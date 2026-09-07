@@ -207,6 +207,7 @@
             <div>
               <div class="text-xs text-slate-400 mb-1.5">Quick Presets:</div>
               <div class="flex flex-wrap gap-1.5">
+                <button type="button" onclick="setPrompt('Who are you and what is your role in the FRIDAY Universe?')" class="px-2.5 py-1 text-xs rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 transition font-medium">✨ Who are you & FRIDAY Universe?</button>
                 <button type="button" onclick="setPrompt('What is the time complexity of quicksort vs mergesort?')" class="px-2.5 py-1 text-xs rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/50 transition">Quicksort vs Mergesort</button>
                 <button type="button" onclick="setPrompt('Compare Kafka and RabbitMQ for high-throughput stream processing.')" class="px-2.5 py-1 text-xs rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/50 transition">Kafka vs RabbitMQ</button>
                 <button type="button" onclick="setPrompt('Explain quantum computing entanglement in 3 bullet points.')" class="px-2.5 py-1 text-xs rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/50 transition">Quantum Entanglement</button>
@@ -501,6 +502,32 @@
       loading.classList.remove('hidden');
 
       const t0 = performance.now();
+      const s1 = document.getElementById('stage-1');
+      const s2 = document.getElementById('stage-2');
+      const s3 = document.getElementById('stage-3');
+      const s4 = document.getElementById('stage-4');
+      const label = document.getElementById('loading-stage');
+
+      const activeClass = 'p-2 rounded-lg border border-indigo-500 bg-indigo-500/20 text-indigo-300 font-semibold shadow-sm';
+      const pendingClass = 'p-2 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-400';
+      const doneClass = 'p-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300';
+
+      const stageTimer = setInterval(() => {
+        const elapsed = (performance.now() - t0) / 1000;
+        if (elapsed < 1.8) {
+          label.textContent = '1/4: Routing task & classifying complexity...';
+          s1.className = activeClass; s2.className = pendingClass; s3.className = pendingClass; s4.className = pendingClass;
+        } else if (elapsed < 5.0) {
+          label.textContent = '2/4: Specialists generating independent analysis in parallel...';
+          s1.className = doneClass; s2.className = activeClass; s3.className = pendingClass; s4.className = pendingClass;
+        } else if (elapsed < 9.0) {
+          label.textContent = '3/4: Adversarial critique, claim checking & trade-off analysis...';
+          s1.className = doneClass; s2.className = doneClass; s3.className = activeClass; s4.className = pendingClass;
+        } else {
+          label.textContent = '4/4: Consensus Synthesizer consolidating answer & calibrating confidence...';
+          s1.className = doneClass; s2.className = doneClass; s3.className = doneClass; s4.className = activeClass;
+        }
+      }, 400);
 
       try {
         const response = await fetch('/ask', {
@@ -545,6 +572,7 @@
         document.getElementById('markdown-body').innerHTML = `<div class="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400"><strong>Error:</strong> ${err.message}</div>`;
         output.classList.remove('hidden');
       } finally {
+        clearInterval(stageTimer);
         submitBtn.disabled = false;
         submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
         lucide.createIcons();

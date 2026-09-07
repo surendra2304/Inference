@@ -273,8 +273,8 @@ class CollaborationEngine:
         then merges the best parts into a single coherent synthesis answer.
         """
         preferred = synthesizer_agent.models if synthesizer_agent.models else [
-            AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="synthesis"),
-            AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="reasoning")
+            AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="synthesis"),
+            AgentModelConfig(provider="gemini", model="gemini-2.5-flash", capability="synthesis")
         ]
 
         # For simple tasks, use top 1; for complex/strategic, invoke top 2 models in parallel

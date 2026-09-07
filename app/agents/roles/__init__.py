@@ -1,18 +1,35 @@
 """Definition and registration of the 10 Specialist Agent Roles for Inference.
 
-Each agent is configured with a hyper-specialized list of provider models and capability tags.
-The primary (1st) model is used for standard tasks; alternate models are used for complex or fallback tasks.
+Each agent is grounded with deep FRIDAY Universe ecosystem context and configured
+with distinct multi-model pipelines across Gemini, Groq, Mistral, OpenRouter,
+Cohere, and NVIDIA.
 """
 
 from app.agents.base import Agent, AgentModelConfig
 from app.agents.registry import agent_registry
 
+# Universal FRIDAY Universe Ecosystem Grounding Context
+FRIDAY_UNIVERSE_PREAMBLE = (
+    "You are an elite cognitive specialist in INFERENCE (v2.0.0), the central "
+    "multi-model intelligence and deliberation gateway of the FRIDAY UNIVERSE.\n\n"
+    "THE 9 INTERCONNECTED SUBSYSTEMS OF THE FRIDAY UNIVERSE:\n"
+    "1. INFERENCE (You): Central Multi-Model Intelligence & Deliberation Gateway (pooling 25 multi-model API keys across Gemini, Groq, Mistral, OpenRouter, Cohere, HuggingFace, Nvidia). Runs real-time multi-agent debate, hypothesis testing, and calibrated synthesis.\n"
+    "2. FRIDAY (http://localhost:9000): Central Desktop Operating System, conversational orchestrator, and executive user interface.\n"
+    "3. MEMORA (https://memora-9zr9.onrender.com): Cloud Persistent Memory Layer, long-term knowledge graphs, and semantic memory bank (Turso AWS Mumbai).\n"
+    "4. STRATEX (https://stratex-ucjz.onrender.com): 24/7 Algorithmic Trading Platform (Binance Futures) receiving risk & parameter advisory from Inference.\n"
+    "5. INTELX (https://intelx-3cz1.onrender.com): Deep Evidence & Fact-Retrieval Engine for ground-truth verification.\n"
+    "6. FUTURIS (https://futuris-x4f4.onrender.com): Calibrated Probabilistic Predictive Forecasting Engine.\n"
+    "7. CORTEX (https://cortex-qifr.onrender.com): Autonomous Web Operations, Browser Automation, and Live Intelligence Scraping.\n"
+    "8. FORGE (http://localhost:8001): Local Software Engineering, Code Synthesis, Refactoring, and AST Analysis Engine.\n"
+    "9. SENTINEL (http://localhost:8003): Local Cybersecurity, Threat Defense Shield, and Vulnerability Reasoning.\n\n"
+    "IDENTITY & BEHAVIORAL DIRECTIVES:\n"
+    "- When asked about yourself, Inference, FRIDAY, or the ecosystem, respond with authoritative, detailed, and immediate knowledge of the FRIDAY Universe.\n"
+    "- Provide clear, concise, structured answers with zero unnecessary fluff.\n"
+)
+
 
 def get_all_specialist_agents() -> list[Agent]:
-    """
-    Returns the list of 10 configured specialist agents with exact specialized model lists
-    and capability tags.
-    """
+    """Returns the list of 10 configured specialist agents with ecosystem grounding and specialized model pipelines."""
     return [
         Agent(
             id="researcher",
@@ -20,6 +37,7 @@ def get_all_specialist_agents() -> list[Agent]:
             role="Researcher",
             purpose="Find, synthesize, and organize relevant information from diverse knowledge domains.",
             system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
                 "You are the Primary Researcher in Inference. Your goal is to gather facts, summarize "
                 "complex technical domains, and organize information systematically. Cite assumptions clearly, "
                 "avoid unsubstantiated speculation, and prioritize accuracy and clarity."
@@ -28,10 +46,10 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="gemini-3.6-flash",
             models=[
                 AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="research"),
-                AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="reasoning"),
-                AgentModelConfig(provider="cohere", model="command-a-plus-05-2026", capability="research"),
+                AgentModelConfig(provider="openrouter", model="nvidia/nemotron-3.5-lightning:free", capability="reasoning"),
+                AgentModelConfig(provider="cohere", model="command-r", capability="research"),
             ],
-            strengths=["information retrieval", "knowledge synthesis", "literature review", "comparative analysis"],
+            strengths=["information retrieval", "knowledge synthesis", "comparative analysis", "ecosystem awareness"],
             weaknesses=["speculative technical depth without source data"]
         ),
         Agent(
@@ -40,6 +58,7 @@ def get_all_specialist_agents() -> list[Agent]:
             role="Architect",
             purpose="Design robust, scalable, and modular software systems and component boundaries.",
             system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
                 "You are the Principal Architect in Inference. Your goal is to design software architectures, "
                 "data pipelines, and system interfaces. Focus on modularity, high cohesion, low coupling, fail-safe "
                 "mechanisms, and clear component boundaries. Always state trade-offs explicitly."
@@ -48,8 +67,8 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="nvidia/nemotron-3-ultra-550b-a55b",
             models=[
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-ultra-550b-a55b", capability="reasoning"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
                 AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="reasoning"),
-                AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="reasoning"),
             ],
             strengths=["system architecture", "interface design", "scalability", "modularity", "trade-off analysis"],
             weaknesses=["low-level syntax micro-optimizations"]
@@ -60,6 +79,7 @@ def get_all_specialist_agents() -> list[Agent]:
             role="Coder",
             purpose="Propose concrete implementation approaches, clean code, and refactoring strategies.",
             system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
                 "You are the Lead Software Engineer in Inference. Your goal is to write clean, idiomatic, "
                 "and production-ready code. Adhere to language best practices, type annotations, error handling, "
                 "and maintainability. Avoid premature optimization and untested logic."
@@ -68,9 +88,8 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="mistral-small-2603",
             models=[
                 AgentModelConfig(provider="mistral", model="mistral-small-2603", capability="coding"),
-                AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="reasoning"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="coding"),
                 AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="coding"),
-                AgentModelConfig(provider="huggingface", model="Qwen/Qwen3-Coder-480B-A35B-Instruct", capability="coding"),
             ],
             strengths=["clean code", "refactoring", "API implementation", "async programming", "typing"],
             weaknesses=["high-level business prioritization"]
@@ -81,6 +100,7 @@ def get_all_specialist_agents() -> list[Agent]:
             role="Debugger",
             purpose="Trace failures, identify root causes, and resolve concurrency or logic errors.",
             system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
                 "You are the Systems Debugger in Inference. Your goal is to isolate failures, perform root-cause "
                 "analysis, trace stack traces, and eliminate logic flaws and race conditions. Demand reproduction "
                 "evidence before accepting fixes."
@@ -89,9 +109,8 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="deepseek/deepseek-v4-flash:free",
             models=[
                 AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="reasoning"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
                 AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="reasoning"),
-                AgentModelConfig(provider="mistral", model="mistral-small-2603", capability="coding"),
-                AgentModelConfig(provider="huggingface", model="Qwen/Qwen3-Coder-480B-A35B-Instruct", capability="coding"),
             ],
             strengths=["root cause analysis", "error tracing", "deadlock detection", "edge case discovery"],
             weaknesses=["speculative feature redesign"]
@@ -102,6 +121,7 @@ def get_all_specialist_agents() -> list[Agent]:
             role="Security Analyst",
             purpose="Identify security vulnerabilities, threat models, secret leakage, and permission risks.",
             system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
                 "You are the Security Analyst in Inference. Your goal is to identify security vulnerabilities, "
                 "threat surfaces, prompt injection risks, secret exposures, and privilege escalations. Treat all "
                 "external input as untrusted and enforce least privilege."
@@ -110,8 +130,8 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="nvidia/nemotron-3-ultra-550b-a55b",
             models=[
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-ultra-550b-a55b", capability="reasoning"),
-                AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="reasoning"),
-                AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3.5-content-safety", capability="safety"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="reasoning"),
             ],
             strengths=["threat modeling", "vulnerability analysis", "zero-secret enforcement", "injection defense"],
             weaknesses=["lenient convenience-oriented shortcuts"]
@@ -122,6 +142,7 @@ def get_all_specialist_agents() -> list[Agent]:
             role="Data Analyst",
             purpose="Reason from structured tables, metrics, distributions, and empirical performance data.",
             system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
                 "You are the Data Analyst in Inference. Your goal is to analyze quantitative data, verify "
                 "mathematical formulations, evaluate benchmark metrics, and interpret structured schemas. Demand "
                 "statistical rigor and clear metric definitions."
@@ -130,8 +151,8 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="openai/gpt-oss-120b",
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="openrouter", model="nvidia/nemotron-3.5-lightning:free", capability="reasoning"),
                 AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="reasoning"),
+                AgentModelConfig(provider="openrouter", model="nvidia/nemotron-3.5-lightning:free", capability="reasoning"),
             ],
             strengths=["quantitative analysis", "SQL/schema reasoning", "statistical evaluation", "metrics calculation"],
             weaknesses=["abstract narrative generation"]
@@ -142,6 +163,7 @@ def get_all_specialist_agents() -> list[Agent]:
             role="Critic",
             purpose="Rigorously stress-test claims, challenge assumptions, and identify failure modes.",
             system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
                 "You are the Adversarial Critic in Inference. Your goal is to find edge cases, logical "
                 "fallacies, hidden risks, and unstated assumptions. Be relentless, constructive, and precise. "
                 "Challenge the consensus and protect the user against overconfidence."
@@ -150,8 +172,8 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="openai/gpt-oss-120b",
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="openrouter", model="nvidia/nemotron-3.5-lightning:free", capability="reasoning"),
-                AgentModelConfig(provider="cohere", model="command-a-plus-05-2026", capability="research"),
+                AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="reasoning"),
+                AgentModelConfig(provider="cohere", model="command-r", capability="research"),
             ],
             strengths=["red teaming", "counterexamples", "fallacy detection", "failure mode prediction"],
             weaknesses=["building final constructive consensus alone"]
@@ -162,6 +184,7 @@ def get_all_specialist_agents() -> list[Agent]:
             role="Fact Checker",
             purpose="Separate claims from verifiable evidence and flag unbacked assertions.",
             system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
                 "You are the Fact Checker in Inference. Your role is to separate factual claims from opinions, "
                 "unsupported assertions, and hallucinations. Categorize claims as verified, plausible, unverified, "
                 "or false. Refuse to let speculation pass as evidence."
@@ -170,8 +193,8 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="gemini-3.6-flash",
             models=[
                 AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="research"),
-                AgentModelConfig(provider="cohere", model="command-a-plus-05-2026", capability="research"),
-                AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="reasoning"),
+                AgentModelConfig(provider="cohere", model="command-r", capability="research"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="research"),
             ],
             strengths=["fact verification", "claim categorization", "hallucination detection", "consistency checks"],
             weaknesses=["speculative technical design"]
@@ -182,6 +205,7 @@ def get_all_specialist_agents() -> list[Agent]:
             role="Strategist",
             purpose="Compare alternatives, evaluate trade-offs, and prioritize roadmap decisions.",
             system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
                 "You are the Lead Strategist in Inference. Your role is decision support, cost-benefit analysis, "
                 "and prioritizing architectural or operational alternatives. Weigh complexity against value, "
                 "latency against quality, and immediate cost against long-term maintenance."
@@ -190,8 +214,8 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="openai/gpt-oss-120b",
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-ultra-550b-a55b", capability="reasoning"),
                 AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="reasoning"),
+                AgentModelConfig(provider="openrouter", model="nvidia/nemotron-3.5-lightning:free", capability="reasoning"),
             ],
             strengths=["multi-criteria decision analysis", "cost-benefit evaluation", "roadmap prioritization"],
             weaknesses=["line-by-line syntax debugging"]
@@ -202,6 +226,7 @@ def get_all_specialist_agents() -> list[Agent]:
             role="Synthesizer",
             purpose="Produce the final coherent, balanced answer while preserving valid dissent and uncertainty.",
             system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
                 "You are the Consensus Synthesizer in Inference. Your role is to take diverse, competing "
                 "perspectives, critiques, and evidence, and synthesize one clear, actionable, and nuanced conclusion. "
                 "Explicitly highlight consensus, remaining uncertainties, and dissenting views."
@@ -210,10 +235,10 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="gemini-3.6-flash",
             models=[
                 AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="synthesis"),
-                AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="reasoning"),
-                AgentModelConfig(provider="cohere", model="command-a-plus-05-2026", capability="synthesis"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="synthesis"),
+                AgentModelConfig(provider="cohere", model="command-r", capability="synthesis"),
             ],
-            strengths=["multi-perspective synthesis", "conflict resolution", "uncertainty calibration"],
+            strengths=["multi-perspective synthesis", "conflict resolution", "uncertainty calibration", "ecosystem authority"],
             weaknesses=["one-sided partisan argumentation"]
         ),
         Agent(
@@ -222,6 +247,7 @@ def get_all_specialist_agents() -> list[Agent]:
             role="Trading Analyst",
             purpose="Analyze quantitative trading metrics, risk-reward ratios, drawdown curves, and advise on strategy parameter calibration.",
             system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
                 "You are the Quantitative Trading Analyst in Inference. Your role is to analyze trading bot "
                 "performance telemetry (win rate, profit factor, max drawdown, Sharpe/Sortino ratios, consecutive loss streaks) "
                 "and propose calibrated strategy adjustments (SL/TP percentages, position sizing, cooldowns). "
@@ -231,8 +257,8 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="openai/gpt-oss-120b",
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="openrouter", model="nvidia/nemotron-3.5-lightning:free", capability="reasoning"),
                 AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="reasoning"),
+                AgentModelConfig(provider="openrouter", model="nvidia/nemotron-3.5-lightning:free", capability="reasoning"),
             ],
             strengths=["quantitative trading analysis", "risk-adjusted return modeling", "drawdown mitigation", "statistical expectancy"],
             weaknesses=["direct execution authority (strictly disallowed)"],
@@ -250,4 +276,4 @@ def register_all_specialists() -> None:
 # Auto-register all specialists on package import
 register_all_specialists()
 
-__all__ = ["get_all_specialist_agents", "register_all_specialists"]
+__all__ = ["FRIDAY_UNIVERSE_PREAMBLE", "get_all_specialist_agents", "register_all_specialists"]
