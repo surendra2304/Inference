@@ -1,6 +1,5 @@
-﻿import asyncio
+import asyncio
 import io
-import json
 import os
 import subprocess
 import sys
@@ -14,12 +13,12 @@ if repo_root not in sys.path:
 # Ensure UTF-8 output on Windows consoles
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import app
-from app.core.orchestrator import orchestrator, OrchestrationRequest
-from app.memory.sqlite import SQLiteMemory
-from app.providers.gateway import KeyPool
+from app.core.orchestrator import OrchestrationRequest, orchestrator  # noqa: E402
+from app.main import app  # noqa: E402
+from app.memory.sqlite import SQLiteMemory  # noqa: E402
+from app.providers.gateway import KeyPool  # noqa: E402
 
 client = TestClient(app)
 
@@ -27,7 +26,7 @@ def run_http_endpoints_suite():
     print("\n" + "="*70)
     print("  PHASE 1: LIVE HTTP API ENDPOINTS SWEEP")
     print("="*70)
-    
+
     endpoints = [
         ("GET", "/", None, 200, "Root metadata"),
         ("GET", "/health", None, 200, "Basic liveness probe"),
@@ -59,7 +58,7 @@ def run_http_endpoints_suite():
             "findings": []
         }, 200, "Sentinel security posture analysis"),
     ]
-    
+
     passed_count = 0
     for method, path, payload, expected_status, desc in endpoints:
         t0 = time.perf_counter()
@@ -68,7 +67,7 @@ def run_http_endpoints_suite():
         elif method == "POST":
             resp = client.post(path, json=payload)
         latency = (time.perf_counter() - t0) * 1000
-        
+
         status_ok = resp.status_code == expected_status
         if status_ok:
             passed_count += 1
@@ -81,9 +80,9 @@ def run_http_endpoints_suite():
     custom_cid = "e2e-audit-test-cid-998877"
     cid_resp = client.get("/health", headers={"X-Correlation-ID": custom_cid})
     print(f"  [PASS] Correlation ID header propagation: verified (status {cid_resp.status_code})")
-    
+
     # Test rate limiter headers
-    print(f"  [PASS] Rate limiter response headers: verified")
+    print("  [PASS] Rate limiter response headers: verified")
 
     print(f"\n  HTTP Endpoints Sweep Result: {passed_count}/{len(endpoints)} Passed.")
     assert passed_count == len(endpoints), "Some HTTP endpoints failed!"
@@ -148,7 +147,7 @@ def run_cli_suite():
     t0 = time.perf_counter()
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=repo_root)
     dur = time.perf_counter() - t0
-    
+
     if proc.returncode == 0:
         print(f"  [PASS] CLI 'ask' command succeeded in {dur:.2f}s (Exit code: 0)")
         print(f"         Output Preview:\n{proc.stdout[:300].strip()}")
@@ -185,7 +184,7 @@ async def main():
     print("     INFERENCE SYSTEM — COMPLETE END-TO-END VERIFICATION SUITE")
     print("     Timestamp: " + time.strftime("%Y-%m-%d %H:%M:%S"))
     print("="*70)
-    
+
     t_start = time.perf_counter()
     run_http_endpoints_suite()
     task_ids = await run_orchestrator_suite()
@@ -193,7 +192,7 @@ async def main():
     run_cli_suite()
     run_resilience_suite()
     total_time = time.perf_counter() - t_start
-    
+
     print("\n" + "="*70)
     print(f"  ALL 5 PHASES COMPLETED SUCCESSFULLY IN {total_time:.2f}s")
     print("  END-TO-END SYSTEM INTEGRITY: 100% OPERATIONAL")

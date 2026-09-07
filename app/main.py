@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.agents.software_specialists import register_software_specialists
 from app.api.friday_routes import friday_router
@@ -36,6 +36,7 @@ from app.routers.providers import providers_router
 from app.routers.sentinel import sentinel_router
 from app.routers.trading import router as trading_router
 from app.security.api_security import ProductionSecurityMiddleware
+from app.ui.dashboard import get_dashboard_html
 from app.utils.logger import logger, setup_logger
 from app.version import VERSION
 
@@ -136,10 +137,21 @@ app.include_router(intelx_router)
 app.include_router(futuris_router)
 
 
+@app.get("/ui", response_class=HTMLResponse)
+async def ui_dashboard():
+    """Interactive Web Dashboard for Inference 2.0."""
+    return HTMLResponse(content=get_dashboard_html(), status_code=200)
+
+
 @app.get("/")
 @app.head("/")
-async def root():
-    """Root metadata endpoint."""
+async def root(request: Request):
+    """Root metadata and web dashboard endpoint."""
+    accept = request.headers.get("accept", "").lower()
+    # If accessed from a browser (text/html) and not requesting JSON explicitly:
+    if "text/html" in accept and "application/json" not in accept:
+        return HTMLResponse(content=get_dashboard_html(), status_code=200)
+
     return {
         "name": production_config.APP_NAME,
         "status": "online",
