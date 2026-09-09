@@ -109,11 +109,19 @@ class UnifiedProviderManager:
             target_model = "gemini-3.6-flash"
 
         # Fast-lane override for auto routing
+        extra_params: dict[str, Any] = {}
         if req.fast_lane and req.provider == "auto":
             target_provider = "groq"
             target_model = "openai/gpt-oss-120b"
-            req.max_tokens = min(req.max_tokens, 220)
-            system_prompt += " Answer with maximum technical conciseness in 2-4 sentences or concise bullet points without introductory fluff."
+            req.max_tokens = min(req.max_tokens, 160)
+            extra_params["reasoning_effort"] = "low"
+            system_prompt = (
+                f"You are the {req.agent_role or 'expert'} specialist in the FRIDAY Universe. "
+                "Provide the direct technical answer immediately in 1-3 sentences. "
+                "Never repeat the question, never include internal reasoning or thinking traces, and output zero preamble."
+            )
+        elif target_provider == "groq" and "openai/gpt-oss" in (target_model or ""):
+            extra_params["reasoning_effort"] = "low"
 
         # Build provider request
         messages = [ProviderMessage(role="user", content=req.prompt)]
@@ -127,6 +135,7 @@ class UnifiedProviderManager:
             model=target_model,
             temperature=req.temperature,
             max_tokens=req.max_tokens,
+            extra_params=extra_params,
         )
 
         # 2. Speculative Racing (Concurrent Execution across fastest providers)
