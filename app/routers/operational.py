@@ -1,4 +1,4 @@
-﻿"""Operational and telemetry endpoints for Inference runtime."""
+"""Operational and telemetry endpoints for Inference runtime."""
 
 from typing import Any
 
@@ -35,14 +35,14 @@ async def get_providers_health() -> dict[str, Any]:
 async def list_models() -> dict[str, Any]:
     """Returns available model registry capabilities and supported configurations."""
     all_models = [
-        {"provider": "gemini", "model": "gemini-2.5-flash", "capabilities": ["chat", "stream", "json", "tools", "vision"], "context_window": 1048576},
-        {"provider": "gemini", "model": "gemini-2.5-pro", "capabilities": ["chat", "stream", "json", "tools", "vision"], "context_window": 2097152},
-        {"provider": "groq", "model": "llama-3.3-70b-versatile", "capabilities": ["chat", "stream", "json", "tools"], "context_window": 131072},
-        {"provider": "groq", "model": "llama-3.1-8b-instant", "capabilities": ["chat", "stream", "json"], "context_window": 131072},
-        {"provider": "mistral", "model": "mistral-small-latest", "capabilities": ["chat", "stream", "json", "tools"], "context_window": 32768},
-        {"provider": "openrouter", "model": "auto", "capabilities": ["chat", "stream", "json", "tools"], "context_window": 131072},
-        {"provider": "cohere", "model": "command-r-plus", "capabilities": ["chat", "stream", "tools"], "context_window": 128000},
-        {"provider": "nvidia", "model": "meta/llama-3.1-70b-instruct", "capabilities": ["chat", "stream", "json"], "context_window": 131072},
+        {"provider": "gemini", "model": "gemini-3.5-flash-lite", "capabilities": ["chat", "stream", "json", "tools", "vision"], "context_window": 1048576},
+        {"provider": "gemini", "model": "gemini-3.6-flash", "capabilities": ["chat", "stream", "json", "tools", "vision"], "context_window": 2097152},
+        {"provider": "groq", "model": "openai/gpt-oss-120b", "capabilities": ["chat", "stream", "json", "tools"], "context_window": 131072},
+        {"provider": "groq", "model": "qwen/qwen3.6-27b", "capabilities": ["chat", "stream", "json"], "context_window": 131072},
+        {"provider": "mistral", "model": "ministral-8b-latest", "capabilities": ["chat", "stream", "json", "tools"], "context_window": 32768},
+        {"provider": "openrouter", "model": "nvidia/nemotron-3.5-lightning:free", "capabilities": ["chat", "stream", "json", "tools"], "context_window": 131072},
+        {"provider": "cohere", "model": "command-r7b-12-2024", "capabilities": ["chat", "stream", "tools"], "context_window": 128000},
+        {"provider": "nvidia", "model": "nvidia/nemotron-3.5-lightning-30b-a3b", "capabilities": ["chat", "stream", "json"], "context_window": 131072},
         {"provider": "huggingface", "model": "meta-llama/Llama-3.2-3B-Instruct", "capabilities": ["chat", "stream"], "context_window": 8192},
         {"provider": "vllm", "model": "local-model", "capabilities": ["chat", "stream", "json", "tools"], "context_window": 32768},
         {"provider": "sglang", "model": "local-sglang-model", "capabilities": ["chat", "stream", "json"], "context_window": 32768},

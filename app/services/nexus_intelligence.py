@@ -163,14 +163,24 @@ class NexusIntelligenceService:
             decision = f"VALIDATED_{req.task_type.upper()}"
             summary = f"Primary analysis by {primary_agent.capitalize()} subjected to adversarial review by Critic."
 
-            # Simulated critique outcome
-            has_ambiguity = any(e.trust_label in ("untrusted_user_input", "inferred_profile") for e in req.evidence)
-            if has_ambiguity:
-                disagreements = ["Critic flagged potential sampling bias in inferred telemetry."]
-                confidence = round(min(0.85, 0.75 * evidence_trust), 2)
-            else:
-                disagreements = []
-                confidence = round(min(0.95, 0.90 * evidence_trust), 2)
+            # Real adversarial critique: one structured critic round through the debate engine.
+            try:
+                from app.debate.enhanced_debate_protocol import enhanced_debate_engine
+                critic_trace = await enhanced_debate_engine.execute_structured_debate(
+                    request_id=req.request_id,
+                    task_type=req.task_type,
+                    goal=req.goal,
+                    evidence=[e.model_dump() for e in req.evidence],
+                    agents=[critic_agent]
+                )
+                disagreements = list(critic_trace.unresolved_objections)
+                base_conf = critic_trace.confidence_evolution[-1] if critic_trace.confidence_evolution else 0.88
+            except Exception:
+                # Deterministic heuristic fallback only if the deliberation engine is unreachable.
+                has_ambiguity = any(e.trust_label in ("untrusted_user_input", "inferred_profile") for e in req.evidence)
+                disagreements = ["Critic flagged potential sampling bias in inferred telemetry."] if has_ambiguity else []
+                base_conf = 0.75 if has_ambiguity else 0.90
+            confidence = round(min(0.95, base_conf * evidence_trust), 2)
 
         else:  # debate mode
             agents_consulted = specialists if len(specialists) >= 3 else list(set(specialists + ["critic", "fact_checker"]))

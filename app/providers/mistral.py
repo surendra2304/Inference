@@ -8,8 +8,8 @@ class MistralProvider(OpenAICompatibleProvider):
     """Adapter for Mistral AI API."""
 
     BASE_URL = "https://api.mistral.ai/v1"
-    DEFAULT_MODEL = "mistral-large-latest"
-    SUPPORTED_MODELS = ["mistral-large-latest", "mistral-small-latest", "codestral-latest", "ministral-8b-latest"]
+    DEFAULT_MODEL = "ministral-8b-latest"
+    SUPPORTED_MODELS = ["ministral-8b-latest", "codestral-latest", "mistral-small-latest", "mistral-large-latest"]
 
     def __init__(self, api_key: str | None = None, default_model: str | None = None, timeout: float = 60.0) -> None:
         super().__init__(

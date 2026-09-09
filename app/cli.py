@@ -82,11 +82,6 @@ async def _run_in_process_ask(
             console.print(f"[bold red]Execution error:[/bold red] {exc}")
         else:
             print(f"Execution error: {exc}")
-    except Exception as exc:
-        if console:
-            console.print(f"[bold red]Execution error:[/bold red] {exc}")
-        else:
-            print(f"Execution error: {exc}")
 
 
 async def _run_in_process_debate(
@@ -199,6 +194,26 @@ def experiment(
 ):
     """Trigger an automated benchmark or comparison experiment directly in-process."""
     asyncio.run(_run_in_process_experiment(exp_type=exp_type, question=question))
+
+
+@cli_app.command("test-keys")
+def test_keys_cmd(
+    mode: str = typer.Option("concurrent", "--mode", "-m", help="concurrent or sequential"),
+    timeout: float = typer.Option(20.0, "--timeout", "-t", help="Per-key request timeout in seconds"),
+    concurrency: int = typer.Option(6, "--concurrency", "-c", help="Concurrent worker count"),
+    provider: str | None = typer.Option(None, "--provider", "-p", help="Filter to a specific provider"),
+):
+    """Test and verify all configured inference provider API keys in real-time."""
+    from scripts.test_all_keys import run_all_key_tests
+
+    asyncio.run(
+        run_all_key_tests(
+            mode=mode,
+            timeout=timeout,
+            specific_provider=provider,
+            concurrency=concurrency,
+        )
+    )
 
 
 def main():

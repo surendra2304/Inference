@@ -15,15 +15,15 @@ DEBATE_TRIGGERS: list[str] = [
 ]
 
 DOMAIN_KEYWORD_MAP = {
-    "debugger": ["debug", "error", "traceback", "crash", "deadlock", "exception", "bug", "failure", "fail", "broken"],
-    "security_analyst": ["security", "vulnerability", "auth", "threat", "injection", "permission", "leak", "secret", "attack"],
-    "data_analyst": ["data", "sql", "metric", "statistics", "table", "dataset", "dataframe", "chart", "distribution"],
-    "coder": ["code", "implement", "function", "refactor", "algorithm", "class", "syntax", "python", "fastapi", "write a"],
-    "architect": ["architecture", "system design", "modular", "scalability", "pipeline", "schema design", "microservice"],
-    "fact_checker": ["verify", "is it true", "fact", "check claim", "verifiable", "source", "accuracy"],
-    "strategist": ["strategy", "priority", "roadmap", "decision", "trade-off", "cost-benefit", "plan"],
-    "critic": ["critique", "red team", "weakness", "fallacy", "attack", "counterexample"],
-    "trading_analyst": ["trading", "trade", "pnl", "drawdown", "win rate", "profit factor", "stop loss", "take profit", "bot", "futures", "scalper"],
+    "debugger": ["debug", "debugger", "debugging", "error", "errors", "traceback", "tracebacks", "crash", "crashes", "deadlock", "deadlocks", "exception", "exceptions", "bug", "bugs", "failure", "failures", "fail", "broken", "stacktrace"],
+    "security_analyst": ["security", "vulnerability", "vulnerabilities", "auth", "authentication", "authorization", "authorize", "threat", "threats", "injection", "injections", "permission", "permissions", "leak", "leaks", "secret", "secrets", "attack", "attacks", "audit"],
+    "data_analyst": ["data", "sql", "metric", "metrics", "statistic", "statistics", "table", "tables", "dataset", "datasets", "dataframe", "dataframes", "chart", "charts", "distribution", "distributions"],
+    "coder": ["code", "coding", "implement", "implementation", "function", "functions", "refactor", "refactoring", "algorithm", "algorithms", "class", "classes", "syntax", "python", "fastapi", "write a", "script"],
+    "architect": ["architecture", "architectures", "system design", "modular", "modularity", "scalability", "scalable", "pipeline", "pipelines", "schema design", "microservice", "microservices", "schema"],
+    "fact_checker": ["verify", "verification", "is it true", "fact", "facts", "check claim", "verifiable", "source", "sources", "accuracy", "accurate"],
+    "strategist": ["strategy", "strategies", "strategic", "priority", "priorities", "roadmap", "decision", "decisions", "trade-off", "tradeoffs", "trade-offs", "cost-benefit", "plan", "planning"],
+    "critic": ["critique", "critiques", "red team", "weakness", "weaknesses", "fallacy", "fallacies", "counterexample", "counterexamples", "challenge"],
+    "trading_analyst": ["trading", "trade", "trades", "trader", "pnl", "drawdown", "drawdowns", "win rate", "profit factor", "stop loss", "take profit", "bot", "bots", "futures", "scalper", "scalping", "sharpe", "sortino", "orderbook"],
 }
 
 

@@ -164,9 +164,15 @@ class CollaborationEngine:
         ]
 
         if complexity == TaskComplexity.SIMPLE:
-            # Pick first healthy config, or first config overall
             healthy = [cfg for cfg in preferred if provider_health_tracker.get_provider_health(cfg.provider).is_healthy]
-            configs_to_run = [healthy[0]] if healthy else preferred[:1]
+            # Prioritize ultra-low latency providers (groq, gemini) for simple tasks
+            fast_candidates = [cfg for cfg in (healthy or preferred) if cfg.provider.lower() in ("groq", "gemini")]
+            if fast_candidates:
+                configs_to_run = [fast_candidates[0]]
+            elif healthy:
+                configs_to_run = [healthy[0]]
+            else:
+                configs_to_run = preferred[:1]
         else:
             # For complex tasks, prioritize healthy configs up to 3, falling back to all available
             healthy = [cfg for cfg in preferred if provider_health_tracker.get_provider_health(cfg.provider).is_healthy]
@@ -208,7 +214,7 @@ class CollaborationEngine:
             assessment = Adjudicator.adjudicate_specialist_multi_model(agent, model_tuples)
             final_content = assessment.summary
 
-            # 1. Save Run Record
+            # 1. Save Run Record (asynchronously offloaded to eliminate disk blocking)
             run_rec = RunRecord(
                 id=run_id,
                 task_id=task_id,
@@ -221,9 +227,12 @@ class CollaborationEngine:
                 latency_seconds=latency,
                 status="completed"
             )
-            await self.memory.save_run(run_rec)
+            try:
+                asyncio.create_task(self.memory.save_run(run_rec))
+            except RuntimeError:
+                await self.memory.save_run(run_rec)
 
-            # 2. Save Message Record
+            # 2. Save Message Record (asynchronously offloaded)
             msg_rec = MessageRecord(
                 id=msg_id,
                 run_id=run_id,
@@ -233,7 +242,10 @@ class CollaborationEngine:
                 content=final_content,
                 stage=f"round_{round_number}_{stage_name}"
             )
-            await self.memory.save_message(msg_rec)
+            try:
+                asyncio.create_task(self.memory.save_message(msg_rec))
+            except RuntimeError:
+                await self.memory.save_message(msg_rec)
 
             return final_content, total_tokens, latency, models_used
 
@@ -254,7 +266,10 @@ class CollaborationEngine:
             status="failed",
             error=error_msg
         )
-        await self.memory.save_run(run_rec)
+        try:
+            asyncio.create_task(self.memory.save_run(run_rec))
+        except RuntimeError:
+            await self.memory.save_run(run_rec)
         fallback_content = f"*[Specialist {agent.role} temporarily offline / high demand on {agent.model_provider}: {error_msg}]*"
         return fallback_content, 0, latency, [agent.model_name]
 
@@ -274,7 +289,7 @@ class CollaborationEngine:
         """
         preferred = synthesizer_agent.models if synthesizer_agent.models else [
             AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="synthesis"),
-            AgentModelConfig(provider="gemini", model="gemini-2.5-flash", capability="synthesis")
+            AgentModelConfig(provider="gemini", model="gemini-3.5-flash-lite", capability="synthesis")
         ]
 
         # For simple tasks, use top 1; for complex/strategic, invoke top 2 models in parallel

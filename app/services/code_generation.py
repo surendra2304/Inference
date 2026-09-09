@@ -2,10 +2,13 @@
 
 import hashlib
 import time
+from collections.abc import AsyncIterator
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.providers.base import ProviderMessage, ProviderRequest
+from app.providers.gateway import model_gateway
 from app.providers.unified_manager import (
     UnifiedExecutionRequest,
     unified_provider_manager,
@@ -102,6 +105,30 @@ class CodeGenerationService:
 
         self._cache[cache_key] = (now, response)
         return response
+
+    async def stream_code(self, req: CodeGenerationRequest) -> AsyncIterator[str]:
+        """Streams generated code tokens in real-time for FORGE."""
+        prompt = self._build_prompt(req)
+        system_prompt = (
+            "You are an expert autonomous software engineer in Inference. "
+            "Write clean, production-ready source code. Return ONLY valid runnable code."
+        )
+        prov_req = ProviderRequest(
+            messages=[ProviderMessage(role="user", content=prompt)],
+            system_instruction=system_prompt,
+            model="openai/gpt-oss-120b",
+            temperature=0.2,
+            max_tokens=4096,
+        )
+
+        try:
+            async for chunk in model_gateway.stream("groq", prov_req, stage_name="forge_stream_code"):
+                yield chunk
+        except Exception as exc:
+            logger.warning("Groq stream for code generation failed, falling back to gemini: %s", exc)
+            prov_req.model = "gemini-3.6-flash"
+            async for chunk in model_gateway.stream("gemini", prov_req, stage_name="forge_stream_code_fallback"):
+                yield chunk
 
     def _build_prompt(self, req: CodeGenerationRequest) -> str:
         lang_guides = {

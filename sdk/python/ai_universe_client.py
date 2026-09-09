@@ -94,3 +94,146 @@ class AIUniverseClient:
         resp = self.client.post("/v1/analytics/outcome", json=payload)
         resp.raise_for_status()
         return resp.json()
+
+    def agent_assist(
+        self,
+        caller_agent: str,
+        task_type: str,
+        prompt: str,
+        context: dict[str, Any] | None = None,
+        fast_lane: bool = True,
+        speculative: bool = False,
+        no_cache: bool = False,
+        max_tokens: int = 1500,
+    ) -> dict[str, Any]:
+        """Universal fast-path inter-agent assist endpoint with L1 caching and speculative racing."""
+        payload = {
+            "caller_agent": caller_agent,
+            "task_type": task_type,
+            "prompt": prompt,
+            "context": context or {},
+            "fast_lane": fast_lane,
+            "speculative": speculative,
+            "no_cache": no_cache,
+            "max_tokens": max_tokens,
+        }
+        resp = self.client.post("/v1/agent/assist", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+    def stream_agent_assist(
+        self,
+        caller_agent: str,
+        task_type: str,
+        prompt: str,
+        context: dict[str, Any] | None = None,
+        max_tokens: int = 1500,
+    ):
+        """Streams inter-agent intelligence tokens in real-time as a Python generator."""
+        import json
+        payload = {
+            "caller_agent": caller_agent,
+            "task_type": task_type,
+            "prompt": prompt,
+            "context": context or {},
+            "max_tokens": max_tokens,
+        }
+        with self.client.stream("POST", "/v1/agent/stream", json=payload) as response:
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    try:
+                        data = json.loads(line[6:])
+                        if data.get("done"):
+                            break
+                        tok = data.get("token", "")
+                        if tok:
+                            yield tok
+                    except Exception:
+                        pass
+
+    def stream_code(
+        self,
+        file_type: str,
+        filename: str,
+        context: dict[str, Any],
+        requirements: list[str] | None = None,
+    ):
+        """Streams generated code chunks from FORGE stream-code endpoint."""
+        import json
+        payload = {
+            "file_type": file_type,
+            "filename": filename,
+            "context": context,
+            "requirements": requirements or [],
+        }
+        with self.client.stream("POST", "/v1/forge/stream-code", json=payload) as response:
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    try:
+                        data = json.loads(line[6:])
+                        if data.get("done"):
+                            break
+                        chunk = data.get("chunk", "")
+                        if chunk:
+                            yield chunk
+                    except Exception:
+                        pass
+
+    def ask_friday(
+        self,
+        question: str,
+        mode: str = "auto",
+        fast_lane: bool = True,
+        no_cache: bool = False,
+    ) -> dict[str, Any]:
+        """Queries FRIDAY reasoning endpoint."""
+        payload = {
+            "question": question,
+            "mode": mode,
+            "fast_lane": fast_lane,
+            "no_cache": no_cache,
+        }
+        resp = self.client.post("/v1/friday/ask", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+    def instant_ask(
+        self,
+        prompt: str,
+        caller_id: str = "human",
+        no_cache: bool = False,
+    ) -> dict[str, Any]:
+        """Queries instant ultra-low latency endpoint with L0 grounding and speculative execution."""
+        payload = {
+            "prompt": prompt,
+            "caller_id": caller_id,
+            "no_cache": no_cache,
+        }
+        resp = self.client.post("/v1/instant/ask", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+    def stream_instant(
+        self,
+        prompt: str,
+        caller_id: str = "human",
+    ):
+        """Streams instant answer tokens in real-time."""
+        import json
+
+        payload = {
+            "prompt": prompt,
+            "caller_id": caller_id,
+        }
+        with self.client.stream("POST", "/v1/instant/stream", json=payload) as response:
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    try:
+                        data = json.loads(line[6:])
+                        if data.get("done"):
+                            break
+                        tok = data.get("token", "")
+                        if tok:
+                            yield tok
+                    except Exception:
+                        pass

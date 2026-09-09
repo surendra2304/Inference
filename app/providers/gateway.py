@@ -11,6 +11,7 @@ Features:
 import asyncio
 import threading
 import time
+from collections.abc import AsyncIterator
 from typing import Any
 
 from app.core.config import settings
@@ -476,6 +477,107 @@ class ModelGateway:
         if last_error:
             raise last_error
         raise GatewayError(f"Provider {failed_provider} and all fallback routes failed.", provider=failed_provider)
+
+    async def execute_speculative(
+        self,
+        providers: list[str],
+        request: ProviderRequest,
+        stage_name: str = "speculative_race",
+        timeout: float = 10.0,
+    ) -> ProviderResponse:
+        """
+        Ultra-low latency speculative racing:
+        Launches parallel requests to specified providers concurrently.
+        Returns the first successful response and cancels remaining slower tasks.
+        """
+        if not providers:
+            raise GatewayError("No providers provided for speculative race.")
+        if len(providers) == 1:
+            request.extra_params["timeout"] = timeout
+            return await self.execute(providers[0], request, stage_name=stage_name)
+
+        start_time = time.monotonic()
+
+        async def _call_provider(prov: str) -> tuple[str, ProviderResponse]:
+            prov_req = request
+            # Auto-select appropriate model for each provider if needed
+            if prov == "groq" and (not request.model or "gemini" in request.model):
+                prov_req = ProviderRequest(
+                    messages=request.messages,
+                    system_instruction=request.system_instruction,
+                    model="openai/gpt-oss-120b",
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                    extra_params={"timeout": timeout},
+                )
+            elif prov == "gemini" and (not request.model or "groq" in request.model or "gpt" in request.model):
+                prov_req = ProviderRequest(
+                    messages=request.messages,
+                    system_instruction=request.system_instruction,
+                    model="gemini-3.6-flash",
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                    extra_params={"timeout": timeout},
+                )
+            else:
+                prov_req.extra_params["timeout"] = timeout
+            resp = await self.execute(prov, prov_req, stage_name=stage_name)
+            return prov, resp
+
+        tasks = [asyncio.create_task(_call_provider(p)) for p in providers]
+        first_error: Exception | None = None
+
+        while tasks:
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for d in done:
+                try:
+                    winning_prov, winning_resp = d.result()
+                    for p in pending:
+                        p.cancel()
+                    elapsed = time.monotonic() - start_time
+                    logger.info(
+                        "SPECULATIVE RACE: Provider '%s' won race among %s in %.3fs",
+                        winning_prov,
+                        providers,
+                        elapsed,
+                    )
+                    if not winning_resp.raw_response:
+                        winning_resp.raw_response = {}
+                    winning_resp.raw_response["speculative_race"] = {
+                        "winner": winning_prov,
+                        "competitors": providers,
+                        "elapsed_seconds": round(elapsed, 4),
+                    }
+                    return winning_resp
+                except Exception as exc:
+                    logger.warning("SPECULATIVE RACE: Provider attempt failed: %s", exc)
+                    first_error = exc
+            tasks = list(pending)
+
+        if first_error:
+            raise first_error
+        raise GatewayError("All speculative race candidates failed.")
+
+    async def stream(
+        self,
+        provider: str,
+        request: ProviderRequest,
+        stage_name: str = "general_stream",
+    ) -> AsyncIterator[str]:
+        """Stream token chunks directly from the requested provider adapter."""
+        import app.providers
+
+        prov_name = provider.lower().strip()
+        pool = self.key_pools.get(prov_name)
+        current_key = pool.choose() if pool else None
+
+        provider_instance = (
+            app.providers.get_provider(prov_name, api_key=current_key)
+            if current_key
+            else app.providers.get_provider(prov_name)
+        )
+        async for chunk in provider_instance.stream(request):
+            yield chunk
 
 
 # Global default gateway instance

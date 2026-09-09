@@ -69,7 +69,7 @@ class StrategyRecord(BaseModel):
     sample_size: int = 1
     recommended_agents: list[str] = Field(default_factory=list)
     recommended_provider: str = "gemini"
-    recommended_model: str = "gemini-2.5-flash"
+    recommended_model: str = "gemini-3.5-flash-lite"
     created_at: datetime = Field(default_factory=datetime.utcnow)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

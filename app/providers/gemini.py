@@ -17,6 +17,7 @@ from app.providers.base import (
     ProviderResponse,
     UsageEstimate,
 )
+from app.providers.http_client import get_shared_client
 from app.utils.logger import logger
 
 
@@ -24,13 +25,13 @@ class GeminiProvider(BaseLLMProvider):
     """Adapter for Google Gemini API via async HTTP."""
 
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-    DEFAULT_MODEL = "gemini-3.6-flash"
+    DEFAULT_MODEL = "gemini-3.5-flash-lite"
     SUPPORTED_MODELS = [
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.7-flash",
         "gemini-3.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
         "gemini-3.1-flash-lite",
+        "gemini-3.5-flash",
     ]
 
     def __init__(self, api_key: str | None = None, default_model: str | None = None, timeout: float = 60.0) -> None:
@@ -126,64 +127,62 @@ class GeminiProvider(BaseLLMProvider):
         payload = self._build_payload(request)
 
         start_time = time.perf_counter()
-        timeout_config = httpx.Timeout(self.timeout, connect=10.0)
-        limits_config = httpx.Limits(max_connections=5, max_keepalive_connections=5)
         try:
-            async with httpx.AsyncClient(timeout=timeout_config, limits=limits_config) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                latency = time.perf_counter() - start_time
+            client = await get_shared_client()
+            response = await client.post(url, headers=headers, json=payload, timeout=self.timeout)
+            latency = time.perf_counter() - start_time
 
-                if response.status_code in (429, 503):
-                    logger.warning(
-                        "Gemini transient error (%d) encountered on model %s; cooling down for 2.0s",
-                        response.status_code,
-                        model,
-                    )
-                    await asyncio.sleep(2.0)
-                    if response.status_code == 429:
-                        raise RuntimeError("Gemini API rate limit exceeded (HTTP 429).")
-                    else:
-                        raise RuntimeError(f"Gemini API temporarily unavailable (HTTP 503): {response.text}")
-                elif response.status_code != 200:
-                    error_msg = response.text
-                    logger.error("Gemini API error (%d): %s", response.status_code, error_msg)
-                    raise RuntimeError(f"Gemini API returned HTTP {response.status_code}: {error_msg}")
+            if response.status_code in (429, 503):
+                logger.warning(
+                    "Gemini transient error (%d) encountered on model %s; cooling down for 2.0s",
+                    response.status_code,
+                    model,
+                )
+                await asyncio.sleep(2.0)
+                if response.status_code == 429:
+                    raise RuntimeError("Gemini API rate limit exceeded (HTTP 429).")
+                else:
+                    raise RuntimeError(f"Gemini API temporarily unavailable (HTTP 503): {response.text}")
+            elif response.status_code != 200:
+                error_msg = response.text
+                logger.error("Gemini API error (%d): %s", response.status_code, error_msg)
+                raise RuntimeError(f"Gemini API returned HTTP {response.status_code}: {error_msg}")
 
-                data = response.json()
+            data = response.json()
 
-                # Extract text from response candidates
-                candidates = data.get("candidates", [])
-                if not candidates:
-                    return ProviderResponse(
-                        content="",
-                        model=model,
-                        provider=self.provider_name,
-                        latency_seconds=latency,
-                        finish_reason="empty",
-                        raw_response=data,
-                    )
-
-                content_parts = candidates[0].get("content", {}).get("parts", [])
-                generated_text = "".join(part.get("text", "") for part in content_parts)
-                finish_reason = candidates[0].get("finishReason", "stop")
-
-                # Extract token usage metadata
-                usage = data.get("usageMetadata", {})
-                prompt_tokens = usage.get("promptTokenCount", 0)
-                completion_tokens = usage.get("candidatesTokenCount", 0)
-                total_tokens = usage.get("totalTokenCount", prompt_tokens + completion_tokens)
-
+            # Extract text from response candidates
+            candidates = data.get("candidates", [])
+            if not candidates:
                 return ProviderResponse(
-                    content=generated_text,
+                    content="",
                     model=model,
                     provider=self.provider_name,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=total_tokens,
-                    latency_seconds=round(latency, 4),
-                    finish_reason=finish_reason,
+                    latency_seconds=latency,
+                    finish_reason="empty",
                     raw_response=data,
                 )
+
+            content_parts = candidates[0].get("content", {}).get("parts", [])
+            generated_text = "".join(part.get("text", "") for part in content_parts)
+            finish_reason = candidates[0].get("finishReason", "stop")
+
+            # Extract token usage metadata
+            usage = data.get("usageMetadata", {})
+            prompt_tokens = usage.get("promptTokenCount", 0)
+            completion_tokens = usage.get("candidatesTokenCount", 0)
+            total_tokens = usage.get("totalTokenCount", prompt_tokens + completion_tokens)
+
+            return ProviderResponse(
+                content=generated_text,
+                model=model,
+                provider=self.provider_name,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                latency_seconds=round(latency, 4),
+                finish_reason=finish_reason,
+                raw_response=data,
+            )
 
         except httpx.TimeoutException as exc:
             logger.error("Gemini request timed out after %.1fs", self.timeout)
@@ -203,8 +202,8 @@ class GeminiProvider(BaseLLMProvider):
         payload = self._build_payload(request)
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                async with client.stream("POST", url, headers=headers, json=payload) as stream_resp:
+            client = await get_shared_client()
+            async with client.stream("POST", url, headers=headers, json=payload, timeout=self.timeout) as stream_resp:
                     if stream_resp.status_code != 200:
                         error_body = await stream_resp.aread()
                         raise RuntimeError(

@@ -143,3 +143,75 @@ async def test_friday_status_endpoint(friday_client):
     # Test unauthorized request (missing header)
     unauth_resp = client.get("/v1/friday/status")
     assert unauth_resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_friday_ask_l1_cache_hit_and_bypass(friday_client):
+    client = friday_client
+    headers = {"X-FRIDAY-API-Key": "test_friday_secret_key_12345"}
+    mock_llm_response = ProviderResponse(
+        content="Ultra-fast cached answer.",
+        model="openai/gpt-oss-120b",
+        provider="groq",
+        total_tokens=20,
+        latency_seconds=0.25,
+    )
+
+    with patch("app.agents.debate.model_gateway.execute", new_callable=AsyncMock) as mock_exec:
+        mock_exec.return_value = mock_llm_response
+
+        # 1. First invocation (cache miss)
+        q = "Unique latency probe question 98765"
+        resp1 = client.post(
+            "/v1/friday/ask",
+            headers=headers,
+            json={"question": q, "caller_id": "test_caller"},
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert data1["provenance"]["cached"] is False
+
+        # 2. Second invocation (cache hit -> sub-millisecond)
+        resp2 = client.post(
+            "/v1/friday/ask",
+            headers=headers,
+            json={"question": q, "caller_id": "test_caller"},
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert data2["provenance"]["cached"] is True
+        assert data2["latency_seconds"] <= 0.002
+        assert data2["answer"] == data1["answer"]
+
+        # 3. Third invocation with no_cache=True (bypasses cache)
+        resp3 = client.post(
+            "/v1/friday/ask",
+            headers=headers,
+            json={"question": q, "caller_id": "test_caller", "no_cache": True},
+        )
+        assert resp3.status_code == 200
+        data3 = resp3.json()
+        assert data3["provenance"]["cached"] is False
+
+
+@pytest.mark.asyncio
+async def test_friday_streaming_sse(friday_client):
+    client = friday_client
+    headers = {"X-FRIDAY-API-Key": "test_friday_secret_key_12345"}
+
+    async def mock_stream_gen(provider, request, stage_name="general_stream"):
+        for token in ["Hello", " ", "FRIDAY", " ", "streaming!"]:
+            yield token
+
+    with patch("app.api.friday_routes.model_gateway.stream", side_effect=mock_stream_gen):
+        resp = client.post(
+            "/v1/friday/stream",
+            headers=headers,
+            json={"question": "Stream me a greeting", "caller_id": "test_stream"},
+        )
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+        body = resp.text
+        assert "data: " in body
+        assert "FRIDAY" in body
+        assert '"done": true' in body

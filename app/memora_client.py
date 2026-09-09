@@ -9,18 +9,17 @@ try:
     MEMORA_ROOT = Path("d:/FRIDAY Universe/Memora")
     if str(MEMORA_ROOT) not in sys.path:
         sys.path.insert(0, str(MEMORA_ROOT))
-    from sdk.memora_client import MemoraClient, memora_client
+    from sdk.memora_client import MemoraClient, memora_client  # type: ignore[import-not-found]
 except Exception:
     import sqlite3
-    import uuid
     import time
-    from typing import Optional, Dict, Any, List
+    import uuid
 
-    class MemoraClient:
+    class MemoraClient:  # type: ignore[no-redef]
         def __init__(self):
             self.local_db_path = "d:/FRIDAY Universe/Memora/data/memora.db"
 
-        def record_consultation(self, topic: str, outcome_summary: str, providers_used: List[str]):
+        def record_consultation(self, topic: str, outcome_summary: str, providers_used: list[str]):
             if not os.path.exists(self.local_db_path):
                 return
             try:

@@ -3,8 +3,6 @@
 import time
 from collections.abc import AsyncIterator
 
-import httpx
-
 from app.core.config import settings
 from app.providers.base import (
     BaseLLMProvider,
@@ -13,6 +11,7 @@ from app.providers.base import (
     ProviderResponse,
     UsageEstimate,
 )
+from app.providers.http_client import get_shared_client
 from app.utils.logger import logger
 
 COHERE_DEFAULT_MODEL = "command-r7b-12-2024"
@@ -84,41 +83,41 @@ class CohereProvider(BaseLLMProvider):
 
         start_time = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                latency = time.perf_counter() - start_time
+            client = await get_shared_client()
+            response = await client.post(url, headers=headers, json=payload, timeout=self.timeout)
+            latency = time.perf_counter() - start_time
 
-                if response.status_code == 429:
-                    raise RuntimeError("Cohere rate limit exceeded (HTTP 429).")
-                elif response.status_code != 200:
-                    raise RuntimeError(f"Cohere API returned HTTP {response.status_code}: {response.text}")
+            if response.status_code == 429:
+                raise RuntimeError("Cohere rate limit exceeded (HTTP 429).")
+            elif response.status_code != 200:
+                raise RuntimeError(f"Cohere API returned HTTP {response.status_code}: {response.text}")
 
-                data = response.json()
-                # Parse Cohere v2 response format
-                content = ""
-                message_obj = data.get("message", {})
-                content_items = message_obj.get("content", [])
-                if content_items and isinstance(content_items, list):
-                    content = "".join(item.get("text", "") for item in content_items if isinstance(item, dict))
-                elif not content:
-                    content = data.get("text", "")
+            data = response.json()
+            # Parse Cohere v2 response format
+            content = ""
+            message_obj = data.get("message", {})
+            content_items = message_obj.get("content", [])
+            if content_items and isinstance(content_items, list):
+                content = "".join(item.get("text", "") for item in content_items if isinstance(item, dict))
+            elif not content:
+                content = data.get("text", "")
 
-                meta = data.get("usage", {}).get("tokens", {}) or data.get("meta", {}).get("tokens", {})
-                prompt_tokens = meta.get("input_tokens", 0)
-                completion_tokens = meta.get("output_tokens", 0)
-                total_tokens = prompt_tokens + completion_tokens
+            meta = data.get("usage", {}).get("tokens", {}) or data.get("meta", {}).get("tokens", {})
+            prompt_tokens = meta.get("input_tokens", 0)
+            completion_tokens = meta.get("output_tokens", 0)
+            total_tokens = prompt_tokens + completion_tokens
 
-                return ProviderResponse(
-                    content=content.strip(),
-                    model=model,
-                    provider="cohere",
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=total_tokens,
-                    latency_seconds=round(latency, 4),
-                    finish_reason="stop",
-                    raw_response=data,
-                )
+            return ProviderResponse(
+                content=content.strip(),
+                model=model,
+                provider="cohere",
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                latency_seconds=round(latency, 4),
+                finish_reason="stop",
+                raw_response=data,
+            )
         except Exception as exc:
             logger.error("Cohere request failure: %s", str(exc))
             raise exc

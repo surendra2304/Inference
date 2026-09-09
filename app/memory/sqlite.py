@@ -140,7 +140,7 @@ class SQLiteMemory(BaseMemory):
                     sample_size INTEGER NOT NULL DEFAULT 1,
                     recommended_agents TEXT,
                     recommended_provider TEXT NOT NULL DEFAULT 'gemini',
-                    recommended_model TEXT NOT NULL DEFAULT 'gemini-2.5-flash',
+                    recommended_model TEXT NOT NULL DEFAULT 'gemini-3.5-flash-lite',
                     created_at TEXT NOT NULL,
                     metadata_json TEXT
                 )
@@ -186,7 +186,7 @@ class SQLiteMemory(BaseMemory):
         name = agent_data.get("name", "")
         role = agent_data.get("role", "")
         provider = agent_data.get("model_provider", "gemini")
-        model = agent_data.get("model_name", "gemini-2.5-flash")
+        model = agent_data.get("model_name", "gemini-3.5-flash-lite")
         status = agent_data.get("status", "active")
         config_json = json.dumps(agent_data)
 

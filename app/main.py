@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
@@ -7,13 +8,16 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.agents.software_specialists import register_software_specialists
+from app.api.agent_routes import agent_router
 from app.api.friday_routes import friday_router
+from app.api.instant_routes import instant_router
 from app.api.routes import router as api_router
 from app.config_production import production_config
 from app.core.config import settings
 from app.core.orchestrator import orchestrator
 from app.health import health_router
 from app.middleware.rate_limiter import EnhancedRateLimiterMiddleware
+from app.providers.http_client import http_client_pool
 from app.routers.admin_analytics import analytics_router
 from app.routers.batch import batch_router
 from app.routers.debate_trace import debate_router
@@ -56,7 +60,22 @@ async def lifespan(app: FastAPI):
     register_software_specialists()
     # Initialize persistent SQLite memory database
     await orchestrator.memory.initialize()
+    # Initialize shared HTTP connection pool and pre-warm primary endpoints
+    await http_client_pool.get_client()
+    asyncio.create_task(
+        http_client_pool.prewarm([
+            "https://api.groq.com",
+            "https://generativelanguage.googleapis.com",
+            "https://api.mistral.ai",
+            "https://openrouter.ai",
+        ])
+    )
     yield
+    # Cleanly close pooled HTTP connections
+    try:
+        await http_client_pool.close()
+    except Exception:
+        pass
     logger.info("Shutting down %s", production_config.APP_NAME)
 
 
@@ -115,6 +134,8 @@ app.include_router(health_router)
 app.include_router(operational_router)
 app.include_router(api_router)
 app.include_router(friday_router)
+app.include_router(agent_router)
+app.include_router(instant_router)
 app.include_router(trading_router)
 app.include_router(enhanced_router)
 app.include_router(live_router)

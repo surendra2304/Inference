@@ -3,7 +3,7 @@
 from app.core.config import settings
 from app.providers.openai_compatible import OpenAICompatibleProvider
 
-NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 
 NVIDIA_SUPPORTED_MODELS: list[str] = [
     "nvidia/nemotron-3-ultra-550b-a55b",

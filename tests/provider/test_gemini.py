@@ -78,7 +78,7 @@ async def test_gemini_generate_success(gemini_provider):
         assert result.prompt_tokens == 15
         assert result.completion_tokens == 8
         assert result.total_tokens == 23
-        assert result.model == "gemini-3.6-flash"
+        assert result.model == gemini_provider.default_model
         assert result.provider == "gemini"
 
 

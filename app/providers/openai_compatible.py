@@ -15,6 +15,7 @@ from app.providers.base import (
     ProviderResponse,
     UsageEstimate,
 )
+from app.providers.http_client import get_shared_client
 from app.utils.logger import logger
 
 
@@ -107,7 +108,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         if request.response_schema:
             payload["response_format"] = {"type": "json_object"}
 
-        payload.update(request.extra_params)
+        internal_keys = {"timeout", "caller_id", "stage_name", "deadline"}
+        filtered_extras = {k: v for k, v in request.extra_params.items() if k not in internal_keys}
+        payload.update(filtered_extras)
         return payload
 
     def _get_headers(self) -> dict[str, str]:
@@ -127,65 +130,64 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         model = payload["model"]
 
         start_time = time.perf_counter()
-        timeout_config = httpx.Timeout(self.timeout, connect=10.0)
-        limits_config = httpx.Limits(max_connections=5, max_keepalive_connections=5)
         try:
-            async with httpx.AsyncClient(timeout=timeout_config, limits=limits_config) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                latency = time.perf_counter() - start_time
+            client = await get_shared_client()
+            response = await client.post(url, headers=headers, json=payload, timeout=self.timeout)
+            latency = time.perf_counter() - start_time
 
-                if response.status_code in (429, 503):
-                    logger.warning(
-                        "%s transient error (%d) encountered on model %s; cooling down for 2.0s",
-                        self._provider_name,
-                        response.status_code,
-                        model,
-                    )
-                    await asyncio.sleep(2.0)
-                    if response.status_code == 429:
-                        raise RuntimeError(f"{self._provider_name.capitalize()} rate limit exceeded (HTTP 429).")
-                    else:
-                        raise RuntimeError(
-                            f"{self._provider_name.capitalize()} service unavailable (HTTP 503): {response.text}"
-                        )
-                elif response.status_code != 200:
-                    error_msg = response.text
-                    logger.error("%s API error (%d): %s", self._provider_name, response.status_code, error_msg)
+            if response.status_code in (429, 503):
+                logger.warning(
+                    "%s transient error (%d) encountered on model %s; cooling down for 2.0s",
+                    self._provider_name,
+                    response.status_code,
+                    model,
+                )
+                await asyncio.sleep(2.0)
+                if response.status_code == 429:
+                    raise RuntimeError(f"{self._provider_name.capitalize()} rate limit exceeded (HTTP 429).")
+                else:
                     raise RuntimeError(
-                        f"{self._provider_name.capitalize()} API returned HTTP {response.status_code}: {error_msg}"
+                        f"{self._provider_name.capitalize()} service unavailable (HTTP 503): {response.text}"
                     )
+            elif response.status_code != 200:
+                error_msg = response.text
+                logger.error("%s API error (%d): %s", self._provider_name, response.status_code, error_msg)
+                raise RuntimeError(
+                    f"{self._provider_name.capitalize()} API returned HTTP {response.status_code}: {error_msg}"
+                )
 
-                data = response.json()
-                choices = data.get("choices", [])
-                if not choices:
-                    return ProviderResponse(
-                        content="",
-                        model=model,
-                        provider=self._provider_name,
-                        latency_seconds=latency,
-                        finish_reason="empty",
-                        raw_response=data,
-                    )
-
-                content = choices[0].get("message", {}).get("content", "")
-                finish_reason = choices[0].get("finish_reason", "stop")
-
-                usage = data.get("usage", {})
-                prompt_tokens = usage.get("prompt_tokens", 0)
-                completion_tokens = usage.get("completion_tokens", 0)
-                total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
-
+            data = response.json()
+            choices = data.get("choices", [])
+            if not choices:
                 return ProviderResponse(
-                    content=content or "",
+                    content="",
                     model=model,
                     provider=self._provider_name,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=total_tokens,
-                    latency_seconds=round(latency, 4),
-                    finish_reason=finish_reason,
+                    latency_seconds=latency,
+                    finish_reason="empty",
                     raw_response=data,
                 )
+
+            msg_obj = choices[0].get("message", {})
+            content = msg_obj.get("content", "") or msg_obj.get("reasoning", "") or msg_obj.get("reasoning_content", "") or ""
+            finish_reason = choices[0].get("finish_reason", "stop")
+
+            usage = data.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
+
+            return ProviderResponse(
+                content=content or "",
+                model=model,
+                provider=self._provider_name,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                latency_seconds=round(latency, 4),
+                finish_reason=finish_reason,
+                raw_response=data,
+            )
         except httpx.TimeoutException as exc:
             logger.error("%s request timed out after %.1fs", self._provider_name, self.timeout)
             raise TimeoutError(
@@ -207,8 +209,8 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         payload["stream"] = True
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                async with client.stream("POST", url, headers=headers, json=payload) as stream_resp:
+            client = await get_shared_client()
+            async with client.stream("POST", url, headers=headers, json=payload, timeout=self.timeout) as stream_resp:
                     if stream_resp.status_code != 200:
                         error_body = await stream_resp.aread()
                         raise RuntimeError(

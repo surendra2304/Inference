@@ -1,6 +1,9 @@
 """FastAPI Router for Core FORGE Intelligence Services (Generate, Plan, Review, Debug, Tests)."""
 
+import json
+
 from fastapi import APIRouter, status
+from fastapi.responses import StreamingResponse
 
 from app.services.architecture_planning import (
     ArchitecturePlanRequest,
@@ -59,3 +62,26 @@ async def debug_endpoint(req: DebugRequest):
 async def generate_tests_endpoint(req: TestGenerationRequest):
     """Generates automated test suites (pytest/jest/playwright) covering happy paths and edge cases."""
     return await test_generation_service.generate_tests(req)
+
+
+@forge_router.post("/stream-code")
+async def stream_code_endpoint(req: CodeGenerationRequest):
+    """Streams generated code tokens in real-time as Server-Sent Events (SSE)."""
+
+    async def _event_generator():
+        try:
+            async for chunk in code_generation_service.stream_code(req):
+                yield f"data: {json.dumps({'chunk': chunk, 'done': False})}\n\n"
+            yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'error': str(exc), 'done': True})}\n\n"
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

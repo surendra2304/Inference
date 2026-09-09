@@ -83,6 +83,7 @@ class Orchestrator(BaseOrchestrator):
         self.strategy_store = StrategyStore(memory=self.memory)
         self.performance_tracker = PerformanceTracker(memory=self.memory)
         self._active_cancellations: dict[str, asyncio.Event] = {}
+        self._recent_tasks: dict[str, TaskRecord] = {}
 
         # Ensure all 10 specialist roles are registered
         register_all_specialists()
@@ -142,9 +143,10 @@ class Orchestrator(BaseOrchestrator):
         # 1. Classify Task Complexity (Simple, Complex, Strategic)
         complexity = classify_task_complexity(request.question, request.mode)
 
-        # Check for learned strategy recommendations if mode is 'auto'
+        # Check for learned strategy recommendations if mode is 'auto' and not strictly latency-bounded
         learned_strat = None
-        if request.mode == "auto":
+        is_latency_critical = request.max_latency is not None and request.max_latency <= 5.0
+        if request.mode == "auto" and not is_latency_critical:
             task_domain = self.router.detect_domain_specialist(request.question)
             try:
                 learned_strat = await self.strategy_store.recommend_strategy(task_domain)
@@ -172,7 +174,7 @@ class Orchestrator(BaseOrchestrator):
             if fallback_agent:
                 participating_agents = [fallback_agent]
 
-        # 3. Create initial task record in SQLite with telemetry metadata
+        # 3. Create initial task record with telemetry metadata (in-memory + async background persistence)
         task_record = TaskRecord(
             id=task_id,
             question=request.question,
@@ -187,7 +189,11 @@ class Orchestrator(BaseOrchestrator):
                 "request_context": request.context_data
             }
         )
-        await self.memory.save_task(task_record)
+        self._recent_tasks[task_id] = task_record
+        try:
+            asyncio.create_task(self.memory.save_task(task_record))
+        except RuntimeError:
+            await self.memory.save_task(task_record)
 
         try:
             # For review/debate modes, pad specialist agents if needed
@@ -235,7 +241,7 @@ class Orchestrator(BaseOrchestrator):
                 self._active_cancellations.pop(task_id, None)
                 raise asyncio.CancelledError(f"Task {task_id} was cancelled during execution.")
 
-            actual_mode = getattr(collab_result, "mode_used", mode_used)
+            actual_mode = mode_used if mode_used == "debate" else getattr(collab_result, "mode_used", mode_used)
             task_record.status = "completed"
             task_record.result = collab_result.final_answer
             task_record.confidence = collab_result.confidence
@@ -245,7 +251,11 @@ class Orchestrator(BaseOrchestrator):
             task_record.metadata["unresolved_disagreements"] = collab_result.unresolved_disagreements
             task_record.metadata["complexity"] = complexity.value
             task_record.metadata["models_used"] = collab_result.models_used
-            await self.memory.save_task(task_record)
+            self._recent_tasks[task_id] = task_record
+            try:
+                asyncio.create_task(self.memory.save_task(task_record))
+            except RuntimeError:
+                await self.memory.save_task(task_record)
 
             self._active_cancellations.pop(task_id, None)
 
@@ -277,7 +287,11 @@ class Orchestrator(BaseOrchestrator):
             task_record.status = "cancelled" if is_cancel else "failed"
             task_record.completed_at = datetime.now(timezone.utc)
             task_record.metadata["error"] = str(exc)
-            await self.memory.save_task(task_record)
+            self._recent_tasks[task_id] = task_record
+            try:
+                await self.memory.save_task(task_record)
+            except Exception:
+                pass
             self._active_cancellations.pop(task_id, None)
 
             raise exc
@@ -290,6 +304,10 @@ class Orchestrator(BaseOrchestrator):
             logger.info("Signaled in-flight cancellation event for task %s", task_id)
             signaled = True
 
+        if task_id in self._recent_tasks:
+            self._recent_tasks[task_id].status = "cancelled"
+            self._recent_tasks[task_id].completed_at = datetime.now(timezone.utc)
+
         task = await self.memory.get_task(task_id)
         if task and task.status in ("running", "pending"):
             task.status = "cancelled"
@@ -299,7 +317,9 @@ class Orchestrator(BaseOrchestrator):
         return signaled
 
     async def get_task_status(self, task_id: str) -> dict[str, Any] | None:
-        """Retrieve task details and progress."""
+        """Retrieve task details and progress with zero-latency in-memory cache lookup."""
+        if task_id in self._recent_tasks:
+            return self._recent_tasks[task_id].model_dump()
         task = await self.memory.get_task(task_id)
         return task.model_dump() if task else None
 
