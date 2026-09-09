@@ -113,11 +113,11 @@ class UnifiedProviderManager:
         if req.fast_lane and req.provider == "auto":
             target_provider = "groq"
             target_model = "openai/gpt-oss-120b"
-            req.max_tokens = min(req.max_tokens, 160)
+            req.max_tokens = min(req.max_tokens, 75)
             extra_params["reasoning_effort"] = "low"
             system_prompt = (
                 f"You are the {req.agent_role or 'expert'} specialist in the FRIDAY Universe. "
-                "Provide the direct technical answer immediately in 1-3 sentences. "
+                "Provide the direct concise technical answer immediately in 1-2 sentences (maximum 40 words). "
                 "Never repeat the question, never include internal reasoning or thinking traces, and output zero preamble."
             )
         elif target_provider == "groq" and "openai/gpt-oss" in (target_model or ""):

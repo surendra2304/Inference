@@ -134,7 +134,7 @@ async def agent_assist_endpoint(req: AgentAssistRequest):
     # Cap tokens hard at 120 — enough for a direct 1-3 sentence answer.
     # Raise cache TTL to 600s so semantically identical follow-up queries hit the
     # in-memory L1 cache and return in <1ms (zero LLM call).
-    AGENT_MAX_TOKENS = min(req.max_tokens, 120)
+    AGENT_MAX_TOKENS = min(req.max_tokens, 75)
     AGENT_CACHE_TTL = 600.0  # 10 minutes
 
     # Check L1 cache first — if hit, we're done in <1ms
