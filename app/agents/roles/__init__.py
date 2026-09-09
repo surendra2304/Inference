@@ -48,6 +48,7 @@ def get_all_specialist_agents() -> list[Agent]:
                 AgentModelConfig(provider="gemini", model="gemini-3.5-flash-lite", capability="research"),
                 AgentModelConfig(provider="openrouter", model="nvidia/nemotron-3.5-lightning:free", capability="reasoning"),
                 AgentModelConfig(provider="cohere", model="command-r7b-12-2024", capability="research"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="research"),
             ],
             strengths=["information retrieval", "knowledge synthesis", "comparative analysis", "ecosystem awareness"],
             weaknesses=["speculative technical depth without source data"]

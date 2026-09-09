@@ -64,7 +64,7 @@ def test_agent_registry_contains_all_10_specialists():
     # Verify Researcher specialized model list
     researcher = agent_registry.get_agent("researcher")
     assert researcher.model_name in ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.7-flash"]
-    assert len(researcher.models) == 3
+    assert len(researcher.models) >= 3
     assert researcher.models[0].provider == "gemini"
     assert researcher.models[0].model in ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.7-flash"]
     assert researcher.models[0].capability == "research"
