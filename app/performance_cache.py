@@ -211,5 +211,5 @@ class AsyncWorkerPool:
             return await coro_func(*args, **kwargs)
 
 
-perf_cache = MultiLevelCache(default_ttl_sec=120.0, max_entries=2000)
+perf_cache = MultiLevelCache(default_ttl_sec=600.0, max_entries=5000)
 async_worker_pool = AsyncWorkerPool(max_concurrent=50)
