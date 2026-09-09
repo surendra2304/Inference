@@ -112,6 +112,8 @@ class UnifiedProviderManager:
         if req.fast_lane and req.provider == "auto":
             target_provider = "groq"
             target_model = "openai/gpt-oss-120b"
+            req.max_tokens = min(req.max_tokens, 220)
+            system_prompt += " Answer with maximum technical conciseness in 2-4 sentences or concise bullet points without introductory fluff."
 
         # Build provider request
         messages = [ProviderMessage(role="user", content=req.prompt)]

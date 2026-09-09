@@ -104,7 +104,8 @@ class CollaborationEngine:
         agent: Agent,
         model_cfg: AgentModelConfig,
         messages: list[ProviderMessage],
-        system_instruction: str
+        system_instruction: str,
+        max_tokens: int = 1024,
     ) -> tuple[ProviderResponse | None, float, Exception | None]:
         """Invoke a specific model configuration through the ModelGateway with health check."""
         # 1. Health check: if provider is unhealthy / rate-limited, fail fast to next model
@@ -121,7 +122,7 @@ class CollaborationEngine:
             messages=messages,
             system_instruction=system_instruction,
             model=model_cfg.model,
-            max_tokens=1024
+            max_tokens=max_tokens
         )
 
         try:
@@ -179,6 +180,10 @@ class CollaborationEngine:
             healthy = [cfg for cfg in preferred if provider_health_tracker.get_provider_health(cfg.provider).is_healthy]
             configs_to_run = healthy[:3] if healthy else preferred[:min(3, len(preferred))]
 
+        token_limit = 220 if complexity == TaskComplexity.SIMPLE else 1024
+        if complexity == TaskComplexity.SIMPLE:
+            system_instruction = (system_instruction or "") + " Answer with maximum technical conciseness in 2-4 sentences or bullet points without filler."
+
         # Execute model calls (single or parallel)
         async def call_model(cfg: AgentModelConfig):
             return await self._invoke_single_model(
@@ -188,7 +193,8 @@ class CollaborationEngine:
                 agent=agent,
                 model_cfg=cfg,
                 messages=messages,
-                system_instruction=system_instruction
+                system_instruction=system_instruction,
+                max_tokens=token_limit,
             )
 
         if len(configs_to_run) == 1:
