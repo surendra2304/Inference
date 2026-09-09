@@ -167,6 +167,7 @@ class CollaborationEngine:
             healthy = [cfg for cfg in preferred if provider_health_tracker.get_provider_health(cfg.provider).is_healthy]
             # Prioritize ultra-low latency providers (groq, gemini) for simple tasks
             fast_candidates = [cfg for cfg in (healthy or preferred) if cfg.provider.lower() in ("groq", "gemini")]
+            fast_candidates.sort(key=lambda c: 0 if c.provider.lower() == "groq" else 1)
             if fast_candidates:
                 configs_to_run = [fast_candidates[0]]
             elif healthy:
