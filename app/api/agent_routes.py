@@ -33,6 +33,7 @@ CallerAgent = Literal[
     "memora",
     "intelx",
     "futuris",
+    "cortex",
     "general",
 ]
 
@@ -109,6 +110,7 @@ _ROLE_MAP: dict[tuple[str, str], str] = {
     ("trading_bot", "market"): "trading_analyst",
     ("nexus", "architecture"): "system_architect",
     ("memora", "general"): "system_architect",
+    ("cortex", "general"): "system_architect",
 }
 
 
