@@ -41,7 +41,7 @@ exclude = ["data*", "diary*", "docs*", "scripts*", "tests*"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = "-ra -q"
+addopts = "-ra -q -p no:fugue_test -p no:fugue_test_fixtures"
 testpaths = [
     "tests",
 ]

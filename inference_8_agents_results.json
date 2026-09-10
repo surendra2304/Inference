@@ -1,0 +1,162 @@
+[
+  {
+    "index": 1,
+    "agent": "friday",
+    "type": "Local Agent (Orchestrator)",
+    "question": "How should a desktop OS schedule priority between background file indexing and live voice transcription under 80% CPU load?",
+    "http_status": 200,
+    "latency_ms": 2022.08,
+    "latency_s": 2.02,
+    "task_id": "task_9d1f5f14e02d",
+    "mode_used": "fast",
+    "agents_used": [
+      "strategist"
+    ],
+    "models_used": [
+      "openai/gpt-oss-120b"
+    ],
+    "cached": false,
+    "cache_tier": null,
+    "answer_preview": "**Scheduling strategy (CPU\u202f\u2264\u202f80\u202f% load)**    - **Live voice transcription** \u2192 *real\u2011time / high\u2011priority* thread (RT\u2011SCHED or `SCHED_FIFO`), locked to an isolat"
+  },
+  {
+    "index": 2,
+    "agent": "forge",
+    "type": "Local Agent (Software Engineering)",
+    "question": "What concurrency pattern in Python prevents event loop thread starvation when offloading heavy zlib compression?",
+    "http_status": 200,
+    "latency_ms": 1247.36,
+    "latency_s": 1.25,
+    "task_id": "task_ef41cf3b1283",
+    "mode_used": "fast",
+    "agents_used": [
+      "coder"
+    ],
+    "models_used": [
+      "openai/gpt-oss-120b"
+    ],
+    "cached": false,
+    "cache_tier": null,
+    "answer_preview": "**Pattern:** Offload the compression to a `ProcessPoolExecutor` via `asyncio.run_in_executor`. This runs the CPU\u2011bound zlib work in separate processes, keeping "
+  },
+  {
+    "index": 3,
+    "agent": "sentinel",
+    "type": "Local Agent (Security Shield)",
+    "question": "How can an API gateway detect replay attacks when client clocks have an asymmetric 15-second NTP drift?",
+    "http_status": 200,
+    "latency_ms": 2121.02,
+    "latency_s": 2.12,
+    "task_id": "task_a6f09d623456",
+    "mode_used": "fast",
+    "agents_used": [
+      "security_analyst"
+    ],
+    "models_used": [
+      "openai/gpt-oss-120b"
+    ],
+    "cached": false,
+    "cache_tier": null,
+    "answer_preview": "**Detecting replay attacks with 15\u202fs asymmetric NTP drift**  - **Server\u2011generated nonce/token** \u2013 Issue a one\u2011time nonce (or JWT\u202f`jti`) per request and store it"
+  },
+  {
+    "index": 4,
+    "agent": "memora",
+    "type": "Cloud Agent (Persistent Memory)",
+    "question": "What hybrid retrieval formula best balances BM25 sparse lexical matching with cosine dense embeddings for technical logs?",
+    "http_status": 200,
+    "latency_ms": 2959.72,
+    "latency_s": 2.96,
+    "task_id": "task_b6cacc77dea0",
+    "mode_used": "fast",
+    "agents_used": [
+      "researcher"
+    ],
+    "models_used": [
+      "gemini-3.5-flash-lite"
+    ],
+    "cached": false,
+    "cache_tier": null,
+    "answer_preview": "For technical logs, the optimal hybrid retrieval formula balances sparse exact-match precision (crucial for error codes, IP addresses, and UUIDs) with dense sem"
+  },
+  {
+    "index": 5,
+    "agent": "stratex",
+    "type": "Cloud Agent (Algorithmic Trading)",
+    "question": "How should an execution algorithm dynamically adjust limit order distance when order book bid-ask spread doubles within 500 milliseconds?",
+    "http_status": 200,
+    "latency_ms": 1555.27,
+    "latency_s": 1.56,
+    "task_id": "task_796823dffa27",
+    "mode_used": "fast",
+    "agents_used": [
+      "coder"
+    ],
+    "models_used": [
+      "openai/gpt-oss-120b"
+    ],
+    "cached": false,
+    "cache_tier": null,
+    "answer_preview": "**Dynamic Limit\u2011Order\u2011Distance Adjustment**  1. **Monitor the spread**      - Sample the best bid\u2011ask spread every\u202f\u2248\u202f50\u202fms.      - Keep a rolling 500\u202fms window "
+  },
+  {
+    "index": 6,
+    "agent": "intelx",
+    "type": "Cloud Agent (Macro Intelligence)",
+    "question": "What statistical test best identifies coordinate bias in web-scraped financial sentiment datasets?",
+    "http_status": 200,
+    "latency_ms": 1423.87,
+    "latency_s": 1.42,
+    "task_id": "task_a5cb3ceccff2",
+    "mode_used": "fast",
+    "agents_used": [
+      "data_analyst"
+    ],
+    "models_used": [
+      "openai/gpt-oss-120b"
+    ],
+    "cached": false,
+    "cache_tier": null,
+    "answer_preview": "**Best test:**\u202fSpatial autocorrelation (Moran\u2019s\u202fI) on sentiment scores, with a permutation\u2010based significance assessment.    *Why:*\u202fDetects whether sentiment va"
+  },
+  {
+    "index": 7,
+    "agent": "futuris",
+    "type": "Cloud Agent (Probabilistic Forecasting)",
+    "question": "How should forecast horizons be partitioned when calculating cumulative probability distributions for cascading system failures?",
+    "http_status": 200,
+    "latency_ms": 1689.25,
+    "latency_s": 1.69,
+    "task_id": "task_071ce915ad63",
+    "mode_used": "fast",
+    "agents_used": [
+      "debugger"
+    ],
+    "models_used": [
+      "openai/gpt-oss-120b"
+    ],
+    "cached": false,
+    "cache_tier": null,
+    "answer_preview": "**Partitioning Forecast Horizons for Cascading Failure CDFs**  1. **Define the total horizon (T)** \u2013 the maximum time you want to model (e.g., 0\u201148\u202fh).  2. **Id"
+  },
+  {
+    "index": 8,
+    "agent": "cortex",
+    "type": "Cloud Agent (Web Operations)",
+    "question": "What backoff strategy best prevents IP rate-limiting while maintaining a 50 page-per-minute scraping throughput across 5 proxies?",
+    "http_status": 200,
+    "latency_ms": 1536.18,
+    "latency_s": 1.54,
+    "task_id": "task_b34c0bd3962c",
+    "mode_used": "fast",
+    "agents_used": [
+      "strategist"
+    ],
+    "models_used": [
+      "openai/gpt-oss-120b"
+    ],
+    "cached": false,
+    "cache_tier": null,
+    "answer_preview": "**Strategy:**\u202fPer\u2011proxy token bucket (10\u202fpages/min)\u202f+\u202fexponential backoff with full jitter.   - On a 429/5xx response, wait `t = min(30\u202fs,\u202f2^r\u202f\u00d7\u202f1\u202fs)` where\u202f`r`"
+  }
+]
