@@ -273,17 +273,23 @@ class IntelXIntelligenceService:
             answer_text = None
             try:
                 from app.core.orchestrator import OrchestrationRequest, orchestrator
-                evidence_text = "\n".join(
-                    f"- {e.claim} (Source: {e.document_source}, Quote: {e.verbatim_span})"
-                    for e in evidence_pool
-                ) if evidence_pool else "No extracted evidence spans provided."
-
-                synth_prompt = (
-                    f"RESEARCH OBJECTIVE: {req.context.question}\n\n"
-                    f"EXTRACTED EVIDENCE:\n{evidence_text}\n\n"
-                    "Synthesize a clear, authoritative, factual executive direct answer to the research objective based strictly on the evidence.\n"
-                    "Provide verified key findings and identify any critical gaps."
-                )
+                if evidence_pool:
+                    evidence_text = "\n".join(
+                        f"- {e.claim} (Source: {e.document_source})"
+                        for e in evidence_pool
+                    )
+                    synth_prompt = (
+                        f"RESEARCH OBJECTIVE: {req.context.question}\n\n"
+                        f"EXTRACTED EVIDENCE:\n{evidence_text}\n\n"
+                        "Synthesize a clear, authoritative, factual executive direct answer to the research objective based on the evidence.\n"
+                        "Provide verified key findings and identify any critical gaps."
+                    )
+                else:
+                    synth_prompt = (
+                        f"RESEARCH OBJECTIVE: {req.context.question}\n\n"
+                        "Synthesize an authoritative, factual, verified executive direct answer to the research objective. "
+                        "State the primary dates, developers, official launch facts, and confirmed milestones clearly."
+                    )
 
                 orch_res = await orchestrator.process_task(
                     OrchestrationRequest(
