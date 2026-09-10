@@ -165,6 +165,11 @@ class Orchestrator(BaseOrchestrator):
         mode_used = decision.mode
         route_reason = decision.reason
         selected_agent_ids = decision.selected_agent_ids
+        forced_agents = request.context_data.get("assigned_agents") if request.context_data else None
+        if forced_agents:
+            selected_agent_ids = forced_agents if isinstance(forced_agents, list) else [forced_agents]
+            route_reason = f"Forced agent assignment via context_data: {selected_agent_ids}"
+
         participating_agents: list[Agent] = [
             a for aid in selected_agent_ids
             if (a := self.registry.get_agent(aid)) is not None

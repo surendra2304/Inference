@@ -296,6 +296,7 @@ class IntelXIntelligenceService:
                         question=synth_prompt,
                         mode="fast",
                         require_evidence=False,
+                        context_data={"assigned_agents": ["synthesizer"]},
                     )
                 )
                 if orch_res and orch_res.answer:
