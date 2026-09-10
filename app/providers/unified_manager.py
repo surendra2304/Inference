@@ -112,8 +112,8 @@ class UnifiedProviderManager:
         extra_params: dict[str, Any] = {}
         if req.fast_lane and req.provider == "auto":
             target_provider = "groq"
-            target_model = "openai/gpt-oss-120b"
-            req.max_tokens = min(req.max_tokens, 75)
+            target_model = "openai/gpt-oss-20b"
+            req.max_tokens = min(req.max_tokens, 60)
             extra_params["reasoning_effort"] = "low"
             system_prompt = (
                 f"You are the {req.agent_role or 'expert'} specialist in the FRIDAY Universe. "

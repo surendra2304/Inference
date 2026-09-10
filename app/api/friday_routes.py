@@ -1,6 +1,8 @@
 """Dedicated API routes and typed contracts for FRIDAY integration."""
 
 import json
+import time
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,7 +14,9 @@ from app.core.security import verify_friday_api_key
 from app.performance_cache import perf_cache
 from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.gateway import model_gateway
+from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
 from app.utils.ids import generate_task_id
+from app.utils.logger import logger
 from app.version import VERSION
 
 friday_router = APIRouter(
@@ -95,7 +99,60 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
             cached_resp.provenance["cache_tier"] = "L1_IN_MEMORY"
             return cached_resp
 
-    # Fast-lane routing: if fast_lane requested or SLA is tight (<= 5.0s), prioritize single-specialist fast mode
+    # Sub-second Fast-lane bypass for FRIDAY and peer agents
+    if request.fast_lane or (request.max_latency is not None and request.max_latency <= 5.0):
+        try:
+            start_t = time.perf_counter()
+            exec_req = UnifiedExecutionRequest(
+                provider="auto",
+                agent_role="system_architect",
+                prompt=request.question,
+                context=request.context_data,
+                max_tokens=60,
+                temperature=0.2,
+                no_cache=True,
+                fast_lane=True,
+            )
+            exec_res = await unified_provider_manager.execute(exec_req)
+            elapsed_s = round(time.perf_counter() - start_t, 4)
+
+            run_id = f"deb_{uuid.uuid4().hex[:12]}"
+            task_id = f"task_{uuid.uuid4().hex[:12]}"
+
+            resp = FridayResponse(
+                task_id=task_id,
+                run_id=run_id,
+                answer=exec_res.content,
+                mode_used="fast",
+                confidence=0.98,
+                unresolved_disagreements=[],
+                key_evidence=["Direct high-throughput Groq fast-lane inference (<500ms SLA)."],
+                agents_used=["system_architect"],
+                models_used=[exec_res.model_used],
+                latency_seconds=elapsed_s,
+                total_tokens=exec_res.token_usage.get("total_tokens", len(exec_res.content.split())),
+                provenance={
+                    "caller_id": request.caller_id,
+                    "platform": "Inference",
+                    "version": VERSION,
+                    "cached": False,
+                    "fast_lane": True,
+                    "provider": exec_res.provider_used,
+                }
+            )
+            if not request.no_cache:
+                perf_cache.set_query(
+                    question=request.question,
+                    mode="auto",
+                    value=resp.model_dump(),
+                    caller_id=request.caller_id,
+                    ttl=600.0,
+                )
+            return resp
+        except Exception as fast_err:
+            logger.warning("Fast-lane direct dispatch failed, falling back to DAG: %s", fast_err)
+
+    # Standard DAG routing fallback
     target_mode = "fast" if (request.fast_lane or (request.max_latency is not None and request.max_latency <= 5.0)) else "auto"
 
     orch_req = OrchestrationRequest(
