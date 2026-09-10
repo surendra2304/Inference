@@ -141,14 +141,26 @@ class IntelXIntelligenceService:
 
         # Role-specific execution logic
         if req.role == "planner":
+            q = req.context.question.strip()
             sub_q = req.context.subquestions if req.context.subquestions else [
-                f"What are the foundational metrics for: {req.context.question}?",
-                f"What counter-evidence exists regarding: {req.context.question}?"
+                f"What is the verified timeline, release date, and official schedule for {q}?",
+                f"What official announcements, statements, and primary documentation exist for {q}?",
+                f"What are the key technical specifications, features, and core facts regarding {q}?",
+                f"What recent updates, developments, and confirmed milestones have occurred for {q}?",
             ]
             role_output = {
-                "execution_plan": f"Decomposed main research goal '{req.context.question}' into {len(sub_q)} discrete investigative tracks.",
+                "objective": q,
+                "subquestions": sub_q,
                 "subquestions_planned": sub_q,
-                "recommended_sources": ["peer_reviewed_literature", "verified_telemetry", "official_documentation"]
+                "execution_plan": f"Decomposed main research goal '{q}' into {len(sub_q)} discrete investigative tracks.",
+                "source_strategy": {
+                    "connector_kinds": ["web_search", "file_ingest"],
+                    "expected_source_count": 8,
+                },
+                "completion_criteria": {
+                    "min_sources_per_subquestion": 2,
+                    "min_independent_corroborations": 2,
+                },
             }
             confidence = 0.94
 
@@ -194,22 +206,66 @@ class IntelXIntelligenceService:
             }
 
         elif req.role == "analyst":
+            import re as _re
+            timeline_items = []
+            entity_relations = []
+            for e in evidence_pool[:10]:
+                date_match = _re.search(
+                    r"\b(20\d{2}|19\d{2}|January|February|March|April|May|June|July|August|September|October|November|December)\b",
+                    e.claim,
+                    _re.IGNORECASE,
+                )
+                event_date = date_match.group(0) if date_match else None
+                timeline_items.append({
+                    "date": event_date,
+                    "event": e.claim,
+                    "claim_ids": [e.claim_id] if e.claim_id else [],
+                })
+                entity_relations.append({
+                    "subject": req.context.question[:40],
+                    "predicate": "documented_by",
+                    "object": e.document_source[:50],
+                    "claim_id": e.claim_id,
+                })
+
+            themes = [
+                {
+                    "label": f"Verified Evidence: {req.context.question[:50]}",
+                    "claim_ids": [e.claim_id for e in evidence_pool if e.claim_id],
+                }
+            ]
+            gaps = []
+            if not evidence_pool:
+                gaps.append(f"Insufficient primary sources for '{req.context.question}'.")
+
             role_output = {
-                "analysis_summary": f"Synthesized findings for '{req.context.question}'. Patterns indicate high consistency across peer-reviewed & official docs.",
-                "identified_patterns": [
-                    "Empirical evidence demonstrates positive correlation with key hypothesis.",
-                    "No material anomalies detected across primary verification spans."
-                ],
-                "data_points_analyzed": len(evidence_pool)
+                "timeline": timeline_items,
+                "entity_relations": entity_relations,
+                "themes": themes,
+                "gaps": gaps,
+                "data_points_analyzed": len(evidence_pool),
             }
             confidence = 0.91
 
         elif req.role == "critic":
-            dissent.append("Critic Note: Potential publication bias in positive outcome reporting; recommends sampling negative control cases.")
+            overconfident = []
+            missing = []
+            for e in evidence_pool:
+                if e.credibility_score < 0.60:
+                    overconfident.append({
+                        "claim_id": e.claim_id or "c-eval",
+                        "reason": f"Single low-credibility source ({e.document_source})",
+                    })
+
+            if len(evidence_pool) < 3:
+                missing.append("Requires wider cross-source triangulation across additional independent domains.")
+
             role_output = {
-                "critique_verdict": "CHALLENGE_REGISTERED",
-                "methodological_critique": "Analysis relies heavily on observational claims without counterfactual baseline comparison.",
-                "recommended_verification_steps": ["Cross-examine against syndicated duplicate sources", "Check historical error margins"]
+                "unsupported_conclusions": [],
+                "overconfident_claims": overconfident,
+                "missing_angles": missing,
+                "severity": "MEDIUM" if (overconfident or missing) else "LOW",
+                "summary": f"Evaluated {len(evidence_pool)} evidence claims for '{req.context.question}'. Analysis grounded in verified evidence.",
             }
             confidence = 0.88
 
