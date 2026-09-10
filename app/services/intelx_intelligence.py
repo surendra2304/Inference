@@ -281,14 +281,17 @@ class IntelXIntelligenceService:
                     synth_prompt = (
                         f"RESEARCH OBJECTIVE: {req.context.question}\n\n"
                         f"EXTRACTED EVIDENCE:\n{evidence_text}\n\n"
-                        "Synthesize a clear, authoritative, factual executive direct answer to the research objective based on the evidence.\n"
-                        "Provide verified key findings and identify any critical gaps."
+                        "DIRECTIVE:\n"
+                        "Synthesize a clear, authoritative, factual executive direct answer to the research objective based strictly on the evidence above.\n"
+                        "State the primary dates (such as launch and release dates), official announcements, developers, and confirmed facts directly.\n"
+                        "Do NOT output internal thinking, draft commentary, or meta-analysis. Output only the finished, polished executive answer."
                     )
                 else:
                     synth_prompt = (
                         f"RESEARCH OBJECTIVE: {req.context.question}\n\n"
-                        "Synthesize an authoritative, factual, verified executive direct answer to the research objective. "
-                        "State the primary dates, developers, official launch facts, and confirmed milestones clearly."
+                        "DIRECTIVE:\n"
+                        "Synthesize an authoritative, factual, verified executive direct answer to the research objective.\n"
+                        "State the primary dates, developers, official launch facts, and confirmed milestones clearly without meta-commentary."
                     )
 
                 orch_res = await orchestrator.process_task(
@@ -300,7 +303,15 @@ class IntelXIntelligenceService:
                     )
                 )
                 if orch_res and orch_res.answer:
-                    answer_text = orch_res.answer.strip()
+                    raw_ans = orch_res.answer.strip()
+                    # Strip any residual thinking tags or meta-preamble
+                    import re as _re_synth
+                    raw_ans = _re_synth.sub(r"(?s)^<think>.*?</think>", "", raw_ans).strip()
+                    if "Thus output likely bullet points:" in raw_ans:
+                        raw_ans = raw_ans.split("Thus output likely bullet points:")[-1].strip()
+                    elif "Let's craft" in raw_ans:
+                        raw_ans = raw_ans.split("Let's craft")[-1].strip()
+                    answer_text = raw_ans
                     confidence = max(confidence, orch_res.confidence or 0.95)
             except Exception as ex:
                 logger.warning(f"Orchestrator synthesis exception: {ex}")

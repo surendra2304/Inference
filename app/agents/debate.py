@@ -180,9 +180,12 @@ class CollaborationEngine:
             healthy = [cfg for cfg in preferred if provider_health_tracker.get_provider_health(cfg.provider).is_healthy]
             configs_to_run = healthy[:3] if healthy else preferred[:min(3, len(preferred))]
 
-        token_limit = 220 if complexity == TaskComplexity.SIMPLE else 1024
+        token_limit = 1024 if (complexity != TaskComplexity.SIMPLE or agent.id == "synthesizer") else 220
         if complexity == TaskComplexity.SIMPLE:
-            system_instruction = (system_instruction or "") + " Answer with maximum technical conciseness in 2-4 sentences or bullet points without filler."
+            if agent.id == "synthesizer":
+                system_instruction = (system_instruction or "") + " Provide the complete, authoritative, factual executive research answer with all dates and key findings clearly stated without preamble or meta-commentary."
+            else:
+                system_instruction = (system_instruction or "") + " Answer with maximum technical conciseness in 2-4 sentences or bullet points without filler."
 
         # Execute model calls (single or parallel)
         async def call_model(cfg: AgentModelConfig):
