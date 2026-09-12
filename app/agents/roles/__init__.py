@@ -54,6 +54,27 @@ def get_all_specialist_agents() -> list[Agent]:
             weaknesses=["speculative technical depth without source data"]
         ),
         Agent(
+            id="proposer",
+            name="Lead Hypothesis Proposer",
+            role="Proposer",
+            purpose="Formulate concrete solutions, structured proposals, and actionable hypotheses for debate.",
+            system_instructions=(
+                f"{FRIDAY_UNIVERSE_PREAMBLE}\n"
+                "You are the Lead Proposer in Inference. Your goal is to construct innovative, structured, "
+                "and concrete technical proposals and hypotheses. Define the problem clearly, propose an actionable "
+                "first-principles solution, and outline initial assumptions for the debate council to evaluate."
+            ),
+            model_provider="gemini",
+            model_name="gemini-3.5-flash-lite",
+            models=[
+                AgentModelConfig(provider="gemini", model="gemini-3.5-flash-lite", capability="reasoning"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
+                AgentModelConfig(provider="openrouter", model="nvidia/nemotron-3.5-lightning:free", capability="reasoning"),
+            ],
+            strengths=["solution architecture", "hypothesis formulation", "first-principles reasoning", "clarity"],
+            weaknesses=["stress-testing edge cases alone"]
+        ),
+        Agent(
             id="architect",
             name="Principal Architect",
             role="Architect",

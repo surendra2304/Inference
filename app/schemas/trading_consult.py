@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TradingTelemetry(BaseModel):
@@ -122,6 +122,62 @@ class AIUniverseDecision(BaseModel):
         default=None,
         description="Testnet-specific capital preservation analysis, margin level evaluation, and position sizing guidelines"
     )
+    # 13 Canonical Response Fields for FRIDAY Universe Interoperability
+    task_id: str = Field(default_factory=lambda: f"task_{uuid4().hex[:12]}")
+    trace_id: str = Field(default_factory=lambda: f"trace_{uuid4().hex[:8]}")
+    answer: str = Field(default="")
+    reasoning_summary: str = Field(default="")
+    uncertainty: float = Field(default=0.10)
+    evidence: list[str] = Field(default_factory=list)
+    agents_used: list[str] = Field(default_factory=lambda: ["trading_analyst", "critic", "synthesizer"])
+    recommendations: list[str] = Field(default_factory=list)
+    proposed_actions: list[dict[str, Any]] = Field(default_factory=list)
+    authorization_required: bool = Field(default=True)
+    provider_metadata: dict[str, Any] = Field(default_factory=lambda: {"provider": "trading_advisory_engine", "model": "quantitative_specialist"})
+    failure_state: str | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def populate_canonical_envelope_fields(self) -> "AIUniverseDecision":
+        if not self.answer:
+            self.answer = (
+                f"Trading Consultation Advisory [{self.status}]: "
+                f"{len(self.parameter_changes)} parameter calibration(s) proposed. "
+                f"Risk Assessment: {self.risk_assessment}"
+            )
+        if not self.reasoning_summary:
+            self.reasoning_summary = self.debate_summary or self.risk_assessment
+        if not self.evidence:
+            ev = []
+            if self.risk_assessment:
+                ev.append(self.risk_assessment)
+            if self.regime_analysis:
+                ev.append(self.regime_analysis)
+            self.evidence = ev
+        if not self.recommendations:
+            self.recommendations = [pc.rationale for pc in self.parameter_changes] or [f"Status: {self.status}"]
+        if not self.proposed_actions:
+            actions = []
+            for pc in self.parameter_changes:
+                actions.append({
+                    "action": f"calibrate_{pc.parameter}",
+                    "target": "stratex_trading_bot",
+                    "parameters": {
+                        "strategy": pc.strategy,
+                        "parameter": pc.parameter,
+                        "current_value": pc.current_value,
+                        "recommended_value": pc.recommended_value,
+                        "change_pct": pc.change_pct,
+                    },
+                    "rationale": pc.rationale,
+                    "is_executable_command": False,
+                    "requires_authorization": True,
+                    "risk_level": "medium" if abs(pc.change_pct) < 15.0 else "high",
+                })
+            self.proposed_actions = actions
+        if self.status == "INSUFFICIENT_DATA" and not self.failure_state:
+            self.failure_state = "INSUFFICIENT_DATA"
+        self.uncertainty = round(1.0 - self.confidence, 4)
+        return self
 
 
 # --- A/B Experiment Tracking Schemas ---

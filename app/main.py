@@ -11,6 +11,8 @@ from app.agents.software_specialists import register_software_specialists
 from app.api.agent_routes import agent_router
 from app.api.friday_routes import friday_router
 from app.api.instant_routes import instant_router
+from app.api.universal_task_routes import task_router
+from app.api.v1_core_routes import v1_router
 from app.api.routes import router as api_router
 from app.config_production import production_config
 from app.core.config import settings
@@ -134,8 +136,10 @@ app.include_router(health_router)
 app.include_router(operational_router)
 app.include_router(api_router)
 app.include_router(friday_router)
+app.include_router(task_router)
 app.include_router(agent_router)
 app.include_router(instant_router)
+app.include_router(v1_router)
 app.include_router(trading_router)
 app.include_router(enhanced_router)
 app.include_router(live_router)
