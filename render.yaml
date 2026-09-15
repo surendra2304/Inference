@@ -28,7 +28,9 @@ services:
         sync: false
       - key: NVIDIA_API_KEY
         sync: false
-      - key: THIRD_PARTY_FALLBACK_API_KEY
+      - key: THIRD_PARTY_GEMINI_KEY
+        sync: false
+      - key: THIRD_PARTY_GROQ_KEY
         sync: false
       - key: INFERENCE_URL
         sync: false

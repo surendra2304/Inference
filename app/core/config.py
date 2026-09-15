@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     NVIDIA_API_KEY: str | None = Field(default=None)
     NVIDIA_API_KEYS: str | None = Field(default=None)
 
+    THIRD_PARTY_GEMINI_KEY: str | None = Field(default=None)
+    THIRD_PARTY_GEMINI_KEYS: str | None = Field(default=None)
+    THIRD_PARTY_GROQ_KEY: str | None = Field(default=None)
+    THIRD_PARTY_GROQ_KEYS: str | None = Field(default=None)
+
     # Integration Keys (Strict: No hardcoded fallback credentials)
     INFERENCE_API_KEY: str | None = Field(default=None)
     inference_api_KEY: str | None = Field(default=None)
@@ -86,8 +91,10 @@ class Settings(BaseSettings):
 
         singular_val = getattr(self, f"{prov}_API_KEY", None)
         plural_val = getattr(self, f"{prov}_API_KEYS", None)
+        tp_singular_val = getattr(self, f"THIRD_PARTY_{prov}_KEY", None)
+        tp_plural_val = getattr(self, f"THIRD_PARTY_{prov}_KEYS", None)
 
-        for raw_val in [plural_val, singular_val]:
+        for raw_val in [plural_val, singular_val, tp_singular_val, tp_plural_val]:
             if raw_val:
                 for k in raw_val.split(","):
                     cleaned = k.strip().strip("'\"")
