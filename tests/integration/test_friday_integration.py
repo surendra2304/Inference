@@ -35,7 +35,23 @@ async def test_friday_ask_authenticated(friday_client):
         latency_seconds=0.35
     )
 
-    with patch("app.agents.debate.model_gateway.execute", new_callable=AsyncMock) as mock_exec:
+    import time
+    from app.providers.unified_manager import UnifiedExecutionResponse
+
+    mock_unified_res = UnifiedExecutionResponse(
+        provider_used="gemini",
+        model_used="gemini-2.5-flash",
+        agent_role="system_architect",
+        content="FRIDAY consultation: Recommended architecture strategy validated.",
+        latency_ms=350.0,
+        timestamp=time.time(),
+        token_usage={"total_tokens": 45},
+        status="success",
+    )
+
+    with patch("app.providers.unified_manager.unified_provider_manager.execute", new_callable=AsyncMock) as mock_u_exec, \
+         patch("app.agents.debate.model_gateway.execute", new_callable=AsyncMock) as mock_exec:
+        mock_u_exec.return_value = mock_unified_res
         mock_exec.return_value = mock_llm_response
 
         headers = {"X-FRIDAY-API-Key": "test_friday_secret_key_12345"}
