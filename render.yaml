@@ -1,0 +1,68 @@
+services:
+  - type: web
+    name: inference-gateway
+    env: docker
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    region: singapore
+    plan: starter
+    healthCheckPath: /health
+    disk:
+      name: inference-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:///data/universe.db
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: COHERE_API_KEY
+        sync: false
+      - key: HUGGINGFACE_API_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: THIRD_PARTY_FALLBACK_API_KEY
+        sync: false
+      - key: INFERENCE_URL
+        sync: false
+      - key: INFERENCE_API_KEY
+        sync: false
+      - key: MEMORA_URL
+        sync: false
+      - key: MEMORA_API_KEY
+        sync: false
+      - key: STRATEX_URL
+        sync: false
+      - key: STRATEX_API_KEY
+        sync: false
+      - key: INTELX_URL
+        sync: false
+      - key: INTELX_API_KEY
+        sync: false
+      - key: FUTURIS_URL
+        sync: false
+      - key: FUTURIS_API_KEY
+        sync: false
+      - key: CORTEX_URL
+        sync: false
+      - key: CORTEX_API_KEY
+        sync: false
+      - key: FORGE_URL
+        sync: false
+      - key: FORGE_API_KEY
+        sync: false
+      - key: SENTINEL_URL
+        sync: false
+      - key: SENTINEL_API_KEY
+        sync: false
+      - key: FRIDAY_URL
+        sync: false
+      - key: FRIDAY_API_KEY
+        sync: false
