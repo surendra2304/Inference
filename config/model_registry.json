@@ -1,0 +1,49 @@
+{
+  "models": [
+    {
+      "name": "anthropic-claude-3-5-sonnet",
+      "provider": "anthropic",
+      "tier": "premium",
+      "capabilities": ["reasoning", "coding", "analysis"],
+      "cost": 0.03,
+      "latency": 500,
+      "win_rate": 0.92
+    },
+    {
+      "name": "mistral-mixtral-8x22b",
+      "provider": "mistral",
+      "tier": "premium",
+      "capabilities": ["coding", "language", "math"],
+      "cost": 0.02,
+      "latency": 450,
+      "win_rate": 0.88
+    },
+    {
+      "name": "cohere-command-r-plus",
+      "provider": "cohere",
+      "tier": "standard",
+      "capabilities": ["reasoning", "language", "analysis"],
+      "cost": 0.01,
+      "latency": 300,
+      "win_rate": 0.85
+    },
+    {
+      "name": "google-gemini-1.5-pro",
+      "provider": "google",
+      "tier": "standard",
+      "capabilities": ["reasoning", "coding", "language"],
+      "cost": 0.015,
+      "latency": 350,
+      "win_rate": 0.87
+    },
+    {
+      "name": "openai-gpt-4o",
+      "provider": "openai",
+      "tier": "premium",
+      "capabilities": ["reasoning", "coding", "analysis"],
+      "cost": 0.03,
+      "latency": 400,
+      "win_rate": 0.90
+    }
+  ]
+}
