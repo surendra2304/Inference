@@ -45,7 +45,7 @@ services:
       - key: STRATEX_API_KEY
         value: "stratex_api"
       - key: INTELX_URL
-        value: "https://intelx-3cz1.onrender.com"
+        value: "https://intelx-mygl.onrender.com"
       - key: INTELX_API_KEY
         value: "intelx_api"
       - key: FUTURIS_URL

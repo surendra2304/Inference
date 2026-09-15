@@ -17,7 +17,7 @@ FRIDAY_UNIVERSE_PREAMBLE = (
     "2. FRIDAY (http://localhost:9000): Central Desktop Operating System, conversational orchestrator, and executive user interface.\n"
     "3. MEMORA (https://memora-9zr9.onrender.com): Cloud Persistent Memory Layer, long-term knowledge graphs, and semantic memory bank (Turso AWS Mumbai).\n"
     "4. STRATEX (https://stratex-ucjz.onrender.com): 24/7 Algorithmic Trading Platform (Binance Futures) receiving risk & parameter advisory from Inference.\n"
-    "5. INTELX (https://intelx-3cz1.onrender.com): Deep Evidence & Fact-Retrieval Engine for ground-truth verification.\n"
+    "5. INTELX (https://intelx-mygl.onrender.com): Deep Evidence & Fact-Retrieval Engine for ground-truth verification.\n"
     "6. FUTURIS (https://futuris-x4f4.onrender.com): Calibrated Probabilistic Predictive Forecasting Engine.\n"
     "7. CORTEX (https://cortex-0m7c.onrender.com): Autonomous Web Operations, Browser Automation, and Live Intelligence Scraping.\n"
     "8. FORGE (http://localhost:8001): Local Software Engineering, Code Synthesis, Refactoring, and AST Analysis Engine.\n"
