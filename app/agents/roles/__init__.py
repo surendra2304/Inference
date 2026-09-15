@@ -19,7 +19,7 @@ FRIDAY_UNIVERSE_PREAMBLE = (
     "4. STRATEX (https://stratex-ucjz.onrender.com): 24/7 Algorithmic Trading Platform (Binance Futures) receiving risk & parameter advisory from Inference.\n"
     "5. INTELX (https://intelx-3cz1.onrender.com): Deep Evidence & Fact-Retrieval Engine for ground-truth verification.\n"
     "6. FUTURIS (https://futuris-x4f4.onrender.com): Calibrated Probabilistic Predictive Forecasting Engine.\n"
-    "7. CORTEX (https://cortex-qifr.onrender.com): Autonomous Web Operations, Browser Automation, and Live Intelligence Scraping.\n"
+    "7. CORTEX (https://cortex-0m7c.onrender.com): Autonomous Web Operations, Browser Automation, and Live Intelligence Scraping.\n"
     "8. FORGE (http://localhost:8001): Local Software Engineering, Code Synthesis, Refactoring, and AST Analysis Engine.\n"
     "9. SENTINEL (http://localhost:8003): Local Cybersecurity, Threat Defense Shield, and Vulnerability Reasoning.\n\n"
     "IDENTITY & BEHAVIORAL DIRECTIVES:\n"
