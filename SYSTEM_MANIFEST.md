@@ -11,8 +11,8 @@
 
 | Attribute | Production Configuration |
 | :--- | :--- |
-| **Live Production URL** | [https://inference-3i2b.onrender.com](https://inference-3i2b.onrender.com) |
-| **Health Check Endpoint** | https://inference-3i2b.onrender.com/health |
+| **Live Production URL** | [https://inference-r1sn.onrender.com](https://inference-r1sn.onrender.com) |
+| **Health Check Endpoint** | https://inference-r1sn.onrender.com/health |
 | **Master API Key Variable** | INFERENCE_API_KEY=inference_api |
 | **Authentication Header** | X-INFERENCE-API-KEY: inference_api / Authorization: Bearer inference_api |
 | **Database Topology** | In-Memory Consultation Cache / Connected to Memora Cloud |
@@ -43,15 +43,15 @@ Every agent in the universe communicates using standard environment variables:
 # ============================================================================== #
 
 # 1. ⚡ Inference AI Multi-Model Gateway (25 Keys)
-INFERENCE_URL=https://inference-3i2b.onrender.com
+INFERENCE_URL=https://inference-r1sn.onrender.com
 INFERENCE_API_KEY=inference_api
 
 # 2. 🧠 Memora Cloud Persistent Memory (9 GB Turso AWS Mumbai)
-MEMORA_URL=https://memora-9zr9.onrender.com
+MEMORA_URL=https://memora-cavc.onrender.com
 MEMORA_API_KEY=memora_api
 
 # 3. 📈 Stratex 24/7 Algorithmic Trading Platform (Binance Futures)
-STRATEX_URL=https://stratex-ucjz.onrender.com
+STRATEX_URL=https://stratex-8wj1.onrender.com
 STRATEX_API_KEY=stratex_api
 
 # 4. 🧠 IntelX Evidence & Intelligence Research Engine (Turso AWS Mumbai)
@@ -59,7 +59,7 @@ INTELX_URL=https://intelx-mygl.onrender.com
 INTELX_API_KEY=intelx_api
 
 # 5. 🔮 Futuris Calibrated Predictive Forecasting Engine
-FUTURIS_URL=https://futuris-x4f4.onrender.com
+FUTURIS_URL=https://futuris-th6f.onrender.com
 FUTURIS_API_KEY=futuris_api
 
 # 6. 🌐 Cortex Autonomous Web Operations & Intelligence
@@ -75,7 +75,7 @@ SENTINEL_URL=https://sentinel-a861.onrender.com
 SENTINEL_API_KEY=sentinel_api
 
 # 9. 🤖 FRIDAY Central Desktop Operating System
-FRIDAY_URL=http://localhost:9000
+FRIDAY_URL=https://friday-zw59.onrender.com
 FRIDAY_API_KEY=friday_api
 `
 
@@ -85,7 +85,7 @@ FRIDAY_API_KEY=friday_api
 
 When opening this directory in **Antigravity AI**:
 * **Identity:** You are working inside **Inference** (d:\FRIDAY Universe\Inference).
-* **Live Service:** This service is deployed live at https://inference-3i2b.onrender.com.
+* **Live Service:** This service is deployed live at https://inference-r1sn.onrender.com.
 * **Authentication:** Incoming requests use INFERENCE_API_KEY=inference_api.
 * **Never Fake Tests:** All tests and verifications must be executed against real code and real endpoints.
 * **No Unapproved Git Pushes:** Keep modifications local unless explicitly instructed to push.

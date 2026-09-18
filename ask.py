@@ -17,7 +17,7 @@ if not q.strip():
 print("\n[Inference Gateway] Routing to Multi-Agent Specialist Cluster...")
 try:
     r = requests.post(
-        "https://inference-3i2b.onrender.com/v1/friday/ask",
+        "https://inference-r1sn.onrender.com/v1/friday/ask",
         headers={"X-FRIDAY-API-Key": "inference_api"},
         json={"question": q},
         timeout=120,
