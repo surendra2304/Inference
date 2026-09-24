@@ -52,8 +52,13 @@ class Settings(BaseSettings):
 
     THIRD_PARTY_GEMINI_KEY: str | None = Field(default=None)
     THIRD_PARTY_GEMINI_KEYS: str | None = Field(default=None)
+    GEMINI_FALLBACK_KEY: str | None = Field(default=None)
+    GEMINI_FALLBACK_KEYS: str | None = Field(default=None)
     THIRD_PARTY_GROQ_KEY: str | None = Field(default=None)
     THIRD_PARTY_GROQ_KEYS: str | None = Field(default=None)
+    GROQ_FALLBACK_KEY: str | None = Field(default=None)
+    GROQ_FALLBACK_KEYS: str | None = Field(default=None)
+    THIRD_PARTY_FALLBACK_API_KEY: str | None = Field(default=None)
 
     # Integration Keys (Strict: No hardcoded fallback credentials)
     INFERENCE_API_KEY: str | None = Field(default=None)
@@ -93,8 +98,11 @@ class Settings(BaseSettings):
         plural_val = getattr(self, f"{prov}_API_KEYS", None)
         tp_singular_val = getattr(self, f"THIRD_PARTY_{prov}_KEY", None)
         tp_plural_val = getattr(self, f"THIRD_PARTY_{prov}_KEYS", None)
+        fb_singular_val = getattr(self, f"{prov}_FALLBACK_KEY", None)
+        fb_plural_val = getattr(self, f"{prov}_FALLBACK_KEYS", None)
+        legacy_val = self.THIRD_PARTY_FALLBACK_API_KEY if prov == "GEMINI" else None
 
-        for raw_val in [plural_val, singular_val, tp_singular_val, tp_plural_val]:
+        for raw_val in [plural_val, singular_val, tp_singular_val, tp_plural_val, fb_singular_val, fb_plural_val, legacy_val]:
             if raw_val:
                 for k in raw_val.split(","):
                     cleaned = k.strip().strip("'\"")
