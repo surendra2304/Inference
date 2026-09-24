@@ -27,6 +27,8 @@ services:
         sync: false
       - key: THIRD_PARTY_GROQ_KEY
         sync: false
+      - key: THIRD_PARTY_OPENROUTER_KEY
+        sync: false
       # Mesh Communication & FRIDAY Core
       - key: FRIDAY_URL
         value: "https://friday-zw59.onrender.com"

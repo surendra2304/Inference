@@ -44,10 +44,14 @@ class OpenRouterProvider(OpenAICompatibleProvider):
     ]
 
     def __init__(self, api_key: str | None = None, default_model: str | None = None, timeout: float = 60.0) -> None:
+        keys = settings.get_provider_keys("openrouter")
+        if api_key:
+            keys = [k.strip() for k in api_key.split(",") if k.strip()]
+        key_str = ",".join(keys) if keys else None
         super().__init__(
             provider_name="openrouter",
             base_url=self.BASE_URL,
-            api_key=api_key or settings.OPENROUTER_API_KEY,
+            api_key=key_str,
             default_model=default_model or self.DEFAULT_MODEL,
             supported_models=self.SUPPORTED_MODELS,
             timeout=timeout,

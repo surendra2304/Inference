@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     THIRD_PARTY_GROQ_KEYS: str | None = Field(default=None)
     GROQ_FALLBACK_KEY: str | None = Field(default=None)
     GROQ_FALLBACK_KEYS: str | None = Field(default=None)
+    THIRD_PARTY_OPENROUTER_KEY: str | None = Field(default=None)
+    THIRD_PARTY_OPENROUTER_KEYS: str | None = Field(default=None)
+    OPENROUTER_FALLBACK_KEY: str | None = Field(default=None)
+    OPENROUTER_FALLBACK_KEYS: str | None = Field(default=None)
+    THIRD_PARTY_NVIDIA_KEY: str | None = Field(default=None)
+    THIRD_PARTY_NVIDIA_KEYS: str | None = Field(default=None)
     THIRD_PARTY_FALLBACK_API_KEY: str | None = Field(default=None)
 
     # Integration Keys (Strict: No hardcoded fallback credentials)
