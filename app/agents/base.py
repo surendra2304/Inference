@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 class AgentModelConfig(BaseModel):
     """Specification of a provider, model identifier, and capability assigned to an agent."""
     provider: str = Field(description="Cloud provider name, e.g. gemini, openrouter, nvidia, cohere, mistral")
-    model: str = Field(description="Model identifier, e.g. gemini-3.7-flash, deepseek/deepseek-v4-flash:free")
+    model: str = Field(description="Model identifier, e.g. gemini-3.8-flash, deepseek/deepseek-v4-flash:free")
     capability: str = Field(description="Specialized capability tag, e.g. research, reasoning, coding, safety, synthesis")
 
 

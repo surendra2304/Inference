@@ -25,11 +25,11 @@ class GeminiProvider(BaseLLMProvider):
     """Adapter for Google Gemini API via async HTTP."""
 
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-    DEFAULT_MODEL = "gemini-3.7-flash"
+    DEFAULT_MODEL = "gemini-3.8-flash"
     SUPPORTED_MODELS = [
+        "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.6-flash",
-        "gemini-3.8-flash",
         "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
     ]
@@ -123,89 +123,104 @@ class GeminiProvider(BaseLLMProvider):
 
         model = request.model or self.default_model
         url = f"{self.BASE_URL}/models/{model}:generateContent"
-        headers = {"Content-Type": "application/json", "x-goog-api-key": self.api_key}
         payload = self._build_payload(request)
+        max_attempts = min(3, len(self.api_keys)) if self.api_keys else 1
 
-        start_time = time.perf_counter()
-        try:
-            client = await get_shared_client()
-            response = await client.post(url, headers=headers, json=payload, timeout=self.timeout)
-            latency = time.perf_counter() - start_time
+        for attempt in range(max_attempts):
+            active_key = self.api_key
+            headers = {"Content-Type": "application/json", "x-goog-api-key": active_key}
+            start_time = time.perf_counter()
+            try:
+                client = await get_shared_client()
+                response = await client.post(url, headers=headers, json=payload, timeout=self.timeout)
+                latency = time.perf_counter() - start_time
 
-            if response.status_code == 503 and model != "gemini-3.6-flash":
-                logger.warning(
-                    "Gemini model %s experienced 503 high demand; failing over to gemini-3.6-flash",
-                    model,
-                )
-                fallback_req = ProviderRequest(
-                    messages=request.messages,
-                    system_instruction=request.system_instruction,
-                    model="gemini-3.6-flash",
-                    temperature=request.temperature,
-                    max_tokens=request.max_tokens,
-                    response_schema=request.response_schema,
-                    extra_params=request.extra_params,
-                )
-                return await self.generate(fallback_req)
+                if response.status_code == 503 and model != "gemini-3.6-flash":
+                    logger.warning(
+                        "Gemini model %s experienced 503 high demand; failing over to gemini-3.6-flash",
+                        model,
+                    )
+                    fallback_req = ProviderRequest(
+                        messages=request.messages,
+                        system_instruction=request.system_instruction,
+                        model="gemini-3.6-flash",
+                        temperature=request.temperature,
+                        max_tokens=request.max_tokens,
+                        response_schema=request.response_schema,
+                        extra_params=request.extra_params,
+                    )
+                    return await self.generate(fallback_req)
 
-            if response.status_code in (429, 503):
-                logger.warning(
-                    "Gemini transient error (%d) encountered on model %s; cooling down for 2.0s",
-                    response.status_code,
-                    model,
-                )
-                await asyncio.sleep(2.0)
-                if response.status_code == 429:
-                    raise RuntimeError("Gemini API rate limit exceeded (HTTP 429).")
-                else:
-                    raise RuntimeError(f"Gemini API temporarily unavailable (HTTP 503): {response.text}")
-            elif response.status_code != 200:
-                error_msg = response.text
-                logger.error("Gemini API error (%d): %s", response.status_code, error_msg)
-                raise RuntimeError(f"Gemini API returned HTTP {response.status_code}: {error_msg}")
+                if response.status_code in (429, 503):
+                    if attempt < max_attempts - 1:
+                        logger.warning(
+                            "Gemini transient error (%d) on key %s... for model %s; rotating to next key (attempt %d/%d)",
+                            response.status_code,
+                            active_key[:8] if active_key else "unknown",
+                            model,
+                            attempt + 1,
+                            max_attempts,
+                        )
+                        await asyncio.sleep(0.3)
+                        continue
+                    else:
+                        if response.status_code == 429:
+                            raise RuntimeError("Gemini API rate limit exceeded across rotated keys (HTTP 429).")
+                        else:
+                            raise RuntimeError(f"Gemini API temporarily unavailable (HTTP 503): {response.text}")
+                elif response.status_code != 200:
+                    error_msg = response.text
+                    logger.error("Gemini API error (%d): %s", response.status_code, error_msg)
+                    raise RuntimeError(f"Gemini API returned HTTP {response.status_code}: {error_msg}")
 
-            data = response.json()
+                data = response.json()
 
-            # Extract text from response candidates
-            candidates = data.get("candidates", [])
-            if not candidates:
+                # Extract text from response candidates
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    return ProviderResponse(
+                        content="",
+                        model=model,
+                        provider=self.provider_name,
+                        latency_seconds=latency,
+                        finish_reason="empty",
+                        raw_response=data,
+                    )
+
+                content_parts = candidates[0].get("content", {}).get("parts", [])
+                generated_text = "".join(part.get("text", "") for part in content_parts)
+                finish_reason = candidates[0].get("finishReason", "stop")
+
+                # Extract token usage metadata
+                usage = data.get("usageMetadata", {})
+                prompt_tokens = usage.get("promptTokenCount", 0)
+                completion_tokens = usage.get("candidatesTokenCount", 0)
+                total_tokens = usage.get("totalTokenCount", prompt_tokens + completion_tokens)
+
                 return ProviderResponse(
-                    content="",
+                    content=generated_text,
                     model=model,
                     provider=self.provider_name,
-                    latency_seconds=latency,
-                    finish_reason="empty",
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    latency_seconds=round(latency, 4),
+                    finish_reason=finish_reason,
                     raw_response=data,
                 )
 
-            content_parts = candidates[0].get("content", {}).get("parts", [])
-            generated_text = "".join(part.get("text", "") for part in content_parts)
-            finish_reason = candidates[0].get("finishReason", "stop")
-
-            # Extract token usage metadata
-            usage = data.get("usageMetadata", {})
-            prompt_tokens = usage.get("promptTokenCount", 0)
-            completion_tokens = usage.get("candidatesTokenCount", 0)
-            total_tokens = usage.get("totalTokenCount", prompt_tokens + completion_tokens)
-
-            return ProviderResponse(
-                content=generated_text,
-                model=model,
-                provider=self.provider_name,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                latency_seconds=round(latency, 4),
-                finish_reason=finish_reason,
-                raw_response=data,
-            )
-
-        except httpx.TimeoutException as exc:
-            logger.error("Gemini request timed out after %.1fs", self.timeout)
-            raise TimeoutError(f"Gemini API request timed out after {self.timeout}s") from exc
-        except httpx.RequestError as exc:
-            logger.error("Gemini network request failure: %s", type(exc).__name__)
-            raise RuntimeError(f"Gemini network connection error: {type(exc).__name__}") from exc
+            except httpx.TimeoutException as exc:
+                if attempt < max_attempts - 1:
+                    logger.warning("Gemini request timed out on key %s...; retrying next key", active_key[:8] if active_key else "unknown")
+                    continue
+                logger.error("Gemini request timed out after %.1fs", self.timeout)
+                raise TimeoutError(f"Gemini API request timed out after {self.timeout}s") from exc
+            except httpx.RequestError as exc:
+                if attempt < max_attempts - 1:
+                    logger.warning("Gemini network error on key %s...; retrying next key", active_key[:8] if active_key else "unknown")
+                    continue
+                logger.error("Gemini network request failure: %s", type(exc).__name__)
+                raise RuntimeError(f"Gemini network connection error: {type(exc).__name__}") from exc
 
     async def stream(self, request: ProviderRequest) -> AsyncIterator[str]:
         """Stream generated chunks using Gemini Server-Sent Events (SSE)."""
@@ -214,12 +229,44 @@ class GeminiProvider(BaseLLMProvider):
 
         model = request.model or self.default_model
         url = f"{self.BASE_URL}/models/{model}:streamGenerateContent?alt=sse"
-        headers = {"Content-Type": "application/json", "x-goog-api-key": self.api_key}
         payload = self._build_payload(request)
+        max_attempts = min(3, len(self.api_keys)) if self.api_keys else 1
 
-        try:
-            client = await get_shared_client()
-            async with client.stream("POST", url, headers=headers, json=payload, timeout=self.timeout) as stream_resp:
+        for attempt in range(max_attempts):
+            active_key = self.api_key
+            headers = {"Content-Type": "application/json", "x-goog-api-key": active_key}
+            try:
+                client = await get_shared_client()
+                async with client.stream("POST", url, headers=headers, json=payload, timeout=self.timeout) as stream_resp:
+                    if stream_resp.status_code == 503 and model != "gemini-3.6-flash":
+                        logger.warning(
+                            "Gemini model %s stream experienced 503 high demand; failing over to gemini-3.6-flash",
+                            model,
+                        )
+                        fallback_req = ProviderRequest(
+                            messages=request.messages,
+                            system_instruction=request.system_instruction,
+                            model="gemini-3.6-flash",
+                            temperature=request.temperature,
+                            max_tokens=request.max_tokens,
+                            response_schema=request.response_schema,
+                            extra_params=request.extra_params,
+                        )
+                        async for chunk in self.stream(fallback_req):
+                            yield chunk
+                        return
+
+                    if stream_resp.status_code in (429, 503) and attempt < max_attempts - 1:
+                        logger.warning(
+                            "Gemini stream transient error (%d) on key %s...; rotating to next key (attempt %d/%d)",
+                            stream_resp.status_code,
+                            active_key[:8] if active_key else "unknown",
+                            attempt + 1,
+                            max_attempts,
+                        )
+                        await asyncio.sleep(0.3)
+                        continue
+
                     if stream_resp.status_code != 200:
                         error_body = await stream_resp.aread()
                         raise RuntimeError(
@@ -242,9 +289,12 @@ class GeminiProvider(BaseLLMProvider):
                                             yield text_chunk
                             except json.JSONDecodeError:
                                 continue
-        except httpx.RequestError as exc:
-            logger.error("Gemini streaming network error: %s", type(exc).__name__)
-            raise RuntimeError(f"Gemini streaming connection error: {type(exc).__name__}") from exc
+                    return
+            except httpx.RequestError as exc:
+                if attempt < max_attempts - 1:
+                    continue
+                logger.error("Gemini streaming network error: %s", type(exc).__name__)
+                raise RuntimeError(f"Gemini streaming connection error: {type(exc).__name__}") from exc
 
     async def health(self) -> bool:
         """Check provider health and key validity with a minimal probe."""

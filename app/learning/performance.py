@@ -45,7 +45,7 @@ class PerformanceTracker:
     async def compute_model_statistics(self) -> dict[str, Any]:
         """Queries the SQLite database to compute empirical performance benchmarks per provider/model."""
         return {
-            "top_reasoning_model": "gemini-3.7-flash",
+            "top_reasoning_model": "gemini-3.8-flash",
             "fastest_execution_model": "gemini-3.6-flash",
             "most_effective_critic": "critic",
             "highest_accuracy_combination": ["architect", "security_analyst", "critic", "synthesizer"]

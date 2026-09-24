@@ -299,7 +299,7 @@ class CollaborationEngine:
         """
         preferred = synthesizer_agent.models if synthesizer_agent.models else [
             AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="synthesis"),
-            AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="synthesis")
+            AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="synthesis")
         ]
 
         # For simple tasks, use top 1; for complex/strategic, invoke top 2 models in parallel

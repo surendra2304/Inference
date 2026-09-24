@@ -37,12 +37,12 @@ PROVIDER_FALLBACK_MATRIX: dict[str, FallbackRoute] = {
     "nvidia": FallbackRoute(
         primary_provider="nvidia",
         fallback_provider="gemini",
-        fallback_model="gemini-3.7-flash"
+        fallback_model="gemini-3.8-flash"
     ),
     "openrouter": FallbackRoute(
         primary_provider="openrouter",
         fallback_provider="gemini",
-        fallback_model="gemini-3.7-flash"
+        fallback_model="gemini-3.8-flash"
     ),
     "mistral": FallbackRoute(
         primary_provider="mistral",
@@ -52,12 +52,12 @@ PROVIDER_FALLBACK_MATRIX: dict[str, FallbackRoute] = {
     "cohere": FallbackRoute(
         primary_provider="cohere",
         fallback_provider="gemini",
-        fallback_model="gemini-3.7-flash"
+        fallback_model="gemini-3.8-flash"
     ),
     "huggingface": FallbackRoute(
         primary_provider="huggingface",
         fallback_provider="gemini",
-        fallback_model="gemini-3.7-flash"
+        fallback_model="gemini-3.8-flash"
     ),
 }
 

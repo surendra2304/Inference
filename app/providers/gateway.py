@@ -514,7 +514,7 @@ class ModelGateway:
                 prov_req = ProviderRequest(
                     messages=request.messages,
                     system_instruction=request.system_instruction,
-                    model="gemini-3.6-flash",
+                    model="gemini-3.8-flash",
                     temperature=request.temperature,
                     max_tokens=request.max_tokens,
                     extra_params={"timeout": timeout},

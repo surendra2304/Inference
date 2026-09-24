@@ -29,9 +29,9 @@ def get_software_specialist_agents() -> list[Agent]:
                 "boundary conditions, error states, and security considerations before architecture begins."
             ),
             model_provider="gemini",
-            model_name="gemini-3.7-flash",
+            model_name="gemini-3.8-flash",
             models=[
-                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="reasoning"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
@@ -52,7 +52,7 @@ def get_software_specialist_agents() -> list[Agent]:
             model_name="nvidia/nemotron-3-super-120b-a12b",
             models=[
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
-                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="reasoning"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
             ],
             strengths=["system topology", "clean architecture", "file manifest generation", "API schema definition"],
@@ -73,7 +73,7 @@ def get_software_specialist_agents() -> list[Agent]:
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="coding"),
                 AgentModelConfig(provider="groq", model="qwen/qwen3.8-27b", capability="coding"),
-                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="coding"),
+                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="coding"),
             ],
             strengths=["production code generation", "type safety", "idiomatic patterns", "efficient algorithms"],
             weaknesses=["high-level product roadmap decisions"]
@@ -89,9 +89,9 @@ def get_software_specialist_agents() -> list[Agent]:
                 "Provide constructive, prioritized line-by-line feedback and concrete remediation diffs."
             ),
             model_provider="gemini",
-            model_name="gemini-3.7-flash",
+            model_name="gemini-3.8-flash",
             models=[
-                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="review"),
+                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="review"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="review"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
@@ -109,9 +109,9 @@ def get_software_specialist_agents() -> list[Agent]:
                 "and async execution flows."
             ),
             model_provider="gemini",
-            model_name="gemini-3.7-flash",
+            model_name="gemini-3.8-flash",
             models=[
-                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="coding"),
+                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="coding"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="coding"),
                 AgentModelConfig(provider="groq", model="qwen/qwen3.8-27b", capability="coding"),
             ],
@@ -129,9 +129,9 @@ def get_software_specialist_agents() -> list[Agent]:
                 "endpoint specifications with example cURL payloads, and troubleshooting matrices."
             ),
             model_provider="gemini",
-            model_name="gemini-3.7-flash",
+            model_name="gemini-3.8-flash",
             models=[
-                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="synthesis"),
+                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="synthesis"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="synthesis"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="synthesis"),
             ],
@@ -152,7 +152,7 @@ def get_software_specialist_agents() -> list[Agent]:
             model_name="openai/gpt-oss-120b",
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="reasoning"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
             strengths=["Docker & containerization", "CI/CD pipeline automation", "Nginx/reverse proxies", "production hardening"],

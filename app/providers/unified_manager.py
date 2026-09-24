@@ -50,14 +50,14 @@ class UnifiedProviderManager:
     # Default fallback mapping from agent roles to best provider & model
     ROLE_PROVIDER_MAPPING = {
         "trading_analyst": ("groq", "openai/gpt-oss-120b"),
-        "requirements_analyst": ("gemini", "gemini-3.7-flash"),
+        "requirements_analyst": ("gemini", "gemini-3.8-flash"),
         "system_architect": ("nvidia", "nvidia/nemotron-3-super-120b-a12b"),
         "code_generator": ("groq", "openai/gpt-oss-120b"),
-        "code_reviewer": ("gemini", "gemini-3.7-flash"),
-        "test_generator": ("gemini", "gemini-3.7-flash"),
-        "documentation_writer": ("gemini", "gemini-3.7-flash"),
+        "code_reviewer": ("gemini", "gemini-3.8-flash"),
+        "test_generator": ("gemini", "gemini-3.8-flash"),
+        "documentation_writer": ("gemini", "gemini-3.8-flash"),
         "devops_engineer": ("groq", "openai/gpt-oss-120b"),
-        "researcher": ("gemini", "gemini-3.7-flash"),
+        "researcher": ("gemini", "gemini-3.8-flash"),
         "critic": ("groq", "openai/gpt-oss-120b"),
     }
 
@@ -106,7 +106,7 @@ class UnifiedProviderManager:
             target_model = default_mod
         elif target_provider == "auto":
             target_provider = "gemini"
-            target_model = "gemini-3.7-flash"
+            target_model = "gemini-3.8-flash"
 
         # Fast-lane override for auto routing
         extra_params: dict[str, Any] = {}

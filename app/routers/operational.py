@@ -35,6 +35,7 @@ async def get_providers_health() -> dict[str, Any]:
 async def list_models() -> dict[str, Any]:
     """Returns available model registry capabilities and supported configurations."""
     all_models = [
+        {"provider": "gemini", "model": "gemini-3.8-flash", "capabilities": ["chat", "stream", "json", "tools", "vision", "thinking"], "context_window": 2097152},
         {"provider": "gemini", "model": "gemini-3.7-flash", "capabilities": ["chat", "stream", "json", "tools", "vision", "thinking"], "context_window": 2097152},
         {"provider": "gemini", "model": "gemini-3.6-flash", "capabilities": ["chat", "stream", "json", "tools", "vision"], "context_window": 2097152},
         {"provider": "gemini", "model": "gemini-3.5-flash", "capabilities": ["chat", "stream", "json", "tools", "vision"], "context_window": 1048576},
