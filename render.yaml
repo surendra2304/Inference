@@ -31,8 +31,6 @@ services:
         sync: false
       - key: THIRD_PARTY_GEMINI_KEY
         sync: false
-      - key: GEMINI_FALLBACK_KEY
-        sync: false
       - key: THIRD_PARTY_GROQ_KEY
         sync: false
       # Mesh Communication & FRIDAY Core
