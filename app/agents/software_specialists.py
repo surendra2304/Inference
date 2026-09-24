@@ -29,11 +29,11 @@ def get_software_specialist_agents() -> list[Agent]:
                 "boundary conditions, error states, and security considerations before architecture begins."
             ),
             model_provider="gemini",
-            model_name="gemini-3.6-flash",
+            model_name="gemini-3.7-flash",
             models=[
-                AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="reasoning"),
-                AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="reasoning"),
-                AgentModelConfig(provider="cohere", model="command-a-plus-05-2026", capability="synthesis"),
+                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="reasoning"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
+                AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
             strengths=["requirements decomposition", "edge case identification", "acceptance criteria", "user story mapping"],
             weaknesses=["implementation details"]
@@ -49,10 +49,10 @@ def get_software_specialist_agents() -> list[Agent]:
                 "data contracts, and dependency graphs with explicit justification for design decisions."
             ),
             model_provider="nvidia",
-            model_name="nvidia/nemotron-3-ultra-550b-a55b",
+            model_name="nvidia/nemotron-3-super-120b-a12b",
             models=[
-                AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-ultra-550b-a55b", capability="reasoning"),
-                AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="reasoning"),
+                AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="reasoning"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
             ],
             strengths=["system topology", "clean architecture", "file manifest generation", "API schema definition"],
@@ -72,8 +72,8 @@ def get_software_specialist_agents() -> list[Agent]:
             model_name="openai/gpt-oss-120b",
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="coding"),
-                AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="coding"),
-                AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="coding"),
+                AgentModelConfig(provider="groq", model="qwen/qwen3.8-27b", capability="coding"),
+                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="coding"),
             ],
             strengths=["production code generation", "type safety", "idiomatic patterns", "efficient algorithms"],
             weaknesses=["high-level product roadmap decisions"]
@@ -88,12 +88,12 @@ def get_software_specialist_agents() -> list[Agent]:
                 "security flaws (OWASP Top 10), performance regressions, race conditions, edge case mishandling, and maintainability. "
                 "Provide constructive, prioritized line-by-line feedback and concrete remediation diffs."
             ),
-            model_provider="openrouter",
-            model_name="deepseek/deepseek-v4-flash:free",
+            model_provider="gemini",
+            model_name="gemini-3.7-flash",
             models=[
-                AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="review"),
-                AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="safety"),
-                AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-ultra-550b-a55b", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="review"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="review"),
+                AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
             strengths=["security vulnerability audit", "static analysis", "refactoring recommendations", "complexity reduction"],
             weaknesses=["generating code from scratch"]
@@ -109,11 +109,11 @@ def get_software_specialist_agents() -> list[Agent]:
                 "and async execution flows."
             ),
             model_provider="gemini",
-            model_name="gemini-3.6-flash",
+            model_name="gemini-3.7-flash",
             models=[
-                AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="coding"),
+                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="coding"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="coding"),
-                AgentModelConfig(provider="mistral", model="mistral-large-2411", capability="coding"),
+                AgentModelConfig(provider="groq", model="qwen/qwen3.8-27b", capability="coding"),
             ],
             strengths=["pytest test suites", "mocking and fixtures", "fuzz and property testing", "edge case assertion"],
             weaknesses=["high-level UI layout design"]
@@ -128,12 +128,12 @@ def get_software_specialist_agents() -> list[Agent]:
                 "developer-friendly markdown documentation. Include architecture diagrams, step-by-step installation guides, "
                 "endpoint specifications with example cURL payloads, and troubleshooting matrices."
             ),
-            model_provider="cohere",
-            model_name="command-a-plus-05-2026",
+            model_provider="gemini",
+            model_name="gemini-3.7-flash",
             models=[
-                AgentModelConfig(provider="cohere", model="command-a-plus-05-2026", capability="synthesis"),
-                AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="research"),
-                AgentModelConfig(provider="openrouter", model="deepseek/deepseek-v4-flash:free", capability="synthesis"),
+                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="synthesis"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="synthesis"),
+                AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="synthesis"),
             ],
             strengths=["technical documentation", "API references", "markdown tutorials", "architecture diagrams"],
             weaknesses=["executing raw code"]
@@ -148,12 +148,12 @@ def get_software_specialist_agents() -> list[Agent]:
                 "GitHub Actions workflows, Kubernetes manifests, reverse proxy configs (Nginx/Caddy), and infrastructure-as-code scripts. "
                 "Prioritize security, minimal image size, caching layers, and graceful zero-downtime rollouts."
             ),
-            model_provider="mistral",
-            model_name="mistral-large-2411",
+            model_provider="groq",
+            model_name="openai/gpt-oss-120b",
             models=[
-                AgentModelConfig(provider="mistral", model="mistral-large-2411", capability="reasoning"),
-                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="coding"),
-                AgentModelConfig(provider="gemini", model="gemini-3.6-flash", capability="reasoning"),
+                AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-3.7-flash", capability="reasoning"),
+                AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
             strengths=["Docker & containerization", "CI/CD pipeline automation", "Nginx/reverse proxies", "production hardening"],
             weaknesses=["frontend styling"]

@@ -19,14 +19,13 @@ CAPABILITY_KEYWORDS: dict[str, list[str]] = {
     "general": ["nemotron-3.5-lightning:free", "llama", "mistral"],
 }
 
-# Verified reliable default fallback free models on OpenRouter
 FALLBACK_FREE_MODELS: dict[str, str] = {
-    "coding": "nvidia/nemotron-3.5-lightning:free",
+    "coding": "liquid/lfm-2.5-2.6b:free",
     "reasoning": "nvidia/nemotron-3.5-lightning:free",
-    "research": "nvidia/nemotron-3.5-lightning:free",
-    "analysis": "nvidia/nemotron-3.5-lightning:free",
+    "research": "liquid/lfm-2.5-2.6b:free",
+    "analysis": "qwen/qwen3.8-27b:free",
     "security": "nvidia/nemotron-3.5-lightning:free",
-    "general": "nvidia/nemotron-3.5-lightning:free",
+    "general": "liquid/lfm-2.5-2.6b:free",
 }
 
 
@@ -34,12 +33,13 @@ class OpenRouterProvider(OpenAICompatibleProvider):
     """Adapter for OpenRouter multi-model aggregation API with dynamic capability matching."""
 
     BASE_URL = "https://openrouter.ai/api/v1"
-    DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning:free"
+    DEFAULT_MODEL = "liquid/lfm-2.5-2.6b:free"
     SUPPORTED_MODELS = [
-        "nvidia/nemotron-3.5-lightning:free",
         "liquid/lfm-2.5-2.6b:free",
+        "qwen/qwen3.8-27b:free",
+        "nvidia/nemotron-3.5-lightning:free",
+        "z-ai/glm-5.2:free",
         "poolside/laguna-s-2.1:free",
-        "dots-studio/dots-3-note-preview:free",
         "meta-llama/llama-3.3-70b-instruct",
     ]
 

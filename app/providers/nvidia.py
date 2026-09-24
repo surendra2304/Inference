@@ -3,13 +3,15 @@
 from app.core.config import settings
 from app.providers.openai_compatible import OpenAICompatibleProvider
 
-NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 
 NVIDIA_SUPPORTED_MODELS: list[str] = [
+    "nvidia/nemotron-3-super-120b-a12b",
     "nvidia/nemotron-3-ultra-550b-a55b",
+    "z-ai/glm-5.3",
+    "z-ai/glm-5.3-flash",
+    "meta/llama-3.2-11b-vision-instruct",
     "nvidia/nemotron-3.5-lightning-30b-a3b",
-    "nvidia/llama-3.1-nemotron-70b-instruct",
-    "mistralai/mistral-large-2-instruct",
     "nvidia/nemotron-3.5-content-safety",
 ]
 

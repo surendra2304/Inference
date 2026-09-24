@@ -25,13 +25,13 @@ class GeminiProvider(BaseLLMProvider):
     """Adapter for Google Gemini API via async HTTP."""
 
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-    DEFAULT_MODEL = "gemini-3.5-flash-lite"
+    DEFAULT_MODEL = "gemini-3.7-flash"
     SUPPORTED_MODELS = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.6-flash",
         "gemini-3.7-flash",
-        "gemini-3.1-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.8-flash",
         "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
     ]
 
     def __init__(self, api_key: str | None = None, default_model: str | None = None, timeout: float = 60.0) -> None:
@@ -131,6 +131,22 @@ class GeminiProvider(BaseLLMProvider):
             client = await get_shared_client()
             response = await client.post(url, headers=headers, json=payload, timeout=self.timeout)
             latency = time.perf_counter() - start_time
+
+            if response.status_code == 503 and model != "gemini-3.6-flash":
+                logger.warning(
+                    "Gemini model %s experienced 503 high demand; failing over to gemini-3.6-flash",
+                    model,
+                )
+                fallback_req = ProviderRequest(
+                    messages=request.messages,
+                    system_instruction=request.system_instruction,
+                    model="gemini-3.6-flash",
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                    response_schema=request.response_schema,
+                    extra_params=request.extra_params,
+                )
+                return await self.generate(fallback_req)
 
             if response.status_code in (429, 503):
                 logger.warning(

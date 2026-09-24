@@ -12,18 +12,18 @@ class ProviderPoolOptimizer:
     def __init__(self) -> None:
         # Task type -> Best providers ranked
         self.specializations: dict[str, list[str]] = {
-            "code_generation": ["groq", "openrouter", "gemini", "mistral"],
+            "code_generation": ["groq", "gemini", "nvidia", "openrouter"],
             "architecture": ["nvidia", "gemini", "groq", "openrouter"],
-            "debugging": ["groq", "openrouter", "gemini", "mistral"],
-            "review": ["openrouter", "gemini", "nvidia", "cohere"],
-            "documentation": ["cohere", "gemini", "openrouter", "mistral"],
+            "debugging": ["gemini", "groq", "nvidia", "openrouter"],
+            "review": ["gemini", "groq", "nvidia", "openrouter"],
+            "documentation": ["gemini", "groq", "nvidia", "openrouter"],
         }
         # Provider demotions: provider -> demoted_until_timestamp
         self._demotions: dict[str, float] = {}
         self._consecutive_failures: dict[str, int] = {}
         self._performance: dict[str, dict[str, Any]] = {
             p: {"successes": 10, "failures": 0, "avg_latency_ms": 250.0}
-            for p in ["gemini", "groq", "mistral", "openrouter", "nvidia", "cohere", "huggingface"]
+            for p in ["gemini", "groq", "nvidia", "openrouter"]
         }
 
     def get_optimal_provider(self, task_type: str = "code_generation") -> str:

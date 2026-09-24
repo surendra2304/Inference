@@ -14,7 +14,7 @@ class RecommendedStrategy(BaseModel):
     recommended_mode: str = Field(description="fast, review, debate")
     recommended_agents: list[str]
     recommended_provider: str = "gemini"
-    recommended_model: str = "gemini-3.5-flash-lite"
+    recommended_model: str = "gemini-3.7-flash"
     confidence: float = Field(ge=0.0, le=1.0)
     historical_score: float = Field(ge=0.0, le=1.0)
     sample_size: int = 1
@@ -34,7 +34,7 @@ class StrategyStore:
         agents: list[str],
         score: float,
         provider: str = "gemini",
-        model: str = "gemini-3.5-flash-lite"
+        model: str = "gemini-3.7-flash"
     ) -> None:
         """Stores or updates a winning orchestration pattern for a task category."""
         existing = await self.memory.get_strategy(task_type)

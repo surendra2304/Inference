@@ -22,43 +22,43 @@ class FallbackRoute(BaseModel):
     fallback_model: str
 
 
-# Explicit provider fallback configuration for the 7 active verified free providers
+# Explicit provider fallback configuration across active verified providers
 PROVIDER_FALLBACK_MATRIX: dict[str, FallbackRoute] = {
     "gemini": FallbackRoute(
         primary_provider="gemini",
-        fallback_provider="openrouter",
-        fallback_model="nvidia/nemotron-3.5-lightning:free"
+        fallback_provider="groq",
+        fallback_model="openai/gpt-oss-120b"
     ),
     "groq": FallbackRoute(
         primary_provider="groq",
         fallback_provider="nvidia",
-        fallback_model="nvidia/nemotron-3-ultra-550b-a55b"
+        fallback_model="nvidia/nemotron-3-super-120b-a12b"
     ),
-    "mistral": FallbackRoute(
-        primary_provider="mistral",
-        fallback_provider="openrouter",
-        fallback_model="nvidia/nemotron-3.5-lightning:free"
+    "nvidia": FallbackRoute(
+        primary_provider="nvidia",
+        fallback_provider="gemini",
+        fallback_model="gemini-3.7-flash"
     ),
     "openrouter": FallbackRoute(
         primary_provider="openrouter",
         fallback_provider="gemini",
-        fallback_model="gemini-3.6-flash"
+        fallback_model="gemini-3.7-flash"
+    ),
+    "mistral": FallbackRoute(
+        primary_provider="mistral",
+        fallback_provider="groq",
+        fallback_model="openai/gpt-oss-120b"
     ),
     "cohere": FallbackRoute(
         primary_provider="cohere",
-        fallback_provider="openrouter",
-        fallback_model="nvidia/nemotron-3.5-lightning:free"
+        fallback_provider="gemini",
+        fallback_model="gemini-3.7-flash"
     ),
     "huggingface": FallbackRoute(
         primary_provider="huggingface",
-        fallback_provider="openrouter",
-        fallback_model="nvidia/nemotron-3.5-lightning:free"
+        fallback_provider="gemini",
+        fallback_model="gemini-3.7-flash"
     ),
-    "nvidia": FallbackRoute(
-        primary_provider="nvidia",
-        fallback_provider="groq",
-        fallback_model="openai/gpt-oss-120b"
-    )
 }
 
 
