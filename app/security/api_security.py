@@ -1,3 +1,4 @@
+import hmac
 import time
 import uuid
 
@@ -5,20 +6,31 @@ from fastapi import Request, Response, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from app.core.config import settings
 from app.utils.logger import logger
 
 
 class APISecurityManager:
     """Manages API Keys, Rate Limiting per IP/Client, Input Sanitization, and Response Security."""
 
-    def __init__(self) -> None:
-        # Default production API keys
-        self._valid_api_keys: set[str] = {
-            "aiu_live_sec_9948271049281726",
-            "aiu_trading_bot_primary_key_2026",
-            "aiu_friday_integration_key_2026",
-            "test_api_key"
-        }
+    def __init__(self, valid_api_keys: set[str] | None = None) -> None:
+        # Never ship credentials in source. Load configured ecosystem keys at
+        # startup; explicit injection is available for isolated unit tests.
+        self._valid_api_keys = (
+            set(valid_api_keys)
+            if valid_api_keys is not None
+            else {
+                key
+                for key in (
+                    settings.INFERENCE_API_KEY,
+                    settings.inference_api_KEY,
+                    settings.FRIDAY_UNIVERSE_API_KEY,
+                    settings.X_FRIDAY_API_KEY,
+                    settings.FRIDAY_API_KEY,
+                )
+                if key
+            }
+        )
         # Rate limit tracking: ip -> list of timestamps
         self._rate_limits: dict[str, list] = {}
         self._rate_limit_max_requests = 120  # per minute
@@ -32,8 +44,12 @@ class APISecurityManager:
         if not api_key:
             return False
         # Remove 'Bearer ' prefix if present
-        clean_key = api_key.replace("Bearer ", "").strip()
-        return clean_key in self._valid_api_keys
+        clean_key = api_key.removeprefix("Bearer ").strip()
+        candidate = clean_key.encode("utf-8")
+        return any(
+            hmac.compare_digest(candidate, valid_key.encode("utf-8"))
+            for valid_key in self._valid_api_keys
+        )
 
     def check_rate_limit(self, client_ip: str) -> bool:
         """Enforces sliding-window rate limiting per IP."""

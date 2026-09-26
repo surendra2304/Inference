@@ -11,6 +11,11 @@ from app.version import VERSION
 health_router = APIRouter(tags=["Health & Monitoring"])
 
 
+def _active_specialist_count() -> int:
+    """Return the current registry size used by readiness and status routes."""
+    return len(agent_registry.list_agents())
+
+
 @health_router.get("/health", status_code=status.HTTP_200_OK)
 @health_router.head("/health", status_code=status.HTTP_200_OK)
 async def basic_health():
@@ -19,7 +24,7 @@ async def basic_health():
         "status": "healthy",
         "service": "inference-api",
         "version": VERSION,
-        "active_specialist_agents": 10,
+        "active_specialist_agents": _active_specialist_count(),
     }
 
 
@@ -45,7 +50,7 @@ async def detailed_health():
         "service": "inference-api",
         "version": VERSION,
         "app_env": production_config.APP_ENV,
-        "active_specialist_agents": 10,
+        "active_specialist_agents": _active_specialist_count(),
         "performance": monitor.get_api_metrics(),
         "cache": {
             "enabled": production_config.CACHE_ENABLED,
