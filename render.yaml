@@ -33,34 +33,34 @@ services:
       - key: FRIDAY_URL
         value: "https://friday-zw59.onrender.com"
       - key: FRIDAY_API_KEY
-        value: "friday_api"
+        sync: false
       - key: INFERENCE_API_KEY
-        value: "inference_api"
+        sync: false
       - key: MEMORA_URL
         value: "https://memora-cavc.onrender.com"
       - key: MEMORA_API_KEY
-        value: "memora_api"
+        sync: false
       - key: STRATEX_URL
         value: "https://stratex-8wj1.onrender.com"
       - key: STRATEX_API_KEY
-        value: "stratex_api"
+        sync: false
       - key: INTELX_URL
         value: "https://intelx-mygl.onrender.com"
       - key: INTELX_API_KEY
-        value: "intelx_api"
+        sync: false
       - key: FUTURIS_URL
         value: "https://futuris-th6f.onrender.com"
       - key: FUTURIS_API_KEY
-        value: "futuris_api"
+        sync: false
       - key: CORTEX_URL
         value: "https://cortex-0m7c.onrender.com"
       - key: CORTEX_API_KEY
-        value: "cortex_api"
+        sync: false
       - key: FORGE_URL
         value: "https://forge-e9kl.onrender.com"
       - key: FORGE_API_KEY
-        value: "forge_api"
+        sync: false
       - key: SENTINEL_URL
         value: "https://sentinel-a861.onrender.com"
       - key: SENTINEL_API_KEY
-        value: "sentinel_api"
+        sync: false

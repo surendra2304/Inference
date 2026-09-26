@@ -1,4 +1,5 @@
 import sys
+import os
 
 import requests
 
@@ -15,10 +16,14 @@ if not q.strip():
     sys.exit(0)
 
 print("\n[Inference Gateway] Routing to Multi-Agent Specialist Cluster...")
+api_key = os.getenv("INFERENCE_API_KEY") or os.getenv("FRIDAY_API_KEY")
+if not api_key:
+    print("Request not sent: configure INFERENCE_API_KEY or FRIDAY_API_KEY first.")
+    sys.exit(2)
 try:
     r = requests.post(
         "https://inference-r1sn.onrender.com/v1/friday/ask",
-        headers={"X-FRIDAY-API-Key": "inference_api"},
+        headers={"X-FRIDAY-API-Key": api_key},
         json={"question": q},
         timeout=120,
     )
