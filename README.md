@@ -126,6 +126,14 @@ cp .env.example .env
 # Edit .env and supply your API keys (GEMINI_API_KEY, GROQ_API_KEY, etc.)
 ```
 
+To inspect configured provider-key counts locally without printing credential
+values, run `python -m app.core.key_inventory` from this repository. The report
+counts deduplicated values recognized by the current settings model. It does not
+verify that credentials work, belong to separate provider accounts, or have
+available quota; those require separate provider checks. Do not hardcode the
+count in ecosystem manifests because the local and deployed environment pools
+can change independently.
+
 ### 3. Run the Service
 ```bash
 uvicorn app.main:app --reload --port 8000
