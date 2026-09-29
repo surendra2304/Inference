@@ -337,10 +337,31 @@ class ModelGateway:
             raise TimeoutError("Request deadline exceeded before fallback execution.")
 
         if failed_provider != "openrouter":
+            openrouter_key: str | None = None
+            openrouter_pool = self.key_pools.get("openrouter")
             try:
                 import app.providers
 
-                openrouter_prov = app.providers.get_provider("openrouter")
+                configured_keys = settings.get_provider_keys("openrouter")
+                if openrouter_pool is None:
+                    openrouter_pool = KeyPool("openrouter", configured_keys)
+                    self.key_pools["openrouter"] = openrouter_pool
+                elif openrouter_pool.total_keys_count == 0 and configured_keys:
+                    openrouter_pool.set_keys(configured_keys)
+
+                if openrouter_pool.total_keys_count:
+                    openrouter_key = openrouter_pool.choose()
+                    if openrouter_key is None:
+                        raise TemporaryUnavailableError(
+                            "All OpenRouter credentials are currently quarantined.",
+                            provider="openrouter",
+                        )
+                    openrouter_prov = app.providers.get_provider(
+                        "openrouter", api_key=openrouter_key
+                    )
+                else:
+                    # Some free OpenRouter routes permit unauthenticated calls.
+                    openrouter_prov = app.providers.get_provider("openrouter")
                 if hasattr(openrouter_prov, "get_best_free_model"):
                     dynamic_model = await openrouter_prov.get_best_free_model(capability)
                 elif hasattr(openrouter_prov, "find_model_by_capability"):
@@ -394,7 +415,20 @@ class ModelGateway:
                 return resp
 
             except Exception as fb_exc:
-                logger.error("OpenRouter dynamic fallback failed: %s", str(fb_exc))
+                typed_error = normalize_provider_exception(
+                    fb_exc, provider="openrouter", model=request.model
+                )
+                self.health_tracker.record_failure(
+                    "openrouter",
+                    type(typed_error).__name__,
+                    is_429=isinstance(typed_error, RateLimitError),
+                    is_503=isinstance(typed_error, TemporaryUnavailableError),
+                )
+                if openrouter_key and typed_error.is_retryable() and openrouter_pool:
+                    openrouter_pool.quarantine(openrouter_key, duration_seconds=60.0)
+                logger.error(
+                    "OpenRouter dynamic fallback failed (%s)", type(typed_error).__name__
+                )
 
         # 2. Check standard policy matrix fallback as second safeguard
         remaining = (deadline - time.monotonic()) if deadline else 60.0
