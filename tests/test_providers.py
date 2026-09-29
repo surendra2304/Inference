@@ -1,13 +1,12 @@
 """Unit tests for providers and model configurations."""
 
-import pytest
+from app.agents.roles import get_all_specialist_agents
+from app.agents.software_specialists import get_software_specialist_agents
 from app.providers.gemini import GeminiProvider
 from app.providers.groq import GroqProvider
 from app.providers.nvidia import NvidiaProvider
 from app.providers.openrouter import OpenRouterProvider
 from app.providers.unified_manager import unified_provider_manager
-from app.agents.roles import get_all_specialist_agents
-from app.agents.software_specialists import get_software_specialist_agents
 
 
 def test_gemini_defaults():

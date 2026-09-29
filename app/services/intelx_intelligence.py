@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from app.analytics.usage_analytics import usage_analytics
 from app.routing.consumer_router import consumer_router
+from app.utils.logger import logger
 
 IntelXRole = Literal[
     "planner",

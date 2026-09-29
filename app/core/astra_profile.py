@@ -8,6 +8,7 @@ never falsely claimed as a proprietary 'GPT-6' model.
 from __future__ import annotations
 
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 

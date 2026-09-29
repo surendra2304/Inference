@@ -22,7 +22,7 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Header, status
 
 from app.agents.base import Agent
 from app.agents.debate import debate_engine
@@ -30,7 +30,6 @@ from app.agents.registry import agent_registry
 from app.core.astra_profile import astra_profile
 from app.core.dag import TaskComplexity
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
-from app.schemas.trading_consult import TradingConsultRequest
 from app.schemas.v1_models import (
     DebateRequest,
     InferenceAskRequest,
@@ -39,12 +38,10 @@ from app.schemas.v1_models import (
     ProviderMetadata,
 )
 from app.security.prompt_isolation import (
-    detect_credentials,
     scrub_credentials,
     scrub_credentials_dict,
     wrap_untrusted_data,
 )
-from app.services.trading_consult_service import trading_consult_service
 from app.utils.logger import logger
 from app.version import VERSION
 
@@ -107,7 +104,7 @@ def _check_insufficient_data(text: str, context: dict[str, Any]) -> tuple[bool, 
     """Checks whether the query or context explicitly lacks required evidence/data."""
     missing: list[str] = []
     text_lower = text.lower()
-    
+
     indicators = [
         ("telemetry missing", "Historical trading telemetry data missing"),
         ("insufficient data", "Empirical evidence insufficient for high-confidence determination"),

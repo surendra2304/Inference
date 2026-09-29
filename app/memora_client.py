@@ -1,7 +1,6 @@
 """
 Universal Memora Client for Inference Multi-Model Deliberation Gateway
 """
-import os
 import sys
 from pathlib import Path
 

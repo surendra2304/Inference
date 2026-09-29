@@ -222,6 +222,8 @@ class GeminiProvider(BaseLLMProvider):
                 logger.error("Gemini network request failure: %s", type(exc).__name__)
                 raise RuntimeError(f"Gemini network connection error: {type(exc).__name__}") from exc
 
+        raise RuntimeError("Gemini request exhausted all retry attempts without a response.")
+
     async def stream(self, request: ProviderRequest) -> AsyncIterator[str]:
         """Stream generated chunks using Gemini Server-Sent Events (SSE)."""
         if not self.api_key:

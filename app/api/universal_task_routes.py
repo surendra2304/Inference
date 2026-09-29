@@ -6,10 +6,9 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, status
 from pydantic import BaseModel, Field
 
-from app.core.config import settings
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
 from app.utils.logger import logger
 

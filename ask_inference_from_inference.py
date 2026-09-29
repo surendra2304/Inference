@@ -1,4 +1,3 @@
-import os
 import subprocess
 import sys
 import time
@@ -18,7 +17,7 @@ def main():
     print("AGENT [9/9]: INFERENCE -> INFERENCE GATEWAY (5 QUESTIONS)")
     print("Client: Native ask.py CLI within d:\\FRIDAY Universe\\Inference")
     print("=" * 80)
-    
+
     results = []
     for i, q in enumerate(questions, 1):
         t0 = time.perf_counter()
@@ -27,7 +26,7 @@ def main():
             proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=90)
             lat = (time.perf_counter() - t0) * 1000
             out = proc.stdout
-            
+
             if proc.returncode == 0 and "INFERENCE RESPONSE:" in out:
                 ans_part = out.split("INFERENCE RESPONSE:")[1].split("=" * 60)[1].strip()
                 ans_snip = ans_part[:120].replace("\n", " ")
@@ -40,7 +39,7 @@ def main():
             lat = (time.perf_counter() - t0) * 1000
             print(f"[INFERENCE Q{i}/5] ERROR | {lat:>7.1f}ms | {e}")
             results.append({"q_num": i, "status": "ERROR", "latency_ms": round(lat, 1), "error": str(e)})
-            
+
     print("-" * 80)
     lats = [r["latency_ms"] for r in results if r["status"] == 200]
     if lats:

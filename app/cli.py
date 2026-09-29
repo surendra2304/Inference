@@ -203,16 +203,10 @@ def test_keys_cmd(
     concurrency: int = typer.Option(6, "--concurrency", "-c", help="Concurrent worker count"),
     provider: str | None = typer.Option(None, "--provider", "-p", help="Filter to a specific provider"),
 ):
-    """Test and verify all configured inference provider API keys in real-time."""
-    from scripts.test_all_keys import run_all_key_tests
-
-    asyncio.run(
-        run_all_key_tests(
-            mode=mode,
-            timeout=timeout,
-            specific_provider=provider,
-            concurrency=concurrency,
-        )
+    """Explain that the retired live key verification command is unavailable."""
+    del mode, timeout, concurrency, provider
+    raise typer.BadParameter(
+        "The live key verification script was removed. Use provider health endpoints to inspect configured providers."
     )
 
 

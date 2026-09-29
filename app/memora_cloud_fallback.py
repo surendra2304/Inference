@@ -16,7 +16,7 @@ class MemoraClient:
     """HTTP adapter for agent containers; it never writes to an agent-local DB."""
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None, timeout: float = 5.0):
-        self.base_url = (base_url or os.getenv("MEMORA_URL", "https://memora-cavc.onrender.com")).rstrip("/")
+        self.base_url = (base_url or os.getenv("MEMORA_URL") or "https://memora-cavc.onrender.com").rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
         self.last_error: str | None = None
@@ -82,7 +82,7 @@ class MemoraClient:
         return result if isinstance(result, list) else result.get("memories", []) if isinstance(result, dict) else []
 
     def recall_experience(self, agent_name: str, task_query: str, domain: str | None = None, limit: int = 5):
-        params = {"limit": limit}
+        params: dict[str, int | str] = {"limit": limit}
         if domain:
             params["domain"] = domain
         result = self._request(agent_name, f"/v1/memories/experience?{urllib.parse.urlencode(params)}")
