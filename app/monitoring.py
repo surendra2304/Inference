@@ -3,6 +3,7 @@
 import math
 import time
 from collections import defaultdict
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -30,11 +31,12 @@ class PerformanceMonitor:
         self.failed_requests = 0
         self.start_time = time.time()
 
-        # Provider metrics: provider_name -> {success: int, failure: int, latencies: []}
+        # Provider metrics: provider_name -> observations from this process only.
         self.provider_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {
             "success": 0,
             "failure": 0,
-            "latencies": []
+            "latencies": [],
+            "last_observed_at": None,
         })
 
         # Debate engine metrics
@@ -57,6 +59,7 @@ class PerformanceMonitor:
         else:
             stats["failure"] += 1
         stats["latencies"].append(latency_sec)
+        stats["last_observed_at"] = time.time()
         if len(stats["latencies"]) > 1000:
             stats["latencies"].pop(0)
 
@@ -96,13 +99,19 @@ class PerformanceMonitor:
         result = {}
         for p_name, stats in self.provider_stats.items():
             total = stats["success"] + stats["failure"]
-            success_rate = round((stats["success"] / total) * 100.0, 1) if total > 0 else 100.0
+            success_rate = round((stats["success"] / total) * 100.0, 1) if total > 0 else None
             avg_lat = round(sum(stats["latencies"]) / len(stats["latencies"]), 3) if stats["latencies"] else 0.0
             result[p_name] = {
                 "total_calls": total,
                 "success_rate_pct": success_rate,
                 "avg_latency_sec": avg_lat,
-                "status": "healthy" if success_rate >= 80.0 else "degraded"
+                "status": "unknown" if success_rate is None else "observed_ok" if success_rate >= 80.0 else "degraded",
+                "evidence_class": "observed_provider_calls",
+                "observed_at": (
+                    datetime.fromtimestamp(stats["last_observed_at"], UTC).isoformat()
+                    if stats["last_observed_at"] is not None
+                    else None
+                ),
             }
         return result
 

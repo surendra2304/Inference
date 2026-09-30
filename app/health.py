@@ -1,5 +1,7 @@
 """Production Health and Prometheus Metrics Endpoints."""
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Response, status
 
 from app.agents.registry import agent_registry
@@ -19,9 +21,12 @@ def _active_specialist_count() -> int:
 @health_router.get("/health", status_code=status.HTTP_200_OK)
 @health_router.head("/health", status_code=status.HTTP_200_OK)
 async def basic_health():
-    """Basic liveness health check."""
+    """Report process liveness only; no dependency readiness is implied."""
     return {
-        "status": "healthy",
+        "status": "responding",
+        "evidence_class": "process_liveness",
+        "evidence_scope": "This Inference process answered /health; providers, memory, and database readiness are not checked.",
+        "observed_at": datetime.now(UTC).isoformat(),
         "service": "inference-api",
         "version": VERSION,
         "active_specialist_agents": _active_specialist_count(),
@@ -30,11 +35,14 @@ async def basic_health():
 
 @health_router.get("/health/ready", status_code=status.HTTP_200_OK)
 async def readiness_check():
-    """Readiness probe checking memory and agent registry readiness."""
+    """Report registry configuration only, not end-to-end inference readiness."""
     agents = agent_registry.list_agents()
     ready = len(agents) >= 10
     return {
-        "status": "ready" if ready else "degraded",
+        "status": "registry_configured" if ready else "registry_incomplete",
+        "evidence_class": "agent_registry_configuration",
+        "evidence_scope": "Checks only the configured specialist registry count; provider, memory, and database readiness are not checked.",
+        "observed_at": datetime.now(UTC).isoformat(),
         "service": "inference-api",
         "version": VERSION,
         "ready": ready,
@@ -44,9 +52,12 @@ async def readiness_check():
 
 @health_router.get("/health/detailed", status_code=status.HTTP_200_OK)
 async def detailed_health():
-    """Detailed health status with live API metrics, cache performance, and concurrency."""
+    """Return a timestamped snapshot of this process, not a provider/dependency probe."""
     return {
-        "status": "healthy",
+        "status": "responding",
+        "evidence_class": "process_runtime_snapshot",
+        "evidence_scope": "This Inference process answered /health/detailed; external provider health is not checked here.",
+        "observed_at": datetime.now(UTC).isoformat(),
         "service": "inference-api",
         "version": VERSION,
         "app_env": production_config.APP_ENV,
@@ -78,6 +89,9 @@ async def provider_health():
         for prov, pool in model_gateway.key_pools.items()
     }
     return {
+        "evidence_class": "process_observed_provider_calls",
+        "evidence_scope": "Provider outcomes recorded by this Inference process; no direct provider probes are performed.",
+        "observed_at": datetime.now(UTC).isoformat(),
         "providers": monitor.get_provider_health(),
         "priority_chain": production_config.PROVIDER_PRIORITY,
         "key_pools": active_keys,

@@ -35,8 +35,9 @@ Content-Type: application/json
 
 ### A. Trading Bot Integration
 ```python
+import os
 from sdk.python.inference_client import AIUniverseClient
-client = AIUniverseClient(base_url="http://localhost:8000", api_key="key_trading_live_01")
+client = AIUniverseClient(base_url="http://localhost:8000", api_key=os.environ["INFERENCE_API_KEY"])
 
 # Query bounded advisory
 advisory = client.client.post("/v1/trading/consult", json={
