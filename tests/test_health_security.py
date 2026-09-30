@@ -22,14 +22,17 @@ def test_health_counts_follow_agent_registry(monkeypatch):
     assert detailed["active_specialist_agents"] == 19
 
 
-def test_health_readiness_reports_degraded_below_minimum(monkeypatch):
+def test_health_readiness_reports_incomplete_registry_below_minimum(monkeypatch):
     monkeypatch.setattr(agent_registry, "list_agents", lambda: [object() for _ in range(9)])
 
     ready = asyncio.run(readiness_check())
 
     assert ready["active_specialist_agents"] == 9
     assert ready["ready"] is False
-    assert ready["status"] == "degraded"
+    # Status labels the actual evidence: registry configuration only, not
+    # end-to-end provider/memory/database readiness.
+    assert ready["status"] == "registry_incomplete"
+    assert ready["evidence_class"] == "agent_registry_configuration"
 
 
 def test_security_manager_loads_only_configured_keys(monkeypatch):
