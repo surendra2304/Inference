@@ -8,12 +8,17 @@ services:
     envVars:
       - key: PORT
         value: "8000"
+      - key: HOST
+        value: "0.0.0.0"
       - key: APP_NAME
         value: "Inference"
       - key: APP_ENV
         value: "production"
+      # Absolute path: the container WORKDIR is /app. A relative
+      # "sqlite:///data/universe.db" resolves against whatever cwd uvicorn
+      # inherits, so the database can be created outside /app/data.
       - key: DATABASE_URL
-        value: "sqlite:///data/universe.db"
+        value: "sqlite:////app/data/universe.db"
       # Secure LLM API Key Pools (Prompt in Render Dashboard)
       - key: GEMINI_API_KEY
         sync: false

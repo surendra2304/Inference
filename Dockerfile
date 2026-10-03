@@ -28,4 +28,17 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
 
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4"]
+
+# Worker count. This service runs on Render's free plan (512MB RAM, 0.5 CPU).
+# It was hard-coded to `--workers 4`, which forks four copies of a process that
+# initialises a SQLite memory store and a provider key pool on startup. On a
+# 512MB instance that is an out-of-memory kill waiting for load, and the OOM
+# killer gives no useful log line — it is exactly the failure that made Forge's
+# CI go red in Phase A1.
+#
+# Free-tier CPU is shared and already the bottleneck (measured p95 latency of
+# ~12s), so extra workers buy no throughput here, they only multiply memory.
+# One worker is the correct default; raise WEB_CONCURRENCY only on a paid
+# instance that actually has the RAM for it.
+ENV WEB_CONCURRENCY=1
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1}"]
