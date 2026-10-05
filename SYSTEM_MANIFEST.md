@@ -11,7 +11,7 @@
 
 | Attribute | Repository configuration |
 | :--- | :--- |
-| **Configured Service URL** | [https://inference-r1sn.onrender.com](https://inference-r1sn.onrender.com) (current deployment state not verified here) |
+| **Configured Service URL** | [https://inference-h7bn.onrender.com](https://inference-h7bn.onrender.com) (current deployment state not verified here) |
 | **Configured Health Route** | `/health` (response is not proof of provider availability) |
 | **API key variable (keep value in secret environment)** | `INFERENCE_API_KEY` (set a unique secret outside source control) |
 | **Authentication Header** | `X-INFERENCE-API-KEY: <configured key>` or `Authorization: Bearer <configured key>` |
@@ -43,7 +43,7 @@ These variable names and URLs are configuration references, not proof of live co
 # ============================================================================== #
 
 # 1. ⚡ Inference AI Multi-Model Gateway (runtime-configured providers)
-INFERENCE_URL=https://inference-r1sn.onrender.com
+INFERENCE_URL=https://inference-h7bn.onrender.com
 INFERENCE_API_KEY=<configure locally; do not commit>
 
 # 2. 🧠 Memora cloud memory service (active backend/capacity not verified)
@@ -85,7 +85,7 @@ FRIDAY_API_KEY=<configure locally; do not commit>
 
 When opening this repository:
 * **Identity:** You are working inside **Inference** (d:\FRIDAY Universe\Inference).
-* **Configured Service URL:** https://inference-r1sn.onrender.com; confirm current deployment status in Render.
+* **Configured Service URL:** https://inference-h7bn.onrender.com; confirm current deployment status in Render.
 * **Authentication:** Incoming requests require the configured `INFERENCE_API_KEY`; use a unique strong secret per service.
 * **Verification:** Distinguish source tests, local integrations, mocked results, and live service evidence.
 * **Secrets:** Never commit live credentials or copy placeholder examples into service environments.

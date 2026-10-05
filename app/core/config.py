@@ -19,8 +19,14 @@ class Settings(BaseSettings):
     APP_ENV: str = "production"
     HOST: str = "127.0.0.1"
     PORT: int = 8000
-    LOG_LEVEL: str = "INFO"
-    CORS_ALLOWED_ORIGINS: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8000", "http://127.0.0.1:8000"])
+    CORS_ALLOWED_ORIGINS: list[str] = Field(default_factory=lambda: [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "https://inference-h7bn.onrender.com",
+    ])
+    INFERENCE_URL: str = Field(default="https://inference-h7bn.onrender.com", description="Canonical live deployment URL for Inference")
 
     # Security & Auth Configuration
     INSECURE_DEV_AUTH: bool = Field(default=False, description="Explicitly enable unauthenticated development mode (NEVER for production)")

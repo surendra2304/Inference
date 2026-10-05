@@ -21,8 +21,9 @@ if not api_key:
     print("Request not sent: configure INFERENCE_API_KEY or FRIDAY_API_KEY first.")
     sys.exit(2)
 try:
+    inference_url = os.getenv("INFERENCE_URL", "https://inference-h7bn.onrender.com").rstrip("/")
     r = requests.post(
-        "https://inference-r1sn.onrender.com/v1/friday/ask",
+        f"{inference_url}/v1/friday/ask",
         headers={"X-FRIDAY-API-Key": api_key},
         json={"question": q},
         timeout=120,
