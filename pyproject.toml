@@ -41,10 +41,16 @@ exclude = ["data*", "diary*", "docs*", "scripts*", "tests*"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
+# Single source of truth for pytest configuration. Historically a separate
+# pytest.ini existed alongside this section; pytest emits
+# "WARNING: ignoring pytest config in pyproject.toml!" and silently drops
+# asyncio_mode/addopts when it does. Merging them makes asyncio_mode="auto"
+# actually take effect.
 addopts = "-ra -q -p no:fugue_test -p no:fugue_test_fixtures"
-testpaths = [
-    "tests",
-]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
 asyncio_mode = "auto"
 
 [tool.ruff]
