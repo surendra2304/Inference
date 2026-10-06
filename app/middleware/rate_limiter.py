@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
+from app.core.security import resolve_client_ip
 from app.routing.consumer_router import consumer_router
 from app.utils.logger import logger
 
@@ -38,18 +39,22 @@ class EnhancedRateLimiterMiddleware(BaseHTTPMiddleware):
         # Identify consumer identity
         auth_header = request.headers.get("Authorization", "")
         api_key_header = request.headers.get("X-API-Key", "")
-        client_ip = request.client.host if request.client else "unknown"
+        # Resolve the originating client, not the reverse proxy that forwarded
+        # the request - otherwise every caller behind the proxy shares one bucket
+        # and a local proxy hands them all the localhost bypass.
+        client_ip = resolve_client_ip(request)
 
-        # Local testing / development exemption:
-        # Development bypass requires an explicit development setting or test runner detection;
-        # production behavior strictly requires authentication and enforces rate limits.
+        # Local testing / development exemption.
+        # Test detection uses the runner's own environment variable (set only in
+        # the pytest process; not influenceable by an HTTP caller) rather than
+        # `"pytest" in sys.modules`, which would silently disable rate limiting
+        # in any process that happened to import pytest.
         import os
-        import sys
 
-        is_test_env = "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST") is not None
+        is_test_env = os.environ.get("PYTEST_CURRENT_TEST") is not None
         is_dev_env = settings.APP_ENV in ("development", "test") or settings.INSECURE_DEV_AUTH or settings.ALLOW_DEV_RATE_LIMIT_BYPASS
 
-        if (is_test_env or is_dev_env) and client_ip in ("testclient", "127.0.0.1", "localhost"):
+        if (is_test_env or is_dev_env) and client_ip in ("testclient", "127.0.0.1", "::1", "localhost"):
             response = await call_next(request)
             response.headers["X-RateLimit-Limit"] = "10000"
             response.headers["X-RateLimit-Remaining"] = "9999"

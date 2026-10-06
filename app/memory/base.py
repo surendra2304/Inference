@@ -1,7 +1,7 @@
 """Base interface and data contracts for persistent memory storage."""
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -15,7 +15,7 @@ class MemoryRecord(BaseModel):
     memory_type: str = Field(default="fact", description="fact, experience, preference, decision, reflection")
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     context_tags: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -27,7 +27,7 @@ class TaskRecord(BaseModel):
     status: str = Field(default="pending", description="pending, running, completed, failed")
     result: str | None = None
     confidence: float | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -45,7 +45,7 @@ class RunRecord(BaseModel):
     latency_seconds: float = 0.0
     status: str = "completed"
     error: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class MessageRecord(BaseModel):
@@ -57,7 +57,7 @@ class MessageRecord(BaseModel):
     agent_id: str | None = None
     content: str
     stage: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class StrategyRecord(BaseModel):
@@ -70,7 +70,7 @@ class StrategyRecord(BaseModel):
     recommended_agents: list[str] = Field(default_factory=list)
     recommended_provider: str = "gemini"
     recommended_model: str = "gemini-3.8-flash"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -81,7 +81,7 @@ class ExperimentRecord(BaseModel):
     configuration: dict[str, Any] = Field(default_factory=dict)
     status: str = "completed"
     result: dict[str, Any] | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class BaseMemory(ABC):

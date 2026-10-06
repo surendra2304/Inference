@@ -1,6 +1,6 @@
 """Multi-Tenant Isolation, API Governance, Row-Level Tenant Security, and Deduplication."""
 
-import hashlib
+import secrets
 import time
 from typing import Any
 
@@ -78,6 +78,9 @@ class MultiTenantManager:
         # In-memory deduplication cache: hash -> (response_payload, expiry_timestamp)
         self.dedup_cache: dict[str, dict[str, Any]] = {}
         self.dedup_ttl_seconds = 300.0  # 5 minutes idempotency window
+        # request_id is caller-supplied and each entry retains a full response
+        # payload, so the cache needs a hard ceiling as well as a TTL.
+        self.max_dedup_entries = 5_000
 
     def extract_tenant_id(self, auth_header: str | None, api_key: str | None) -> str:
         token = (api_key or auth_header or "").strip()
@@ -105,14 +108,34 @@ class MultiTenantManager:
         return True
 
     def rotate_tenant_key(self, tenant_id: str, old_key: str) -> str:
-        """Rotates a tenant API key securely."""
+        """Rotates a tenant API key after proving possession of the current one.
+
+        The caller MUST present a key that is presently active for the tenant.
+        Previously any value was accepted (and silently appended), which meant an
+        unauthenticated caller could mint unlimited tenant keys. Now:
+          * unknown tenant        -> ValueError    (404/400)
+          * old_key not active    -> PermissionError (403)
+          * success               -> exactly one key swapped, so `active_keys`
+                                     cannot grow without bound.
+        """
         policy = self.tenants.get(tenant_id)
         if not policy:
             raise ValueError(f"Tenant '{tenant_id}' not found.")
-        new_key = f"key_{tenant_id}_{hashlib.sha256(str(time.time()).encode()).hexdigest()[:12]}"
-        if old_key in policy.active_keys:
-            policy.active_keys.remove(old_key)
+
+        if old_key not in policy.active_keys:
+            logger.warning(
+                "Tenant key rotation rejected: presented key is not active for tenant '%s'",
+                tenant_id,
+            )
+            raise PermissionError(
+                "Presented 'old_key' is not an active key for this tenant."
+            )
+
+        # CSPRNG: a credential must not be derived from a predictable timestamp.
+        new_key = f"key_{tenant_id}_{secrets.token_hex(8)}"
+        policy.active_keys.remove(old_key)
         policy.active_keys.append(new_key)
+        logger.info("Tenant '%s' API key rotated successfully.", tenant_id)
         return new_key
 
     def check_deduplication(self, request_id: str) -> dict[str, Any] | None:
@@ -127,6 +150,21 @@ class MultiTenantManager:
         return None
 
     def store_deduplication(self, request_id: str, response_payload: dict[str, Any]) -> None:
+        if len(self.dedup_cache) >= self.max_dedup_entries:
+            # Prefer dropping entries that are already expired, then the
+            # soonest-to-expire, so the freshest idempotency window survives.
+            now = time.time()
+            for rid, entry in list(self.dedup_cache.items()):
+                if now >= entry["expires_at"]:
+                    del self.dedup_cache[rid]
+            if len(self.dedup_cache) >= self.max_dedup_entries:
+                soonest_expiry = sorted(
+                    self.dedup_cache.items(), key=lambda kv: kv[1]["expires_at"]
+                )
+                overflow = len(self.dedup_cache) - self.max_dedup_entries + 1
+                for rid, _ in soonest_expiry[:max(1, overflow)]:
+                    del self.dedup_cache[rid]
+
         self.dedup_cache[request_id] = {
             "response": response_payload,
             "expires_at": time.time() + self.dedup_ttl_seconds

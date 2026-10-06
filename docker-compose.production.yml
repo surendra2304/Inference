@@ -1,78 +1,52 @@
-version: '3.8'
+# Production stack for Inference.
+#
+# This file previously described an architecture the application does not
+# implement, which made it impossible to start:
+#   * nginx/ was referenced as a bind mount but the directory does not exist,
+#     so the nginx container had no configuration;
+#   * api-1/2-3 published no ports at all - nginx was meant to front them, so
+#     with nginx unstartable the stack exposed nothing;
+#   * `env_file: .env` is hard-required while the repository ships
+#     .env.example, so `docker compose up` failed before building anything;
+#   * redis and postgres were provisioned but nothing in app/ connects to
+#     them - the service reads SQLite (settings.DATABASE_URL defaults to
+#     sqlite:///data/universe.db) and no Redis/Postgres driver is even
+#     declared in requirements.txt.
+#
+# The application is a single uvicorn process with a SQLite store, so that is
+# what this file now provisions: one API container with a published port and a
+# persistent data volume.
 
 services:
-  nginx:
-    image: nginx:alpine
+  api:
+    build: .
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - api-1
-      - api-2
-      - api-3
-    restart: always
-
-  api-1:
-    build: .
+      - "8000:8000"
     environment:
-      - APP_ENV=production
-      - PORT=8000
-      - REDIS_URL=redis://redis:6379/0
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/inference
+      APP_ENV: production
+      PORT: "8000"
+      # Matches settings.DATABASE_URL's default so state lands in the volume.
+      DATABASE_URL: sqlite:///data/universe.db
+      WEB_CONCURRENCY: "1"
+    # Optional so `docker compose up` works on a fresh clone. Copy
+    # .env.example to .env to supply provider keys - without them the service
+    # starts and answers /health, but model calls fail closed with 503.
     env_file:
-      - .env
-    depends_on:
-      - redis
-      - postgres
-    restart: always
-
-  api-2:
-    build: .
-    environment:
-      - APP_ENV=production
-      - PORT=8000
-      - REDIS_URL=redis://redis:6379/0
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/inference
-    env_file:
-      - .env
-    depends_on:
-      - redis
-      - postgres
-    restart: always
-
-  api-3:
-    build: .
-    environment:
-      - APP_ENV=production
-      - PORT=8000
-      - REDIS_URL=redis://redis:6379/0
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/inference
-    env_file:
-      - .env
-    depends_on:
-      - redis
-      - postgres
-    restart: always
-
-  redis:
-    image: redis:7-alpine
-    restart: always
+      - path: .env
+        required: false
     volumes:
-      - redis-data:/data
-
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=inference
-    volumes:
-      - pg-data:/var/lib/postgresql/data
-    restart: always
+      - inference-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
 
 volumes:
-  redis-data:
-  pg-data:
+  inference-data:

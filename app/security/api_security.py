@@ -1,4 +1,5 @@
 import hmac
+import os
 import time
 import uuid
 
@@ -7,6 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.security import resolve_client_ip
 from app.utils.logger import logger
 
 
@@ -35,6 +37,9 @@ class APISecurityManager:
         self._rate_limits: dict[str, list] = {}
         self._rate_limit_max_requests = 120  # per minute
         self._rate_limit_window = 60.0  # seconds
+        # Distinct client IPs are effectively unbounded; without a ceiling this
+        # dict grows forever even though each individual window is pruned.
+        self._max_tracked_ips = 10_000
 
         # Suspicious / Blocked IPs
         self._blocked_ips: set[str] = set()
@@ -53,11 +58,40 @@ class APISecurityManager:
 
     def check_rate_limit(self, client_ip: str) -> bool:
         """Enforces sliding-window rate limiting per IP."""
-        if client_ip in ("testclient", "127.0.0.1", "localhost"):
+        if client_ip == "testclient":
+            # Test-harness identity, not a routable address.
             return True
+        if client_ip in ("127.0.0.1", "::1", "localhost"):
+            # The loopback bypass is opt-in. Without a gate, deploying this
+            # service behind a loopback reverse proxy with APP_ENV=development
+            # (the value .env.example used to ship) disabled rate limiting for
+            # every caller at once.
+            explicitly_dev = (
+                os.environ.get("PYTEST_CURRENT_TEST") is not None
+                or settings.APP_ENV in ("development", "test")
+                or settings.INSECURE_DEV_AUTH
+                or settings.ALLOW_DEV_RATE_LIMIT_BYPASS
+            )
+            if explicitly_dev:
+                return True
         now = time.time()
         if client_ip in self._blocked_ips:
             return False
+
+        # Bound cardinality before recording this IP: expire idle buckets, and
+        # if still at capacity evict the least-recently active ones.
+        if len(self._rate_limits) >= self._max_tracked_ips:
+            cutoff = now - self._rate_limit_window
+            for ip, ts in list(self._rate_limits.items()):
+                if not ts or ts[-1] < cutoff:
+                    self._rate_limits.pop(ip, None)
+            if len(self._rate_limits) >= self._max_tracked_ips:
+                oldest_first = sorted(
+                    self._rate_limits.items(),
+                    key=lambda kv: kv[1][-1] if kv[1] else 0.0,
+                )
+                for ip, _ in oldest_first[: max(1, self._max_tracked_ips // 10)]:
+                    self._rate_limits.pop(ip, None)
 
         timestamps = self._rate_limits.get(client_ip, [])
         # Filter out timestamps outside window
@@ -89,7 +123,9 @@ class ProductionSecurityMiddleware(BaseHTTPMiddleware):
     """Middleware enforcing security headers, request size limits, and basic rate control."""
 
     async def dispatch(self, request: Request, call_next):
-        client_ip = request.client.host if request.client else "127.0.0.1"
+        # Never default an unknown client to loopback: that would lump every
+        # unidentified caller into one bucket and grant it localhost treatment.
+        client_ip = resolve_client_ip(request)
 
         # 1. IP Block / Rate limit check
         if not security_manager.check_rate_limit(client_ip):
@@ -100,7 +136,13 @@ class ProductionSecurityMiddleware(BaseHTTPMiddleware):
 
         # 2. Request body size check (Max 2MB)
         content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > 2 * 1024 * 1024:
+        try:
+            content_length_bytes = int(content_length) if content_length else 0
+        except ValueError:
+            # A malformed Content-Length must not crash the middleware; treat it
+            # as oversized rather than letting int() raise a 500.
+            content_length_bytes = 2 * 1024 * 1024 + 1
+        if content_length_bytes > 2 * 1024 * 1024:
             return JSONResponse(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 content={"detail": "Request payload exceeds 2MB limit."}

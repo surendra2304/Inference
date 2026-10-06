@@ -42,6 +42,11 @@ class UnifiedExecutionResponse(BaseModel):
     timestamp: float
     token_usage: dict[str, int] = Field(default_factory=dict)
     status: str = "success"
+    # Honest degradation signalling: consumers MUST check this instead of assuming
+    # a non-empty `content` means a model actually answered. When True, `content`
+    # is empty and `error` carries the real reason no model could be reached.
+    degraded: bool = False
+    error: str | None = None
 
 
 class UnifiedProviderManager:
@@ -219,19 +224,24 @@ class UnifiedProviderManager:
                 status="success",
             )
         except Exception as exc:
-            logger.warning("Provider %s failed, generating fallback response: %s", target_provider, exc)
             elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
-            # Safe structured fallback
-            fallback_content = f"[{req.agent_role or 'Assistant'}] Analysis completed for prompt: {req.prompt[:150]}... Response synthesized under standard operating protocols."
+            # NO SYNTHESIZED ANSWER. A provider failure is not a result: we return an
+            # explicitly degraded response with empty content and no token counts so
+            # callers cannot mistake "no model ran" for "the model answered".
+            logger.warning(
+                "Provider %s failed with no model output (degraded): %s", target_provider, exc
+            )
             return UnifiedExecutionResponse(
                 provider_used=target_provider,
-                model_used=target_model or "fallback-model",
+                model_used=target_model or "none",
                 agent_role=req.agent_role or "general",
-                content=fallback_content,
+                content="",
                 latency_ms=elapsed_ms,
                 timestamp=time.time(),
-                token_usage={"total_tokens": 120},
-                status="fallback_success",
+                token_usage={},
+                status="degraded",
+                degraded=True,
+                error=f"{target_provider}: {type(exc).__name__}: {exc}",
             )
 
 

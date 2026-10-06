@@ -116,6 +116,17 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
             exec_res = await unified_provider_manager.execute(exec_req)
             elapsed_s = round(time.perf_counter() - start_t, 4)
 
+            # Honest degradation gate: never report 0.98 confidence, never invent
+            # token counts from word count, and never cache a non-answer.
+            if exec_res.degraded:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=(
+                        "FRIDAY fast-lane degraded: no model provider produced output "
+                        f"({exec_res.error or 'all providers failed'}). No answer fabricated."
+                    ),
+                )
+
             run_id = f"deb_{uuid.uuid4().hex[:12]}"
             task_id = f"task_{uuid.uuid4().hex[:12]}"
 
@@ -149,6 +160,10 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
                     ttl=600.0,
                 )
             return resp
+        except HTTPException:
+            # Deliberate degradation signal (e.g. no model produced output) is a
+            # real answer to the caller: do not swallow it into the DAG fallback.
+            raise
         except Exception as fast_err:
             logger.warning("Fast-lane direct dispatch failed, falling back to DAG: %s", fast_err)
 

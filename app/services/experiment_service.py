@@ -86,7 +86,7 @@ class ExperimentService:
             exp["consultations"][arm_upper] += 1
             exp["latest_telemetry"][arm_upper] = telemetry
             exp["telemetry_history"][arm_upper].append({
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "decision_id": decision_id,
                 "telemetry": telemetry
             })

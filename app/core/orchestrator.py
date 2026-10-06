@@ -51,6 +51,11 @@ class OrchestrationResult(BaseModel):
     complexity: str = "simple"
     total_tokens: int = 0
     total_latency_seconds: float = 0.0
+    # Honest self-healing metadata (peer coverage / degraded synthesis)
+    degraded: bool = False
+    degradation_reasons: list[str] = Field(default_factory=list)
+    agent_coverage: dict[str, str] = Field(default_factory=dict)
+    failed_agents: list[str] = Field(default_factory=list)
 
 
 class BaseOrchestrator(ABC):
@@ -256,6 +261,17 @@ class Orchestrator(BaseOrchestrator):
             task_record.metadata["unresolved_disagreements"] = collab_result.unresolved_disagreements
             task_record.metadata["complexity"] = complexity.value
             task_record.metadata["models_used"] = collab_result.models_used
+            # Persist honest degradation state alongside the result so the audit
+            # trail can never claim a fully healthy run that was not.
+            task_record.metadata["degraded"] = collab_result.degraded
+            task_record.metadata["degradation_reasons"] = collab_result.degradation_reasons
+            task_record.metadata["agent_coverage"] = collab_result.agent_coverage
+            task_record.metadata["failed_agents"] = collab_result.failed_agents
+            if collab_result.degraded:
+                logger.warning(
+                    "Task %s completed in DEGRADED state: %s",
+                    task_id, "; ".join(collab_result.degradation_reasons) or "see failed_agents"
+                )
             self._recent_tasks[task_id] = task_record
             try:
                 asyncio.create_task(self.memory.save_task(task_record))
@@ -281,7 +297,11 @@ class Orchestrator(BaseOrchestrator):
                 adjudication=collab_result.adjudication,
                 complexity=complexity.value,
                 total_tokens=collab_result.total_tokens,
-                total_latency_seconds=round(latency, 4)
+                total_latency_seconds=round(latency, 4),
+                degraded=collab_result.degraded,
+                degradation_reasons=collab_result.degradation_reasons,
+                agent_coverage=collab_result.agent_coverage,
+                failed_agents=collab_result.failed_agents,
             )
 
         except (asyncio.CancelledError, Exception) as exc:

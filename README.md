@@ -139,6 +139,20 @@ can change independently.
 uvicorn app.main:app --reload --port 8000
 ```
 
+### 4. Or Run It With Docker Compose
+```bash
+# Optional but recommended: supply provider keys
+cp .env.example .env
+
+docker compose -f docker-compose.production.yml up --build
+# API on http://localhost:8000  (health: /health, dashboard: /ui)
+```
+
+The compose file provisions a single API container with a persistent volume at
+`/app/data` for the SQLite store. The `.env` file is optional at start-up: the
+container boots and serves `/health` without it, but model calls fail closed
+with `503` until provider keys are configured.
+
 ---
 
 ## 📚 Documentation

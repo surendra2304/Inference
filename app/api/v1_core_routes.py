@@ -22,7 +22,7 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Header, status
+from fastapi import APIRouter, Header, HTTPException, status
 
 from app.agents.base import Agent
 from app.agents.debate import debate_engine
@@ -38,14 +38,44 @@ from app.schemas.v1_models import (
     ProviderMetadata,
 )
 from app.security.prompt_isolation import (
-    scrub_credentials,
+    CredentialLeakError,
+    detect_credentials,
     scrub_credentials_dict,
+    scrub_credentials_verified,
     wrap_untrusted_data,
 )
 from app.utils.logger import logger
 from app.version import VERSION
 
 v1_router = APIRouter(prefix="/v1", tags=["Inference v1 Core Protocol"])
+
+
+def _scrub_and_verify(raw_text: str, context: Any, trace_id: str) -> tuple[str, Any]:
+    """Scrub credentials from prompt and context, then prove none survived.
+
+    `detect_credentials` is the audit for `scrub_credentials`: if it still
+    reports a credential after scrubbing, forwarding the request would violate
+    prompt_isolation's invariant that confidential material never reaches a
+    model provider, so the request is refused instead.
+    """
+    try:
+        clean_text = scrub_credentials_verified(raw_text, field="prompt")
+        clean_context = scrub_credentials_dict(context)
+    except CredentialLeakError as exc:
+        logger.error("Trace %s refused: %s", trace_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Request refused: a credential could not be sanitized.",
+        ) from exc
+
+    residual = detect_credentials({"prompt": clean_text, "context": clean_context})
+    if residual:
+        logger.error("Trace %s refused; residual credentials: %s", trace_id, residual)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Request refused: a credential could not be sanitized.",
+        )
+    return clean_text, clean_context
 
 
 @v1_router.get("/health", status_code=status.HTTP_200_OK)
@@ -130,7 +160,6 @@ def _check_insufficient_data(text: str, context: dict[str, Any]) -> tuple[bool, 
 @v1_router.post("/ask", response_model=InferenceTaskResponse, status_code=status.HTTP_200_OK)
 async def ask_v1(
     request: InferenceAskRequest,
-    x_friday_api_key: str | None = Header(None, alias="X-FRIDAY-API-Key"),
     x_trace_id: str | None = Header(None, alias="X-Trace-ID"),
 ) -> InferenceTaskResponse:
     """Deliberative reasoning endpoint compatible with FRIDAY TaskEnvelope.
@@ -142,9 +171,9 @@ async def ask_v1(
     task_id = request.task_id or f"task_{uuid.uuid4().hex[:12]}"
     trace_id = request.trace_id or x_trace_id or f"trace_{uuid.uuid4().hex[:8]}"
 
-    # 1. Security: Scrub confidential credentials from prompt and context
-    clean_prompt = scrub_credentials(raw_prompt)
-    clean_context = scrub_credentials_dict(request.context)
+    # 1. Security: Scrub confidential credentials from prompt and context,
+    #    verifying afterwards that none survived.
+    clean_prompt, clean_context = _scrub_and_verify(raw_prompt, request.context, trace_id)
 
     # 2. Wrap untrusted data if provided
     if request.untrusted_data:
@@ -201,6 +230,46 @@ async def ask_v1(
         )
         resp = await unified_provider_manager.execute(exec_req)
         latency_ms = int((time.perf_counter() - start_time) * 1000)
+
+        # ── Honest degradation gate ────────────────────────────────────────────────
+        # If no model produced output we must NOT report SUCCESS, must not claim
+        # empirical verification, and must not assign a confident score. The
+        # evidence policy (STRICT_EMPIRICAL) requires returning uncertainty here.
+        if resp.degraded:
+            logger.warning(
+                "[V1_ASK] degraded (no model output): %s", resp.error or "unknown provider failure"
+            )
+            return InferenceTaskResponse(
+                task_id=task_id,
+                trace_id=trace_id,
+                answer=(
+                    "No model provider could be reached for this request, so Inference "
+                    "deliberated with zero evidence. No answer is asserted rather than "
+                    "fabricating a conclusion."
+                ),
+                reasoning_summary=(
+                    f"Deliberation halted: all model calls failed ({resp.error}). "
+                    "Per STRICT_EMPIRICAL policy, low confidence is returned instead of a guess."
+                ),
+                confidence=0.0,
+                uncertainty=1.0,
+                evidence=[],
+                agents_used=["astra_council"],
+                recommendations=[
+                    "Configure a provider API key (GEMINI_API_KEYS / GROQ_API_KEYS, etc.)",
+                    f"Inspect provider health at /health/providers (failed: {resp.provider_used})",
+                    "Retry once the provider pool reports active keys",
+                ],
+                proposed_actions=[],
+                authorization_required=False,
+                provider_metadata=ProviderMetadata(
+                    provider=resp.provider_used,
+                    model=resp.model_used,
+                    latency_ms=latency_ms,
+                ),
+                failure_state=resp.error or "all_provider_calls_failed",
+                status="DEGRADED",
+            )
 
         # Formulate advisory proposed actions
         advisory_actions: list[ProposedAction] = []
@@ -269,7 +338,6 @@ async def ask_v1(
 @v1_router.post("/debate", response_model=InferenceTaskResponse, status_code=status.HTTP_200_OK)
 async def debate_v1(
     request: DebateRequest,
-    x_friday_api_key: str | None = Header(None, alias="X-FRIDAY-API-Key"),
     x_trace_id: str | None = Header(None, alias="X-Trace-ID"),
 ) -> InferenceTaskResponse:
     """Multi-agent deliberative debate across the 6 canonical roles.
@@ -282,9 +350,8 @@ async def debate_v1(
     task_id = request.task_id or f"task_{uuid.uuid4().hex[:12]}"
     trace_id = request.trace_id or x_trace_id or f"trace_{uuid.uuid4().hex[:8]}"
 
-    # 1. Security: Scrub credentials and wrap untrusted data
-    clean_topic = scrub_credentials(topic)
-    clean_context = scrub_credentials_dict(request.context)
+    # 1. Security: Scrub credentials (verified) and wrap untrusted data
+    clean_topic, clean_context = _scrub_and_verify(topic, request.context, trace_id)
 
     if request.untrusted_data:
         isolated_data = wrap_untrusted_data(request.untrusted_data, source=request.untrusted_data_source)
