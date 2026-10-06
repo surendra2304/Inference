@@ -1,10 +1,12 @@
-﻿.git
+.git
 .github
 .vscode
 .idea
 .env
 *.env
 *.env.*
+.venv
+venv
 __pycache__
 *.pyc
 *.pyo
@@ -16,3 +18,4 @@ tests
 data/*
 *.log
 logs/*
+PHASE0-2_REPORT.md
