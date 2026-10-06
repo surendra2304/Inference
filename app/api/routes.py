@@ -2,10 +2,12 @@
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from app.agents.debate import AgentPanelUnavailable
 from app.core.orchestrator import OrchestrationRequest, orchestrator
+from app.core.security import require_inference_api_key
 
 router = APIRouter()
 
@@ -35,6 +37,14 @@ class AskResponse(BaseModel):
     total_tokens: int
     unresolved_disagreements: list[str] = Field(default_factory=list)
     key_evidence: list[str] = Field(default_factory=list)
+    # Self-healing / honest-degradation metadata
+    degraded: bool = False
+    degradation_reasons: list[str] = Field(default_factory=list)
+    agent_coverage: dict[str, str] = Field(
+        default_factory=dict,
+        description="original_agent_id -> covering peer agent id, when a specialist had to be covered",
+    )
+    failed_agents: list[str] = Field(default_factory=list)
 
 
 class DebateRequest(BaseModel):
@@ -60,9 +70,13 @@ class DebateResponse(BaseModel):
     key_evidence: list[str] = Field(default_factory=list)
     total_tokens: int = 0
     latency_seconds: float = 0.0
+    degraded: bool = False
+    degradation_reasons: list[str] = Field(default_factory=list)
+    agent_coverage: dict[str, str] = Field(default_factory=dict)
+    failed_agents: list[str] = Field(default_factory=list)
 
 
-@router.post("/ask", response_model=AskResponse, status_code=status.HTTP_200_OK)
+@router.post("/ask", response_model=AskResponse, status_code=status.HTTP_200_OK, dependencies=[Depends(require_inference_api_key)])
 async def ask_question(request: AskRequest) -> AskResponse:
     """Submit a question to the Inference orchestrator (auto-routes to Fast, Review, or Debate)."""
     if not request.question.strip():
@@ -95,7 +109,19 @@ async def ask_question(request: AskRequest) -> AskResponse:
             latency_seconds=result.total_latency_seconds,
             total_tokens=result.total_tokens,
             unresolved_disagreements=result.unresolved_disagreements,
-            key_evidence=result.key_evidence
+            key_evidence=result.key_evidence,
+            degraded=result.degraded,
+            degradation_reasons=result.degradation_reasons,
+            agent_coverage=result.agent_coverage,
+            failed_agents=result.failed_agents,
+        )
+    except AgentPanelUnavailable as exc:
+        # Every specialist (and every peer that tried to cover) went dark.
+        # 503 Service Unavailable is the truthful status: the service could not
+        # perform the requested inference, and we refuse to fabricate an answer.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
         )
     except Exception as exc:
         raise HTTPException(
@@ -104,7 +130,7 @@ async def ask_question(request: AskRequest) -> AskResponse:
         )
 
 
-@router.post("/debate", response_model=DebateResponse, status_code=status.HTTP_200_OK)
+@router.post("/debate", response_model=DebateResponse, status_code=status.HTTP_200_OK, dependencies=[Depends(require_inference_api_key)])
 async def trigger_debate(request: DebateRequest) -> DebateResponse:
     """Explicitly trigger the 6-Round Structured Multi-Agent Debate Engine."""
     if not request.question.strip():
@@ -136,7 +162,16 @@ async def trigger_debate(request: DebateRequest) -> DebateResponse:
             unresolved_disagreements=result.unresolved_disagreements,
             key_evidence=result.key_evidence,
             total_tokens=result.total_tokens,
-            latency_seconds=result.total_latency_seconds
+            latency_seconds=result.total_latency_seconds,
+            degraded=result.degraded,
+            degradation_reasons=result.degradation_reasons,
+            agent_coverage=result.agent_coverage,
+            failed_agents=result.failed_agents,
+        )
+    except AgentPanelUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
         )
     except Exception as exc:
         raise HTTPException(
@@ -145,7 +180,7 @@ async def trigger_debate(request: DebateRequest) -> DebateResponse:
         )
 
 
-@router.get("/tasks/{task_id}")
+@router.get("/tasks/{task_id}", dependencies=[Depends(require_inference_api_key)])
 async def get_task(task_id: str):
     """Retrieve details and state of a task by ID."""
     status_data = await orchestrator.get_task_status(task_id)
@@ -184,7 +219,7 @@ class ExperimentTriggerRequest(BaseModel):
     providers_to_test: list[str] | None = None
 
 
-@router.post("/experiments", status_code=status.HTTP_200_OK)
+@router.post("/experiments", status_code=status.HTTP_200_OK, dependencies=[Depends(require_inference_api_key)])
 async def trigger_experiment(request: ExperimentTriggerRequest):
     """Trigger an automated benchmark or comparison experiment."""
     from app.experiments.harness import benchmark_harness
@@ -218,7 +253,7 @@ async def trigger_experiment(request: ExperimentTriggerRequest):
         )
 
 
-@router.get("/experiments/{experiment_id}")
+@router.get("/experiments/{experiment_id}", dependencies=[Depends(require_inference_api_key)])
 async def get_experiment(experiment_id: str):
     """Retrieve details and results of an experiment by ID."""
     record = await orchestrator.memory.get_experiment(experiment_id)

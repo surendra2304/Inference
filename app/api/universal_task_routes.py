@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Header, status
+from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
@@ -64,8 +64,6 @@ class AstraReasonResponse(BaseModel):
 @task_router.post("/v1/task/execute", response_model=TaskResultModel, status_code=status.HTTP_200_OK)
 async def execute_task(
     envelope: TaskEnvelopeModel,
-    x_friday_api_key: str | None = Header(None, alias="X-FRIDAY-API-Key"),
-    authorization: str | None = Header(None),
 ) -> TaskResultModel:
     """Execute a structured TaskEnvelope from any peer agent in the FRIDAY Universe."""
     t0 = time.time()
@@ -90,6 +88,22 @@ async def execute_task(
         )
         resp = await unified_provider_manager.execute(req)
         lat = int((time.time() - t0) * 1000)
+
+        if resp.degraded:
+            return TaskResultModel(
+                task_id=envelope.task_id,
+                target_agent="inference",
+                status="DEGRADED",
+                error=resp.error or "all provider calls failed",
+                result={
+                    "response": "",
+                    "model_used": resp.model_used,
+                    "provider_used": resp.provider_used,
+                    "token_usage": {},
+                },
+                summary="No model provider produced output; no answer fabricated.",
+                execution_time_ms=lat,
+            )
 
         return TaskResultModel(
             task_id=envelope.task_id,
@@ -133,6 +147,20 @@ async def astra_reason(request: AstraReasonRequest) -> AstraReasonResponse:
         )
         resp = await unified_provider_manager.execute(req)
         lat = int((time.time() - t0) * 1000)
+
+        if resp.degraded:
+            return AstraReasonResponse(
+                task_id=f"astra_deg_{uuid.uuid4().hex[:8]}",
+                synthesis=(
+                    "No model provider produced output for this reasoning request; "
+                    "ASTRA returns no synthesis instead of fabricating one."
+                ),
+                confidence=0.0,
+                model_used=resp.model_used,
+                provider_used=resp.provider_used,
+                latency_ms=lat,
+                perspective="Central Reasoning Council (ASTRA) — degraded",
+            )
 
         return AstraReasonResponse(
             task_id=f"astra_{uuid.uuid4().hex[:8]}",

@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -31,6 +31,9 @@ router = APIRouter(prefix="/v1/trading", tags=["Trading Consultation"])
 _bot_request_timestamps: dict[str, list[float]] = defaultdict(list)
 RATE_LIMIT_WINDOW_SECONDS = 3600.0
 RATE_LIMIT_MAX_REQUESTS = 20
+# bot_id is supplied in the request body, so every distinct value would
+# otherwise create a permanent dict entry - a trivial memory-exhaustion vector.
+MAX_TRACKED_BOT_IDS = 10_000
 
 # Payload size threshold: 1MB (1,048,576 bytes)
 MAX_PAYLOAD_BYTES = 1024 * 1024
@@ -42,10 +45,27 @@ FORBIDDEN_CREDENTIAL_KEYS = {
 }
 
 
+def _evict_stale_bot_windows(now: float) -> None:
+    """Drop idle bot windows and cap how many distinct bot_ids we track."""
+    cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+    for bot_id in [b for b, ts in _bot_request_timestamps.items() if not ts or ts[-1] <= cutoff]:
+        del _bot_request_timestamps[bot_id]
+
+    if len(_bot_request_timestamps) >= MAX_TRACKED_BOT_IDS:
+        # Evict the least-recently active windows first.
+        oldest_first = sorted(
+            _bot_request_timestamps.items(),
+            key=lambda kv: kv[1][-1] if kv[1] else 0.0,
+        )
+        for bot_id, _ in oldest_first[: max(1, MAX_TRACKED_BOT_IDS // 10)]:
+            del _bot_request_timestamps[bot_id]
+
+
 def _check_rate_limit(bot_id: str) -> None:
     """Enforces max 20 consultations per bot_id per hour."""
     now = time.time()
     cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+    _evict_stale_bot_windows(now)
     # Clean expired timestamps
     _bot_request_timestamps[bot_id] = [ts for ts in _bot_request_timestamps[bot_id] if ts > cutoff]
     if len(_bot_request_timestamps[bot_id]) >= RATE_LIMIT_MAX_REQUESTS:
@@ -124,7 +144,7 @@ async def consult_trading_bot(request: Request) -> AIUniverseDecision:
         # On timeout, return a NO_CHANGE decision with explanatory note
         return AIUniverseDecision(
             decision_id=str(uuid4()),
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             status="NO_CHANGE",
             confidence=0.50,
             parameter_changes=[],
@@ -132,7 +152,7 @@ async def consult_trading_bot(request: Request) -> AIUniverseDecision:
             regime_analysis="Analysis incomplete due to deliberation timeout.",
             dissent_notes="Timeout encountered during multi-agent debate stages.",
             debate_summary="Consultation orchestration reached the 180-second timeout threshold. Defaulting to NO_CHANGE safe holding pattern.",
-            valid_until=(datetime.utcnow()).isoformat(),
+            valid_until=(datetime.now(timezone.utc)).isoformat(),
             comparison_rationale="Consultation timed out before completing A/B comparative synthesis."
         )
     except Exception as exc:

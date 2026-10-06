@@ -3,8 +3,8 @@
 import asyncio
 import json
 import time
-from datetime import datetime, timedelta
-from typing import Any, Literal, cast
+from datetime import datetime, timedelta, timezone
+from typing import Any, Literal, NamedTuple, cast
 from uuid import uuid4
 
 from app.agents.base import Agent
@@ -36,6 +36,19 @@ from app.utils.ids import (
     generate_task_id,
 )
 from app.utils.logger import logger
+
+
+class SpecialistOutcome(NamedTuple):
+    """What one specialist invocation actually produced.
+
+    `model_backed=False` means no model answered: the text is deterministic
+    canned analysis, not the specialist's opinion.
+    """
+
+    agent_id: str
+    text: str
+    model_backed: bool
+    error: str | None = None
 
 
 class TradingConsultService:
@@ -137,14 +150,42 @@ class TradingConsultService:
         agent: Agent,
         prompt: str,
         system_instructions: str | None = None
-    ) -> str:
-        """Invokes a specialist agent using ModelGateway, monitoring provider latency and circuit breakers."""
+    ) -> SpecialistOutcome:
+        """Invokes a specialist agent using ModelGateway, monitoring provider latency and circuit breakers.
+
+        Returns a SpecialistOutcome so callers can tell real model output apart
+        from deterministic fallback text. Run records are written with an
+        honest status: "completed" only when a model actually answered.
+        """
         monitor.record_agent_participation(agent.id)
+        run_id = generate_run_id()
+        msg_id = generate_message_id()
 
         # Check circuit breaker
         if not circuit_breaker.is_available(agent.model_provider):
+            breaker_error = f"Circuit breaker OPEN for provider '{agent.model_provider}'"
             logger.warning("Circuit breaker OPEN for provider '%s'; skipping to deterministic fallback", agent.model_provider)
-            return self._deterministic_fallback_for_agent(agent.id, prompt)
+            fallback_text = self._deterministic_fallback_for_agent(agent.id, prompt)
+            await self.memory.save_run(RunRecord(
+                id=run_id,
+                task_id=task_id,
+                agent_id=agent.id,
+                provider=agent.model_provider,
+                model=agent.model_name,
+                stage=stage_name,
+                status="failed",
+                error=breaker_error,
+            ))
+            await self.memory.save_message(MessageRecord(
+                id=msg_id,
+                run_id=run_id,
+                task_id=task_id,
+                role="assistant",
+                agent_id=agent.id,
+                content=fallback_text,
+                stage=stage_name,
+            ))
+            return SpecialistOutcome(agent.id, fallback_text, False, breaker_error)
 
         req = ProviderRequest(
             messages=[ProviderMessage(role="user", content=prompt)],
@@ -154,8 +195,6 @@ class TradingConsultService:
             max_tokens=1024
         )
 
-        run_id = generate_run_id()
-        msg_id = generate_message_id()
         start = time.perf_counter()
 
         try:
@@ -173,9 +212,20 @@ class TradingConsultService:
             circuit_breaker.record_success(agent.model_provider)
             monitor.record_provider_call(agent.model_provider, latency, success=True)
 
-            content = resp.content if resp and resp.content else self._deterministic_fallback_for_agent(agent.id, prompt)
+            model_answered = bool(resp and resp.content)
+            if model_answered:
+                content = resp.content
+                run_status, run_error = "completed", None
+            else:
+                content = self._deterministic_fallback_for_agent(agent.id, prompt)
+                run_status = "failed"
+                run_error = "Provider returned empty content; deterministic fallback substituted"
+                logger.warning(
+                    "Trading consultation %s (%s) got empty model content; recording fallback as failed",
+                    agent.id, stage_name,
+                )
 
-            # Record run
+            # Record run with the truthful status of this invocation
             await self.memory.save_run(RunRecord(
                 id=run_id,
                 task_id=task_id,
@@ -186,7 +236,8 @@ class TradingConsultService:
                 latency_seconds=latency,
                 prompt_tokens=resp.prompt_tokens if (resp and resp.prompt_tokens is not None) else 0,
                 completion_tokens=resp.completion_tokens if (resp and resp.completion_tokens is not None) else 0,
-                status="completed"
+                status=run_status,
+                error=run_error,
             ))
 
             # Record message
@@ -200,7 +251,7 @@ class TradingConsultService:
                 stage=stage_name
             ))
 
-            return content
+            return SpecialistOutcome(agent.id, content, model_answered, run_error)
         except Exception as exc:
             latency = time.perf_counter() - start
             circuit_breaker.record_failure(agent.model_provider)
@@ -217,8 +268,8 @@ class TradingConsultService:
                 model=agent.model_name,
                 stage=stage_name,
                 latency_seconds=latency,
-                status="completed",
-                error=str(exc)
+                status="failed",
+                error=str(exc),
             ))
 
             # Record fallback message
@@ -232,7 +283,7 @@ class TradingConsultService:
                 stage=stage_name
             ))
 
-            return fallback_text
+            return SpecialistOutcome(agent.id, fallback_text, False, str(exc))
 
     def _deterministic_fallback_for_agent(self, agent_id: str, prompt: str) -> str:
         """Deterministic mathematical analysis fallback if cloud LLM providers are unavailable."""
@@ -356,12 +407,34 @@ class TradingConsultService:
         ta_analysis: str,
         strat_analysis: str,
         critic_critique: str,
-        data_analysis: str
+        data_analysis: str,
+        specialist_outcomes: list[SpecialistOutcome] | None = None,
     ) -> AIUniverseDecision:
-        """Produces bounded decision adhering to all safety invariants."""
+        """Produces bounded decision adhering to all safety invariants.
+
+        Confidence is derived from how many specialists actually produced model
+        output. It was previously a hardcoded 0.88 regardless of whether the
+        panel had deliberated at all or silently fallen back to canned text.
+        """
         decision_id = str(uuid4())
-        valid_until = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+        valid_until = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         t = req.telemetry
+
+        outcomes = specialist_outcomes or []
+        total_specialists = len(outcomes)
+        model_backed = sum(1 for o in outcomes if o.model_backed)
+        participation = (model_backed / total_specialists) if total_specialists else 0.0
+        # Linear honesty curve: 0.45 with no model participation, 0.88 when the
+        # whole panel answered. A panel that never spoke cannot claim 0.88.
+        panel_confidence = round(0.45 + 0.43 * participation, 2)
+        agent_coverage = {
+            o.agent_id: ("model" if o.model_backed else "fallback") for o in outcomes
+        }
+        fallback_ids = [o.agent_id for o in outcomes if not o.model_backed]
+        degradation_reasons = [
+            f"{o.agent_id}: {o.error or 'no model output produced'}" for o in outcomes if not o.model_backed
+        ]
+        panel_degraded = bool(fallback_ids)
 
         treat_status, comp_rationale, exp_improvement = self._compare_treatment_vs_control(req)
         testnet_assessment = self._generate_testnet_risk_assessment(req)
@@ -370,14 +443,33 @@ class TradingConsultService:
         if t.total_trades < 20:
             return AIUniverseDecision(
                 decision_id=decision_id,
-                timestamp=datetime.utcnow().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 status="INSUFFICIENT_DATA",
                 confidence=0.95,
                 parameter_changes=[],
                 risk_assessment=f"Sample size of {t.total_trades} trades is below the statistical significance threshold of 20 closed trades. Recommend continued paper/testnet execution to gather baseline distribution data.",
                 regime_analysis=f"Market regime observation active. Current win rate is {t.win_rate * 100:.1f}%, but confidence is uncalibrated due to low sample volume.",
-                dissent_notes="Adversarial Critic cautions against premature parameter adjustment on small sample sizes (N < 20) to prevent curve fitting.",
-                debate_summary="Specialist panel unanimously determined that statistical sample size is insufficient to support parameter recalibration.",
+                dissent_notes=(
+                    "Adversarial Critic cautions against premature parameter adjustment on small sample "
+                    "sizes (N < 20) to prevent curve fitting."
+                    if not panel_degraded
+                    else "No independent critique was performed: the Adversarial Critic produced no model "
+                    "output. The insufficiency finding below derives from the deterministic sample-size "
+                    "rule alone."
+                ),
+                debate_summary=(
+                    "Specialist panel unanimously determined that statistical sample size is insufficient "
+                    "to support parameter recalibration."
+                    if not panel_degraded
+                    else (
+                        f"Deterministic sample-size rule returned INSUFFICIENT_DATA (N={t.total_trades} < 20). "
+                        f"{len(fallback_ids)}/{total_specialists} specialists produced no model output "
+                        f"({', '.join(fallback_ids)}), so no panel deliberation took place."
+                    )
+                ),
+                degraded=panel_degraded,
+                degradation_reasons=degradation_reasons,
+                agent_coverage=agent_coverage,
                 valid_until=valid_until,
                 comparison_rationale=comp_rationale or "A/B comparison deferred until minimum statistical sample size (N >= 20) is accumulated.",
                 expected_improvement=exp_improvement or "Baseline data acquisition in progress.",
@@ -389,14 +481,33 @@ class TradingConsultService:
         if self._is_healthy(req):
             return AIUniverseDecision(
                 decision_id=decision_id,
-                timestamp=datetime.utcnow().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 status="NO_CHANGE",
                 confidence=0.90,
                 parameter_changes=[],
                 risk_assessment=f"Healthy performance profile: Win rate {t.win_rate * 100:.1f}%, Profit Factor {t.profit_factor:.2f}, Max Drawdown {t.max_drawdown_pct:.2f}%. Bot is operating stably within safe statistical parameters.",
                 regime_analysis="Strategy is well-aligned with the prevailing market regime. Expectancy remains positive.",
-                dissent_notes="No critical risk breaches identified by the Adversarial Critic.",
-                debate_summary="TradingAnalyst, Strategist, Data Analyst, and Critic confirmed healthy metrics across all active strategies. Maintaining current parameter configurations.",
+                dissent_notes=(
+                    "No critical risk breaches identified by the Adversarial Critic."
+                    if not panel_degraded
+                    else "Adversarial Critic produced no model output; no independent critique was run "
+                    "against these metrics."
+                ),
+                debate_summary=(
+                    "TradingAnalyst, Strategist, Data Analyst, and Critic confirmed healthy metrics "
+                    "across all active strategies. Maintaining current parameter configurations."
+                    if not panel_degraded
+                    else (
+                        f"Deterministic health check returned NO_CHANGE on verified telemetry "
+                        f"(WR {t.win_rate * 100:.1f}%, PF {t.profit_factor:.2f}, DD "
+                        f"{t.max_drawdown_pct:.2f}%). {len(fallback_ids)}/{total_specialists} "
+                        f"specialists produced no model output ({', '.join(fallback_ids)}); "
+                        f"their entries are canned fallback text, not analysis."
+                    )
+                ),
+                degraded=panel_degraded,
+                degradation_reasons=degradation_reasons,
+                agent_coverage=agent_coverage,
                 valid_until=valid_until,
                 comparison_rationale=comp_rationale or "Healthy metrics align with baseline operating envelope; no arm divergence required.",
                 expected_improvement=exp_improvement or "Expectancy remains stable at current healthy levels.",
@@ -526,19 +637,32 @@ class TradingConsultService:
         bounded_changes = changes[:2]
         status_val: Literal["RECOMMENDATION", "NO_CHANGE", "INSUFFICIENT_DATA"] = "RECOMMENDATION" if bounded_changes else "NO_CHANGE"
 
+        if panel_degraded:
+            debate_header = (
+                f"Multi-Agent Deliberation (DEGRADED - {len(fallback_ids)}/{total_specialists} "
+                f"specialists produced no model output; entries marked [FALLBACK] are canned "
+                f"deterministic text, not model analysis):\n"
+            )
+        else:
+            debate_header = "Multi-Agent Deliberation:\n"
+
+        def _entry(label: str, agent_id: str, text: str) -> str:
+            marker = "" if agent_coverage.get(agent_id) == "model" else " [FALLBACK]"
+            return f"- {label}: {text[:200]}...{marker}\n"
+
         debate_summary = (
-            f"Multi-Agent Deliberation:\n"
-            f"- TradingAnalyst: {ta_analysis[:200]}...\n"
-            f"- Strategist: {strat_analysis[:200]}...\n"
-            f"- Critic: {critic_critique[:200]}...\n"
-            f"- Data Analyst: {data_analysis[:200]}..."
-        )
+            debate_header
+            + _entry("TradingAnalyst", "trading_analyst", ta_analysis)
+            + _entry("Strategist", "strategist", strat_analysis)
+            + _entry("Critic", "critic", critic_critique)
+            + _entry("Data Analyst", "data_analyst", data_analysis)
+        ).rstrip("\n")
 
         return AIUniverseDecision(
             decision_id=decision_id,
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             status=status_val,
-            confidence=0.88,
+            confidence=panel_confidence,
             parameter_changes=bounded_changes,
             risk_assessment=risk_narrative or "Risk profile assessed across all active strategies.",
             regime_analysis=regime_narrative or "Regime telemetry evaluated.",
@@ -548,7 +672,10 @@ class TradingConsultService:
             comparison_rationale=comp_rationale,
             expected_improvement=exp_improvement or ("Estimated +10-15% risk-adjusted expectancy improvement." if bounded_changes else "Preserves existing expectancy profile."),
             treatment_status=treat_status,
-            testnet_risk_assessment=testnet_assessment
+            testnet_risk_assessment=testnet_assessment,
+            degraded=panel_degraded,
+            degradation_reasons=degradation_reasons,
+            agent_coverage=agent_coverage,
         )
 
     async def consult(self, req: TradingConsultRequest) -> AIUniverseDecision:
@@ -564,8 +691,10 @@ class TradingConsultService:
 
         decision = await concurrency_controller.run(self._consult_internal, req)
 
-        # Cache valid decision
-        telemetry_cache.set(req, decision)
+        # Cache only decisions the whole panel actually produced. Reusing a
+        # degraded result would keep serving fallback-backed advice as fresh.
+        if not decision.degraded:
+            telemetry_cache.set(req, decision)
 
         latency = time.perf_counter() - start_time
         monitor.record_request(latency, success=True)
@@ -608,7 +737,8 @@ class TradingConsultService:
             f"{context_str}\n\n"
             f"Identify performance anomalies, consecutive loss streaks, drawdown risks, and propose concrete adjustments."
         )
-        ta_output = await self._invoke_agent(task_id, "trading_analysis", 1, trading_analyst, ta_prompt)
+        ta_outcome = await self._invoke_agent(task_id, "trading_analysis", 1, trading_analyst, ta_prompt)
+        ta_output = ta_outcome.text
 
         strat_prompt = (
             f"Review the trading telemetry and the Trading Analyst's initial findings:\n\n"
@@ -617,7 +747,8 @@ class TradingConsultService:
             f"Evaluate the strategic trade-offs of proposed adjustments. Weigh drawdown mitigation against trade frequency. "
             f"If trading in TESTNET mode, strictly enforce conservative risk parameters and prioritize capital preservation."
         )
-        strat_output = await self._invoke_agent(task_id, "strategic_comparison", 2, strategist, strat_prompt)
+        strat_outcome = await self._invoke_agent(task_id, "strategic_comparison", 2, strategist, strat_prompt)
+        strat_output = strat_outcome.text
 
         critic_prompt = (
             f"Critique the following strategy proposals and challenge any weak assumptions:\n\n"
@@ -625,7 +756,8 @@ class TradingConsultService:
             f"PROPOSALS:\n- Trading Analyst: {ta_output}\n- Strategist: {strat_output}\n\n"
             f"Attack curve-fitting risks, sample size limitations, and adverse market regimes. Highlight counter-risks."
         )
-        critic_output = await self._invoke_agent(task_id, "adversarial_critique", 3, critic, critic_prompt)
+        critic_outcome = await self._invoke_agent(task_id, "adversarial_critique", 3, critic, critic_prompt)
+        critic_output = critic_outcome.text
 
         data_prompt = (
             f"Quantitatively verify the proposals and critique against the empirical telemetry numbers:\n\n"
@@ -633,22 +765,39 @@ class TradingConsultService:
             f"CRITIQUE:\n{critic_output}\n\n"
             f"Verify if trade count (N={req.telemetry.total_trades}) justifies parameter adjustments and confirm mathematical validity."
         )
-        data_output = await self._invoke_agent(task_id, "quantitative_verification", 4, data_analyst, data_prompt)
+        data_outcome = await self._invoke_agent(task_id, "quantitative_verification", 4, data_analyst, data_prompt)
+        data_output = data_outcome.text
+
+        specialist_outcomes = [ta_outcome, strat_outcome, critic_outcome, data_outcome]
 
         decision = self._rule_based_synthesis(
             req=req,
             ta_analysis=ta_output,
             strat_analysis=strat_output,
             critic_critique=critic_output,
-            data_analysis=data_output
+            data_analysis=data_output,
+            specialist_outcomes=specialist_outcomes,
         )
 
         task_record.status = "completed"
         task_record.result = json.dumps(decision.model_dump())
         task_record.confidence = decision.confidence
-        task_record.completed_at = datetime.utcnow()
+        task_record.completed_at = datetime.now(timezone.utc)
         task_record.metadata["decision_id"] = decision.decision_id
         task_record.metadata["status"] = decision.status
+        model_backed = sum(1 for o in specialist_outcomes if o.model_backed)
+        task_record.metadata["model_backed_specialists"] = model_backed
+        task_record.metadata["specialist_coverage"] = {
+            o.agent_id: ("model" if o.model_backed else "fallback") for o in specialist_outcomes
+        }
+        if decision.degraded:
+            task_record.metadata["degraded"] = True
+            task_record.metadata["degradation_reasons"] = decision.degradation_reasons
+            logger.warning(
+                "Trading consultation %s degraded: %d/%d specialists produced model output (%s)",
+                decision.decision_id, model_backed, len(specialist_outcomes),
+                "; ".join(decision.degradation_reasons),
+            )
         task_record.metadata["parameter_changes_count"] = len(decision.parameter_changes)
         task_record.metadata["trading_mode"] = req.trading_mode
         if req.experiment_id:
@@ -786,7 +935,7 @@ class TradingConsultService:
         )
 
         return TestnetComparisonResponse(
-            comparison_timestamp=datetime.utcnow().isoformat(),
+            comparison_timestamp=datetime.now(timezone.utc).isoformat(),
             testnet_summary=perf.testnet_metrics,
             paper_summary=perf.paper_metrics,
             strategy_divergence=divergence,

@@ -13,6 +13,7 @@ Implements the "Collaborate First, Debate on Conflict" model:
 import asyncio
 import time
 from datetime import datetime, timezone
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -33,6 +34,30 @@ from app.providers.gateway import model_gateway
 from app.providers.health import provider_health_tracker
 from app.utils.ids import generate_debate_id, generate_message_id, generate_run_id
 from app.utils.logger import logger
+
+
+class AgentCallUnavailable(RuntimeError):
+    """Raised when a specialist agent could not produce output from ANY of its models.
+
+    This replaces the previous behaviour of returning a prose placeholder
+    ("*[Specialist X temporarily offline]*") that was indistinguishable from a
+    real answer and therefore propagated as a confident result.
+    """
+
+
+class AgentPanelUnavailable(RuntimeError):
+    """Raised when no specialist (nor any peer able to cover) produced output.
+
+    Carries the per-agent failure reasons so API layers can report exactly why
+    the panel went dark instead of synthesizing an answer from nothing.
+    """
+
+    def __init__(self, task_id: str, failures: list[str]) -> None:
+        self.task_id = task_id
+        self.failures = failures
+        super().__init__(
+            f"Task {task_id}: no specialist produced output. " + "; ".join(failures)
+        )
 
 
 class CollaborationMessage(BaseModel):
@@ -80,6 +105,13 @@ class CollaborationResult(BaseModel):
     models_used: list[str] = Field(default_factory=list)
     total_tokens: int = 0
     total_latency_seconds: float = 0.0
+    # Honest-degradation metadata: consumers must not treat a degraded panel the
+    # same as a fully successful one.
+    degraded: bool = False
+    degradation_reasons: list[str] = Field(default_factory=list)
+    # Self-healing audit trail: original_agent_id -> covering peer agent id
+    agent_coverage: dict[str, str] = Field(default_factory=dict)
+    failed_agents: list[str] = Field(default_factory=list)
 
 
 class CollaborationEngine:
@@ -280,8 +312,13 @@ class CollaborationEngine:
             asyncio.create_task(self.memory.save_run(run_rec))
         except RuntimeError:
             await self.memory.save_run(run_rec)
-        fallback_content = f"*[Specialist {agent.role} temporarily offline / high demand on {agent.model_provider}: {error_msg}]*"
-        return fallback_content, 0, latency, [agent.model_name]
+
+        # Do NOT hand back a prose placeholder: a failed call is an error, not an
+        # answer. The caller (run_collaboration) decides whether a peer can cover
+        # this agent, and ultimately surfaces a degraded panel.
+        raise AgentCallUnavailable(
+            f"{agent.id} ({agent.model_provider}): {error_msg}"
+        ) from (next((e for e in (err for _, _, err, _ in model_results) if e), None))
 
     async def _execute_multi_model_synthesis(
         self,
@@ -392,38 +429,123 @@ class CollaborationEngine:
         critic_agent = self.registry.get_agent("critic") or participating_agents[-1]
 
         # -------------------------------------------------------------
-        # STEP 1: Parallel Independent Analysis (Round 1)
+        # STEP 1: Parallel Independent Analysis (Round 1) with peer recovery
         # -------------------------------------------------------------
         logger.info(
             "Collaboration %s: Firing parallel specialist analysis for %d agents (Complexity: %s)",
             session_id, len(participating_agents), complexity.value
         )
 
-        async def analyze_agent(agent: Agent) -> tuple[Agent, str, int, list[str]]:
+        # Self-healing bookkeeping: which agents failed, which peer covered them.
+        failed_agents: set[str] = set()
+        coverage_log: dict[str, str] = {}
+        degradation_reasons: list[str] = []
+
+        def _build_prompt(target: Agent) -> str:
             if len(participating_agents) == 1:
-                prompt = (
+                return (
                     f"User Query:\n{question}\n\n"
                     "Provide a direct, clear, and concise response matching the exact formatting and length requested by the user. "
                     "Avoid unnecessary verbosity, robotic disclaimers, or excessive introductory fluff."
                 )
-            else:
+            return (
+                f"Question / Goal:\n{question}\n\n"
+                f"As the {target.role}, provide your direct, concise technical recommendation and core rationale. "
+                "Be concrete, identify primary trade-offs, and state assumptions explicitly."
+            )
+
+        def _peer_candidates(original: Agent) -> list[Agent]:
+            """Peers that may cover a failed specialist.
+
+            Preference order: (1) other members of this task's panel, (2) any other
+            registered active specialist. Peers that already failed are skipped.
+            """
+            seen: set[str] = {original.id}
+            ordered: list[Agent] = []
+            panel_ids = [a.id for a in participating_agents]
+            for cand in participating_agents + list(self.registry.list_agents()):
+                if cand.id in seen or cand.id in failed_agents or not cand.id:
+                    continue
+                seen.add(cand.id)
+                if cand.status == "active":
+                    ordered.append(cand)
+            # Panel members first (they were selected for this task's shape).
+            ordered.sort(key=lambda a: 0 if a.id in panel_ids else 1)
+            return ordered
+
+        async def _attempt(target: Agent, covering_for: Agent | None = None):
+            prompt = _build_prompt(target)
+            if covering_for is not None:
                 prompt = (
-                    f"Question / Goal:\n{question}\n\n"
-                    f"As the {agent.role}, provide your direct, concise technical recommendation and core rationale. "
-                    "Be concrete, identify primary trade-offs, and state assumptions explicitly."
+                    f"{prompt}\n\n"
+                    f"[PEER ASSIST] Your colleague '{covering_for.role}' could not produce an "
+                    f"analysis for this task. Provide your own '{target.role}' assessment of "
+                    "this exact question so the panel still receives a grounded perspective."
                 )
             text, t_count, _, models = await self._execute_agent_call(
                 task_id=task_id,
                 stage_name="independent_analysis",
                 round_number=1,
-                agent=agent,
+                agent=target,
                 messages=[ProviderMessage(role="user", content=prompt)],
                 complexity=complexity
             )
-            return agent, text, t_count, models
+            return target, text, t_count, models
 
-        # Execute all specialist perspectives simultaneously with asyncio.gather
-        r1_results = await asyncio.gather(*[analyze_agent(agent) for agent in participating_agents])
+        async def analyze_agent(agent: Agent):
+            """Run one specialist, self-healing through peers when its models are dark."""
+            try:
+                return await _attempt(agent)
+            except AgentCallUnavailable as primary_err:
+                failed_agents.add(agent.id)
+                logger.warning(
+                    "Collaboration %s: specialist '%s' unavailable (%s) — attempting peer coverage",
+                    session_id, agent.id, primary_err
+                )
+                for peer in _peer_candidates(agent):
+                    try:
+                        result = await _attempt(peer, covering_for=agent)
+                    except AgentCallUnavailable as peer_err:
+                        failed_agents.add(peer.id)
+                        logger.warning(
+                            "Collaboration %s: peer '%s' also unavailable (%s)",
+                            session_id, peer.id, peer_err
+                        )
+                        continue
+                    coverage_log[agent.id] = peer.id
+                    logger.info(
+                        "Collaboration %s: peer '%s' covered for unavailable specialist '%s'",
+                        session_id, peer.id, agent.id
+                    )
+                    return result
+                # Nobody could cover: record the reason and let the gather decide.
+                degradation_reasons.append(str(primary_err))
+                raise
+
+        # Execute all specialist perspectives simultaneously. return_exceptions=True
+        # so one dark agent does not abort the whole panel (that is the point of
+        # peer coverage): we collect outcomes and only fail if EVERYONE is dark.
+        r1_raw = await asyncio.gather(
+            *[analyze_agent(agent) for agent in participating_agents],
+            return_exceptions=True,
+        )
+
+        r1_results = []
+        panel_failures: list[str] = []
+        for agent, outcome in zip(participating_agents, r1_raw):
+            if isinstance(outcome, asyncio.CancelledError):
+                raise outcome
+            if isinstance(outcome, BaseException):
+                panel_failures.append(f"{agent.id}: {outcome}")
+                continue
+            r1_results.append(outcome)
+
+        if not r1_results:
+            raise AgentPanelUnavailable(
+                task_id=task_id,
+                failures=panel_failures or degradation_reasons or ["no specialist produced output"],
+            )
+
         round_1_messages: list[CollaborationMessage] = []
 
         for agent, text, t_count, models in r1_results:
@@ -447,16 +569,31 @@ class CollaborationEngine:
 
         # Extract structured claims and evidence for all specialist perspectives
         specialist_assessments: list[SpecialistAssessment] = []
+        covered_peer_ids = set(coverage_log.values())
         for agent, text, t_count, models in r1_results:
             mid = models[0] if models else "default_model"
             c, e = Adjudicator.extract_claims_and_evidence(agent, mid, text)
+
+            # Model confidence must reflect what we actually observed, not a
+            # constant. A real model call that yielded extractable claims/evidence
+            # scores higher than one that yielded neither, and a perspective that a
+            # covering peer had to produce on behalf of a dark specialist is
+            # discounted because it is second-hand.
+            if e or c:
+                model_conf = 0.75
+            else:
+                model_conf = 0.55
+            if agent.id in covered_peer_ids:
+                model_conf -= 0.10
+            model_conf = round(max(0.0, min(0.95, model_conf)), 2)
+
             specialist_assessments.append(SpecialistAssessment(
                 agent_id=agent.id,
                 agent_role=agent.role,
                 summary=text,
                 claims=c,
                 evidence=e,
-                model_confidence=0.90
+                model_confidence=model_conf
             ))
 
         all_claims: list[AtomicClaim] = []
@@ -464,6 +601,24 @@ class CollaborationEngine:
         for ass in specialist_assessments:
             all_claims.extend(ass.claims)
             all_evidence.extend(ass.evidence)
+
+        # True once the Synthesizer itself could not reach any model (set below).
+        synthesis_degraded = False
+
+        def _degradation_fields() -> dict[str, Any]:
+            """Honest self-healing metadata attached to every CollaborationResult."""
+            reasons = list(degradation_reasons)
+            if failed_agents:
+                reasons.append(
+                    "unavailable specialists (covered by peer or dropped): "
+                    + ", ".join(sorted(failed_agents))
+                )
+            return {
+                "degraded": bool(reasons),
+                "degradation_reasons": reasons,
+                "agent_coverage": dict(coverage_log),
+                "failed_agents": sorted(failed_agents),
+            }
 
         # Optimization: In fast / simple 1-agent mode, return the specialist's direct response immediately
         if len(participating_agents) == 1 and complexity == TaskComplexity.SIMPLE:
@@ -489,11 +644,13 @@ class CollaborationEngine:
                 rounds=rounds_log,
                 confidence=calib_conf,
                 unresolved_disagreements=[],
-                key_evidence=[e.excerpt for e in all_evidence] if all_evidence else ["Single-specialist direct assessment."],
+                # No evidence means no evidence: never invent a placeholder claim.
+                key_evidence=[e.excerpt for e in all_evidence],
                 structured_evidence=all_evidence,
                 claims=all_claims,
                 total_tokens=total_tokens,
-                total_latency_seconds=elapsed_time
+                total_latency_seconds=elapsed_time,
+                **_degradation_fields(),
             )
 
         combined_proposals = "\n\n".join([
@@ -517,14 +674,35 @@ class CollaborationEngine:
             "- If there is a severe, dangerous technical disagreement between specialists, start with 'CONFLICT_DETECTED:' followed by the dispute."
         )
 
-        synthesis_text, syn_tokens, _, syn_models = await self._execute_multi_model_synthesis(
-            task_id=task_id,
-            stage_name="consensus_synthesis",
-            round_number=2,
-            synthesizer_agent=synthesizer_agent,
-            synthesis_prompt=synthesis_prompt,
-            complexity=complexity
-        )
+        try:
+            synthesis_text, syn_tokens, _, syn_models = await self._execute_multi_model_synthesis(
+                task_id=task_id,
+                stage_name="consensus_synthesis",
+                round_number=2,
+                synthesizer_agent=synthesizer_agent,
+                synthesis_prompt=synthesis_prompt,
+                complexity=complexity
+            )
+        except AgentCallUnavailable as syn_err:
+            # The Synthesizer is dark, but Round 1 produced REAL specialist output.
+            # Return that real, unmerged material (clearly labelled) at low confidence
+            # instead of inventing a consensus — and never fail the whole task when
+            # we still have genuine specialist analysis to hand back.
+            synthesis_degraded = True
+            degradation_reasons.append(f"synthesizer unavailable: {syn_err}")
+            syn_tokens, syn_models = 0, []
+            logger.warning(
+                "Collaboration %s: synthesizer unavailable (%s) — returning raw specialist panel output",
+                session_id, syn_err
+            )
+            synthesis_text = (
+                "## Specialist panel output (automated synthesis unavailable)\n\n"
+                "> **Degraded mode:** the Synthesizer could not reach any model, so the "
+                "specialist analyses below are returned **unmerged and unverified**. "
+                "Treat them as raw perspectives, not a vetted consensus.\n\n"
+                f"{combined_proposals}"
+            )
+
         total_tokens += syn_tokens
         all_models_used.extend(syn_models)
 
@@ -613,9 +791,10 @@ class CollaborationEngine:
                 task_id=task_id,
                 canonical_problem=question,
                 final_answer=final_answer,
-                confidence=adjudication_res.system_confidence,
+                confidence=round(min(adjudication_res.system_confidence, 0.45), 2) if synthesis_degraded else adjudication_res.system_confidence,
                 unresolved_disagreements=adjudication_res.unresolved_disputes or ["Resolved via targeted debate."],
-                key_evidence=[e.excerpt for e in adjudication_res.key_evidence] if adjudication_res.key_evidence else ["Resolved through cross-specialist debate."],
+                # Empty when no evidence exists: a placeholder sentence is not evidence.
+                key_evidence=[e.excerpt for e in adjudication_res.key_evidence],
                 structured_evidence=adjudication_res.key_evidence,
                 claims=all_claims,
                 adjudication=adjudication_res,
@@ -625,21 +804,9 @@ class CollaborationEngine:
                 complexity=complexity.value,
                 models_used=list(dict.fromkeys(all_models_used)),
                 total_tokens=total_tokens,
-                total_latency_seconds=round(total_duration, 4)
+                total_latency_seconds=round(total_duration, 4),
+                **_degradation_fields(),
             )
-
-        # Direct Instant Synthesis (Standard fast path)
-        if synthesis_text.startswith("*[Specialist Synthesizer temporarily offline") and round_1_messages:
-            extracted_proposals = []
-            for msg in round_1_messages:
-                if not msg.content.startswith("*[Specialist"):
-                    extracted_proposals.append(f"### {msg.agent_role} Recommendation\n{msg.content}")
-
-            if extracted_proposals:
-                synthesis_text = (
-                    "## Multi-Specialist Consolidated Recommendations\n\n" +
-                    "\n\n".join(extracted_proposals)
-                )
 
         rounds_log.append(CollaborationRoundLog(
             round_number=2,
@@ -672,9 +839,10 @@ class CollaborationEngine:
             task_id=task_id,
             canonical_problem=question,
             final_answer=synthesis_text,
-            confidence=adjudication_res.system_confidence,
+            confidence=round(min(adjudication_res.system_confidence, 0.45), 2) if synthesis_degraded else adjudication_res.system_confidence,
             unresolved_disagreements=adjudication_res.unresolved_disputes,
-            key_evidence=[e.excerpt for e in adjudication_res.key_evidence] if adjudication_res.key_evidence else ["Consensus verified across specialist team."],
+            # Empty when no evidence exists: a placeholder sentence is not evidence.
+            key_evidence=[e.excerpt for e in adjudication_res.key_evidence],
             structured_evidence=adjudication_res.key_evidence,
             claims=all_claims,
             adjudication=adjudication_res,
@@ -684,7 +852,8 @@ class CollaborationEngine:
             complexity=complexity.value,
             models_used=list(dict.fromkeys(all_models_used)),
             total_tokens=total_tokens,
-            total_latency_seconds=round(total_duration, 4)
+            total_latency_seconds=round(total_duration, 4),
+            **_degradation_fields(),
         )
 
 

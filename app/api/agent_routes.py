@@ -65,7 +65,7 @@ class AgentAssistRequest(BaseModel):
 class AgentAssistResponse(BaseModel):
     """Standardized ultra-fast response for peer agents."""
 
-    status: Literal["success", "cache_hit", "fallback_success"]
+    status: Literal["success", "cache_hit", "fallback_success", "degraded"]
     caller_agent: str
     agent_role: str
     response: str
@@ -74,6 +74,7 @@ class AgentAssistResponse(BaseModel):
     latency_ms: float
     cache_hit: bool
     token_usage: dict[str, int] = Field(default_factory=dict)
+    error: str | None = None
 
 
 # In-memory latency and performance metrics per caller agent
@@ -175,8 +176,9 @@ async def agent_assist_endpoint(req: AgentAssistRequest):
     exec_res = await unified_provider_manager.execute(exec_req)
     elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
 
-    # Store in L1 cache with 600s TTL
-    if not req.no_cache:
+    # Never cache a degraded (no-model-ran) result: a recovered provider must be
+    # able to serve the next request.
+    if not req.no_cache and not exec_res.degraded:
         perf_cache.set_query(
             question=req.prompt,
             mode=cache_mode,
@@ -188,8 +190,8 @@ async def agent_assist_endpoint(req: AgentAssistRequest):
     _record_telemetry(req.caller_agent, elapsed_ms, is_cache_hit=False)
     logger.info("agent/assist %s/%s → %s in %.2fms", req.caller_agent, req.task_type, exec_res.provider_used, elapsed_ms)
 
-    res_status: Literal["success", "cache_hit", "fallback_success"] = (
-        "fallback_success" if exec_res.status == "fallback_success" else "success"
+    res_status: Literal["success", "cache_hit", "fallback_success", "degraded"] = (
+        "degraded" if exec_res.degraded else ("fallback_success" if exec_res.status == "fallback_success" else "success")
     )
 
     return AgentAssistResponse(
@@ -202,6 +204,7 @@ async def agent_assist_endpoint(req: AgentAssistRequest):
         latency_ms=elapsed_ms,
         cache_hit=False,
         token_usage=exec_res.token_usage,
+        error=exec_res.error,
     )
 
 

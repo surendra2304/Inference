@@ -32,10 +32,11 @@ class CodeGenerationRequest(BaseModel):
 class CodeGenerationResponse(BaseModel):
     code: str
     confidence: float
-    generation_path: Literal["agent", "template_fallback"]
+    generation_path: Literal["agent", "template_fallback", "degraded"]
     token_usage: int
     latency_ms: float
     filename: str
+    error: str | None = None
 
 
 class CodeGenerationService:
@@ -91,6 +92,22 @@ class CodeGenerationService:
                     break
             code_text = "\n".join(lines[start_idx:end_idx]).strip()
 
+        if exec_res.degraded:
+            # No model produced code. Report the true path, zero confidence, and
+            # zero tokens rather than labelling an empty result as agent output.
+            response = CodeGenerationResponse(
+                code="",
+                confidence=0.0,
+                generation_path="degraded",
+                token_usage=0,
+                latency_ms=elapsed_ms,
+                filename=req.filename,
+                error=exec_res.error,
+            )
+            # Transient outages must not be cached: a recovered provider must be
+            # able to serve the next request.
+            return response
+
         gen_path: Literal["agent", "template_fallback"] = "template_fallback" if exec_res.status == "fallback_success" else "agent"
         confidence = 0.92 if gen_path == "agent" else 0.55
 
@@ -98,7 +115,7 @@ class CodeGenerationService:
             code=code_text,
             confidence=confidence,
             generation_path=gen_path,
-            token_usage=exec_res.token_usage.get("total_tokens", 350),
+            token_usage=exec_res.token_usage.get("total_tokens", 0),
             latency_ms=elapsed_ms,
             filename=req.filename
         )

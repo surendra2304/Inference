@@ -13,6 +13,8 @@ import re
 import uuid
 from typing import Any
 
+from app.utils.logger import logger
+
 # Regex patterns for credential identification and scrubbing
 _PEM_KEY_PATTERN = re.compile(
     r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----",
@@ -190,6 +192,13 @@ def detect_credentials(data: Any) -> list[str]:
     if isinstance(data, str):
         if _PEM_KEY_PATTERN.search(data):
             detected.append("pem_private_key")
+        # Hex keys and generic secret fields were previously scrubbed but never
+        # detected, so the audit reported clean while redaction was actively
+        # removing them - detection must cover every pattern scrubbing handles.
+        if _HEX_PRIVATE_KEY_PATTERN.search(data):
+            detected.append("hex_private_key")
+        if _GENERIC_SECRET_FIELD_PATTERN.search(data):
+            detected.append("generic_secret_field")
         if _JWT_PATTERN.search(data):
             detected.append("jwt_token")
         for m in _BEARER_PATTERN.finditer(data):
@@ -209,6 +218,41 @@ def detect_credentials(data: Any) -> list[str]:
                 detected.append("session_cookie")
 
     return detected
+
+
+class CredentialLeakError(ValueError):
+    """Raised when a credential survives scrubbing and must not be forwarded."""
+
+    def __init__(self, field: str, residual: list[str]) -> None:
+        self.field = field
+        self.residual = residual
+        super().__init__(
+            f"credential survived sanitization in '{field}': {', '.join(residual)}"
+        )
+
+
+def scrub_credentials_verified(text: str, field: str = "text") -> str:
+    """Scrub, then prove with detect_credentials that nothing remains.
+
+    Enforcement of invariant 1 in this module's docstring: scrubbing alone is
+    an assertion, this is the check. A first residual triggers one more pass;
+    anything still detectable raises CredentialLeakError so the caller can
+    refuse the request instead of forwarding the secret to a model provider.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    cleaned = scrub_credentials(text)
+    residual = detect_credentials(cleaned)
+    if residual:
+        cleaned = scrub_credentials(cleaned)
+        residual = detect_credentials(cleaned)
+        if residual:
+            raise CredentialLeakError(field, residual)
+        logger.warning(
+            "Credential required a second scrub pass in field '%s'", field
+        )
+    return cleaned
 
 
 def wrap_untrusted_data(data: str, source: str = "untrusted") -> str:

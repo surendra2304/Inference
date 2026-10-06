@@ -1,6 +1,6 @@
 """Pydantic schemas for Trading Consultation Subsystem, A/B Testing, and Testnet Support."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -88,7 +88,7 @@ class AIUniverseDecision(BaseModel):
     """Final structured advisory decision produced by Inference."""
     decision_id: str = Field(default_factory=lambda: str(uuid4()), description="Unique UUID for this advisory decision")
     timestamp: str = Field(
-        default_factory=lambda: datetime.utcnow().isoformat(),
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO 8601 creation timestamp"
     )
     status: Literal["RECOMMENDATION", "NO_CHANGE", "INSUFFICIENT_DATA"] = Field(
@@ -116,6 +116,21 @@ class AIUniverseDecision(BaseModel):
     treatment_status: str | None = Field(
         default=None,
         description="Performance status relative to control (e.g., OUTPERFORMING_CONTROL, PARITY, UNDERPERFORMING_CONTROL)"
+    )
+    # Specialist participation honesty (H6): records which specialists actually
+    # produced model output, so a panel that silently fell back to canned
+    # deterministic text cannot be presented as if it had deliberated.
+    degraded: bool = Field(
+        default=False,
+        description="True when at least one specialist produced no model output"
+    )
+    degradation_reasons: list[str] = Field(
+        default_factory=list,
+        description="Per-specialist explanation of why model output was unavailable"
+    )
+    agent_coverage: dict[str, str] = Field(
+        default_factory=dict,
+        description="specialist id -> 'model' (real model output) or 'fallback' (deterministic text)"
     )
     # Testnet-specific fields
     testnet_risk_assessment: str | None = Field(

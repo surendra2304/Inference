@@ -4,7 +4,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import aiosqlite
@@ -20,6 +20,23 @@ from app.memory.base import (
     TaskRecord,
 )
 from app.utils.logger import logger
+
+
+def _parse_timestamp(value: str | None) -> datetime:
+    """Parse a stored timestamp, always returning an aware UTC datetime.
+
+    Rows written before timestamps were timezone-aware carry no offset; they
+    were produced by datetime.utcnow() so they are UTC. Normalising on read
+    keeps legacy and new rows comparable instead of raising
+    "can't compare offset-naive and offset-aware datetimes".
+    """
+    if not value:
+        raise ValueError("timestamp value is missing")
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
 
 
 class SQLiteMemory(BaseMemory):
@@ -241,8 +258,8 @@ class SQLiteMemory(BaseMemory):
                 if not row:
                     return None
 
-                created_at = datetime.fromisoformat(row["created_at"])
-                completed_at = datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
+                created_at = _parse_timestamp(row["created_at"])
+                completed_at = _parse_timestamp(row["completed_at"]) if row["completed_at"] else None
                 meta = json.loads(row["metadata_json"]) if row["metadata_json"] else {}
 
                 return TaskRecord(
@@ -321,7 +338,7 @@ class SQLiteMemory(BaseMemory):
                     agent_id=row["agent_id"],
                     content=row["content"],
                     stage=row["stage"],
-                    created_at=datetime.fromisoformat(row["created_at"])
+                    created_at=_parse_timestamp(row["created_at"])
                 ))
         return records
 
@@ -380,7 +397,7 @@ class SQLiteMemory(BaseMemory):
                         memory_type=row["memory_type"],
                         importance=row["importance"],
                         context_tags=tags,
-                        created_at=datetime.fromisoformat(row["created_at"])
+                        created_at=_parse_timestamp(row["created_at"])
                     ))
         return records
 
@@ -414,7 +431,7 @@ class SQLiteMemory(BaseMemory):
                         memory_type=row["memory_type"],
                         importance=row["importance"],
                         context_tags=tags,
-                        created_at=datetime.fromisoformat(row["created_at"])
+                        created_at=_parse_timestamp(row["created_at"])
                     ))
         return records
 
@@ -476,7 +493,7 @@ class SQLiteMemory(BaseMemory):
                     recommended_agents=agents,
                     recommended_provider=row["recommended_provider"],
                     recommended_model=row["recommended_model"],
-                    created_at=datetime.fromisoformat(row["created_at"]),
+                    created_at=_parse_timestamp(row["created_at"]),
                     metadata=meta
                 )
 
@@ -498,7 +515,7 @@ class SQLiteMemory(BaseMemory):
                         recommended_agents=agents,
                         recommended_provider=row["recommended_provider"],
                         recommended_model=row["recommended_model"],
-                        created_at=datetime.fromisoformat(row["created_at"]),
+                        created_at=_parse_timestamp(row["created_at"]),
                         metadata=meta
                     ))
         return records
@@ -543,5 +560,5 @@ class SQLiteMemory(BaseMemory):
                     configuration=config,
                     status=row["status"],
                     result=result,
-                    created_at=datetime.fromisoformat(row["created_at"])
+                    created_at=_parse_timestamp(row["created_at"])
                 )

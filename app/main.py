@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -17,6 +17,7 @@ from app.api.v1_core_routes import v1_router
 from app.config_production import production_config
 from app.core.config import settings
 from app.core.orchestrator import orchestrator
+from app.core.security import require_inference_api_key
 from app.health import health_router
 from app.middleware.rate_limiter import EnhancedRateLimiterMiddleware
 from app.providers.http_client import http_client_pool
@@ -132,34 +133,39 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # Mount API routes
+# ── Authentication boundary ────────────────────────────────────────────────────
+# Every router that executes models, spends budget, mutates state, or exposes
+# audit data requires the configured INFERENCE_API_KEY (fail-closed).
+# Health probes and the dashboard's read-only routes stay unauthenticated so
+# liveness checks and /ui keep working without a credential.
 app.include_router(health_router)
-app.include_router(operational_router)
-app.include_router(api_router)
-app.include_router(friday_router)
-app.include_router(task_router)
-app.include_router(agent_router)
-app.include_router(instant_router)
-app.include_router(v1_router)
-app.include_router(trading_router)
-app.include_router(enhanced_router)
-app.include_router(live_router)
-app.include_router(multi_market_router)
-app.include_router(evolution_router)
-app.include_router(predictions_router)
-app.include_router(ecosystem_router)
-app.include_router(providers_router)
-app.include_router(forge_router)
-app.include_router(batch_router)
 app.include_router(forge_health_router)
-app.include_router(analytics_router)
-app.include_router(nexus_router)
-app.include_router(debate_router)
-app.include_router(governance_router)
-app.include_router(multimodal_router)
-app.include_router(experiment_router)
-app.include_router(sentinel_router)
-app.include_router(intelx_router)
-app.include_router(futuris_router)
+app.include_router(operational_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(api_router)  # per-route auth applied in app/api/routes.py
+app.include_router(friday_router)  # already carries its own verify_friday_api_key
+app.include_router(task_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(agent_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(instant_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(v1_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(trading_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(enhanced_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(live_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(multi_market_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(evolution_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(predictions_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(ecosystem_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(providers_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(forge_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(batch_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(analytics_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(nexus_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(debate_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(governance_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(multimodal_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(experiment_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(sentinel_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(intelx_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(futuris_router, dependencies=[Depends(require_inference_api_key)])
 
 
 @app.get("/ui", response_class=HTMLResponse)

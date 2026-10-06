@@ -87,6 +87,19 @@ class Settings(BaseSettings):
     DEFAULT_BUDGET_USD: float = Field(default=10.0, description="Explicit hard budget ceiling per tenant/period in USD")
     REQUEST_TIMEOUT: float = Field(default=60.0, description="Default timeout in seconds for provider calls")
     ALLOW_DEV_RATE_LIMIT_BYPASS: bool = Field(default=False, description="Explicit flag required to bypass rate limits on localhost/testclient")
+    TRUST_PROXY_HEADERS: bool = Field(
+        default=True,
+        description=(
+            "Honour X-Forwarded-For / X-Real-IP when determining the client IP for "
+            "rate limiting. Headers are ONLY consulted when the direct TCP peer is "
+            "loopback or listed in TRUSTED_PROXY_CIDRS, so a public client cannot "
+            "forge them. Disable if the service is reached directly with no proxy."
+        ),
+    )
+    TRUSTED_PROXY_CIDRS: list[str] = Field(
+        default_factory=list,
+        description="Extra CIDR ranges treated as trusted reverse proxies (e.g. 10.0.0.0/8)",
+    )
 
     # LiteLLM Integration (Optional Transport & Fallback Layer)
     INFERENCE_LITELLM_ENABLED: bool = Field(default=False, description="Enable LiteLLM unified model transport layer")
