@@ -560,3 +560,50 @@ def test_cost_report_states_its_basis_and_does_not_project_from_one_sample():
     # The tracker registers itself in the process-wide audit; drop this instance's row so the
     # test does not make every later `audit_bounds()` call see a duplicate store.
     _REGISTRY.remove(tracker.records)
+
+
+# --------------------------------------------------------------------------------------
+# #63: usage analytics must not invent a confidence for a caller that reported none.
+# --------------------------------------------------------------------------------------
+# The old default was ``confidence: float = 0.90``. Every request logged through
+# ``log_request`` therefore carried a measured-looking 0.90 even when the caller measured
+# nothing, and any average over the field was an average over a constant dressed up as a
+# measurement. The field is now ``float | None = None`` and ``get_overview`` publishes how
+# many records actually carry one.
+
+
+def test_usage_analytics_does_not_default_confidence_to_anything():
+    from app.analytics.usage_analytics import UsageAnalyticsEngine
+
+    engine = UsageAnalyticsEngine()
+    engine.records.clear()
+    record = engine.log_request(consumer="trading", service="consult", tokens_in=100, tokens_out=20)
+    assert record.confidence is None, (
+        "a request whose caller reported no confidence must not be assigned one; "
+        f"got {record.confidence!r}"
+    )
+
+
+def test_usage_analytics_reports_confidence_coverage_not_a_filled_in_default():
+    from app.analytics.usage_analytics import UsageAnalyticsEngine
+
+    engine = UsageAnalyticsEngine()
+    engine.records.clear()
+    engine.log_request(consumer="trading", service="consult", tokens_in=100, tokens_out=20)
+    engine.log_request(consumer="trading", service="consult", tokens_in=50, tokens_out=10,
+                       confidence=0.72)
+    overview = engine.get_overview()
+    assert overview["measurement_coverage"]["confidence"] == 1, (
+        "coverage must count the one record that actually carried a confidence, so a reader "
+        "can tell 0.72 was measured and the other record was not"
+    )
+    assert overview["total_calls"] == 2
+
+
+def test_usage_analytics_round_trips_a_reported_confidence():
+    from app.analytics.usage_analytics import UsageAnalyticsEngine
+
+    engine = UsageAnalyticsEngine()
+    engine.records.clear()
+    record = engine.log_request(consumer="forge", service="code_generation", confidence=0.61)
+    assert record.confidence == 0.61

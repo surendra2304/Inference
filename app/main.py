@@ -49,6 +49,7 @@ from app.security.api_security import ProductionSecurityMiddleware
 from app.ui.dashboard import get_dashboard_html
 from app.utils.json_safe import make_safe_response_class, validation_errors_payload
 from app.utils.logger import logger, setup_logger
+from app.utils.memory_guard import idle_trim_watchdog
 from app.version import VERSION
 
 #: When this process started. Tasks created before it belong to a previous process and
@@ -90,7 +91,21 @@ async def lifespan(app: FastAPI):
             "https://openrouter.ai",
         ])
     )
+    # Memory hygiene for the quiet tail: while traffic flows, the middleware considers a trim
+    # on every completed request; once it stops, this loop (guard policy still applies) returns
+    # freed arenas to the OS instead of leaving the high-water mark in place until the next
+    # burst. Cancelled on shutdown.
+    watchdog = asyncio.create_task(
+        idle_trim_watchdog(
+            interval_seconds=float(getattr(production_config, "MEMORY_TRIM_WATCHDOG_SECONDS", 30.0))
+        )
+    )
     yield
+    watchdog.cancel()
+    try:
+        await watchdog
+    except asyncio.CancelledError:
+        pass
     # Cleanly close pooled HTTP connections
     try:
         await http_client_pool.close()

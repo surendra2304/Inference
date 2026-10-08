@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     MEMORY_TRIM_ENABLED: bool = True
     MEMORY_TRIM_THRESHOLD_MB: float = 400.0
     MEMORY_TRIM_COOLDOWN_SECONDS: float = 60.0
+    MEMORY_TRIM_CHECK_INTERVAL_SECONDS: float = 1.0
+    #: How often the idle watchdog considers a trim. Trimming is event-driven while traffic
+    #: flows; this covers the quiet tail after a burst, which no request ever triggers.
+    MEMORY_TRIM_WATCHDOG_SECONDS: float = 30.0
 
     # 7 Active Cloud Provider API Keys (Supports single or comma-separated lists)
     GEMINI_API_KEY: str | None = Field(default=None)
