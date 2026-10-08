@@ -8,11 +8,9 @@ stress it to dead ends, find and FIX every bug surfaced, write substantial new c
 upgrades capability, keep real-life regression tests, keep going until the queue is empty with
 evidence attached to every item.
 
-**Current step:** item 1 (RSS leak) — attribution done via new opt-in
-`/memory/diagnostics` endpoint; growth diff per burst names
-`app/services/nexus_intelligence.py:185,309,310,316,321` and
-`app/analytics/usage_analytics.py:62`. Next: separate "store still filling (bounded)" from
-"true linear leak".
+**Current step:** items 1-7 done; item 8 (#29 cross-endpoint dedup collision) is the next
+queue item; then the Q7 citation check and the final sweep. The tree is green at commit
+`e18844b` (**450 passed**, ruff clean, mypy clean, real-time drive **12/12**).
 
 ## Checklist
 
@@ -39,7 +37,8 @@ evidence attached to every item.
       0.5 KB/request budget; plus `scripts/leak_probe.py` with
       `tests/test_leak_probe_verdict.py` (7 tests, includes the measured
       `[5.9,11.1,2.4,1.5,1.5,1.3]` series which trend-only logic called a plateau).
-- [ ] 4. Append #69 + leak findings to `notes/WORKQUEUE.md`.
+- [x] 4. Append #69 + leak findings to `notes/WORKQUEUE.md`. DONE in `65c1c50`/`7b9b59f`; the
+      leak entry is marked CLOSED with the 40k-request plateau evidence.
 - [x] 5. usage analytics honesty. DONE (bigger than the original item): `log_request` no longer
       invents provider/tokens/confidence/cost; all four services that passed
       `provider="gemini"` + fixed token counts (none of them calls a provider) now pass
@@ -55,10 +54,36 @@ evidence attached to every item.
       re-routes by weight when the preferred provider's circuit is open instead of falling
       straight to deterministic text. 8 tests in `tests/test_self_optimizing_router.py`;
       411 passed, ruff+mypy clean. Commit 4218d0c.
-- [ ] 7. #62–#65 backlog items.
+- [x] 7. #62–#65 backlog items. #62 fixed (`65c1c50`), #63/#64 verified fixed with new
+      regression tests (the #63 test fails against the old `confidence: float = 0.90`
+      default - falsified by restoring it), #65 fixed earlier. #29 is item 8.
 - [ ] 8. #29 backlog item.
 - [ ] 9. Q7 citation check (sqlite loop ownership).
 - [ ] 10. Final sweep: full pytest + ruff + mypy + real-life harness green.
+
+## Memory-leak investigation, closed (second pass)
+
+The "RSS leak" is **not a leak, and it is not object retention either**. Measured three ways
+on the live agent:
+
+1. **40,000-request /nexus/intelligence soak** (`/tmp/soak40k.json`): RSS 81.4 -> 98.7 MB while
+   the bounded stores filled, then 26 consecutive rounds (26,000 requests) at exactly 0.0 MB,
+   all 13 stores at their ceiling. Verdict `plateau`.
+2. **Block-count forensics** `scripts/memory_forensics.py` (tracemalloc off, 1,600 `/ask` at
+   concurrency 6): live Python blocks 403,456 at rest -> 698,136 under load -> 404,371 after
+   45 s idle, i.e. exactly back to baseline, while RSS ended 1.3 MB higher. Anonymous heap grows
+   (RssAnon), not file-backed.
+3. **Whole-drive verdict** (`scripts/real_life_drive.py`, new final check
+   `memory_retention`): blocks 559,541 -> 559,545 (**+4**) across ~3,600 requests spanning every
+   mode, the adversarial corpus and the cancellation probe.
+
+So the residual is allocator slack, and `app/utils/memory_guard.py` now returns it: 102 trims
+reclaimed **222.5 MB** cumulatively during that drive (and 0.0 MB on a light burst - both
+numbers are in the module docstring). Two bugs in the guard itself were found and fixed by
+driving it: it ignored `MEMORY_TRIM_*` (reported `threshold_mb 400` when configured to 80) and
+its modulo-based consideration gate made it dead code under concurrency (1,500 requests,
+`trims: 0`). The RSS-based rules in the drive were then *demoted* to informational, because the
+same run that "failed" them measured +4 blocks.
 
 ## Evidence log
 (appended per item: command + observed numbers)
