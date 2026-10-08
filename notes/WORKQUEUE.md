@@ -387,3 +387,79 @@ Every new defect gets appended immediately with a measurement. If empty, re-audi
       filling — which cannot by itself explain sustained growth after 13k evictions, so the
       leak is either retained frame/response state or a store that is not actually bounded.
       NEXT: 12,300-request probe verdict, then fix the named site and re-measure flat RSS.
+
+## Increment 31 — real-life drive hardening: hidden-state bug, error-text leaks, allocator truth
+
+Every item here was found by *driving the agent*, not by reading it. Commit chain:
+`405f593` (schema/no-leak/guard) -> `e18844b` (memory verdict) -> `733f537` (error text)
+-> `bd60df7`/`75f10fe` (rate limit + fault harness).
+
+- [x] **Hidden state: `/v1/trading/consult` returned HTTP 500 ``no such table: tasks`` on a
+      clean database.** `TradingConsultService` builds its own `SQLiteMemory` and nothing
+      ever called `initialize()`; the endpoint worked only where some other component had
+      already created the schema. Exposed by deleting `data/universe.db` (the harness had
+      been passing on a database created by an earlier server run). Fixed in
+      `SQLiteMemory.connect()`: `ensure_schema()` creates missing tables once per instance
+      before handing out a connection; `initialize()` forces the check. `_create_schema` is
+      shared DDL. Pinned by `tests/test_memory_self_heal.py` (8 tests: clean-file writes,
+      reads, once-per-instance DDL, forced re-check, the failing route, and that a store
+      failure does not return 500 with internals).
+- [x] **Internal exception text published to clients — 5 sites.** ``detail=f"... {exc!s}"`` on
+      `/ask`, `/v1/ask` (twice: panel-unavailable and deliberation-failed, where the raw text
+      was interpolated into ``answer``), `/v1/debate` (``answer`` *and* ``failure_state``), and
+      the FRIDAY gateway. Measured in tests: ``password=s3cr3t-marker-2b1c`` and
+      ``/srv/private/db.sqlite`` came back in response bodies. `app/utils/errors.py` now owns
+      the rule: `internal_error()` logs with a correlation id and returns only the id;
+      `unavailable_detail()` publishes specialist ids and failure *kinds*. The engine records
+      the exception type explicitly (`app/agents/debate.py`) so the 503 stays informative.
+      A legacy assertion that *required* the gateway's raw text ("simulated outage") in the
+      503 was rewritten to the safe form of the same intent. 21 tests:
+      `tests/test_internal_errors_never_leak.py`.
+- [x] **The same text leaked one request later through `GET /tasks/{id}`** — `ask_v1` stored
+      `{"error": str(exc)}`, `get_task_status` returns `model_dump()`, and the route publishes
+      it. Metadata is now scrubbed at write time *and* on read (`scrub_credentials_dict`).
+- [x] **The scrubber missed bare provider key literals** — a rejected key arrives as
+      "Invalid API key: sk-...", not as `api_key=sk-...`. `scrub_credentials` now redacts
+      `sk-`/`sk-or-v1-`/`gsk_`/`hf_`/`nvapi-`/`xai-`/`pplx-`/`cohere-`/`AIza`/`r8_`/
+      `mistral-` literals, and the tests assert both directions: keys are redacted, and
+      benign text ("task-1234567890abcdef", "risk-assessment-of-the-write-path", "sk-learn")
+      is not mangled. The named-field minimum dropped 16 -> 8 characters, because a short
+      password is still a password.
+- [x] **Allocator high-water, measured to the end.** RSS-only verdicts were wrong in both
+      directions: (a) 1,600 `/ask` requests grew RSS 1.3 MB while `sys.getallocatedblocks()`
+      returned exactly to baseline (403,456 rest -> 698,136 load -> 404,371 idle); (b) a sample
+      1 s after a burst read +602,105 blocks and 40 s later read *below* its pre-burst value.
+      `app/utils/memory_guard.py` returns freed arenas (`malloc_trim`) only when the process is
+      idle and above the threshold, and it works: 102 trims reclaimed **222.5 MB** during one
+      full drive, 293 MB during the mixed soak — while the same guard reclaimed 0.0 MB on a
+      light burst (glibc had no whole arena free). Both numbers are in the module docstring.
+      Two bugs in the guard itself were found by driving it: it ignored `MEMORY_TRIM_*`
+      entirely (reported threshold 400 when configured 80) and its
+      "consider a trim every 25 completions *while idle*" gate made it dead code under
+      concurrency (1,500 requests, `trims: 0`).
+- [x] **The drive's memory verdict is now object retention**, not RSS: a final
+      `check_memory_retention` runs after every other check, polls until the block count holds
+      still across four readings, and reports `inconclusive` if it never does. Full drive:
+      **12/12 checks**, blocks 559,541 -> 559,545 (**+4**) over ~3,600 mixed requests.
+      `check_resource_ceiling` keeps the store audit and the RSS arithmetic and defers the
+      retention verdict when the counter is available (with the reason written in the code).
+- [x] **Per-bot rate limit was a frozen constant with no `Retry-After`.** `/v1/trading/consult`
+      answered 92 x 429 per 60 s soak round (every attempt) under a hardcoded 20/hour, and the
+      only headers present described the *global* limiter. Now reads
+      `TRADING_CONSULT_RATE_LIMIT_PER_HOUR` (default unchanged), answers `Retry-After` from the
+      oldest timestamp in the window, names the setting in the message, and keeps
+      `RATE_LIMIT_MAX_REQUESTS` working for existing callers (the first version of the change
+      broke `tests/test_bounded_state.py`, which imports it — caught by the suite, fixed in
+      `75f10fe`).
+- [x] **Failure injection, 14/14 honest** (`scripts/fault_injection.py`, second agent on :8001
+      against a rig that can be told to fail): healthy -> outage (every call 500) -> slow (3s
+      each) -> past-deadline (client timeout) -> recovery, across `/v1/friday/ask`, `/v1/ask`,
+      `/v1/debate`, `/v1/trading/consult`. Outage: 503 or in-band DEGRADED/ERROR at confidence
+      0.0. Slow: 12.2s, same honesty. Deadline: answered at 20.0s rather than hanging.
+      Recovery: immediate. The rig gained `{"*": ...}` in `fail_for` so "everything is down"
+      is expressible without killing the process.
+- [x] **The fault harness had three bugs of its own, all fixed and documented:** it judged a
+      healthy SUCCESS as dishonest; it mistook a dedup cache hit for a working provider
+      (identical question text returns the first answer, so "outage" scenarios echoed the
+      baseline); and it set `hang_seconds` without selecting the hang fault, injecting nothing.
+- [x] Suite: **472 passed**, ruff clean, mypy clean (239 files).
