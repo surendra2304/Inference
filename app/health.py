@@ -7,6 +7,7 @@ from fastapi import APIRouter, Response, status
 from app.agents.registry import agent_registry
 from app.config_production import production_config
 from app.monitoring import monitor
+from app.observability.prometheus import render_prometheus
 from app.optimization import concurrency_controller, telemetry_cache
 from app.version import VERSION
 
@@ -119,39 +120,20 @@ async def system_status():
 
 
 @health_router.get("/metrics", status_code=status.HTTP_200_OK)
-async def prometheus_metrics():
-    """Exposes Prometheus-formatted metrics."""
-    metrics_data = monitor.get_api_metrics()
-    cache_rate = telemetry_cache.get_hit_rate()
+async def prometheus_metrics() -> Response:
+    """Exposes Prometheus-formatted metrics for this process.
 
-    lines = [
-        "# HELP inference_requests_total Total number of consultation requests",
-        "# TYPE inference_requests_total counter",
-        f"inference_requests_total {metrics_data['total_requests']}",
-        "",
-        "# HELP inference_latency_p50_seconds P50 response latency in seconds",
-        "# TYPE inference_latency_p50_seconds gauge",
-        f"inference_latency_p50_seconds {metrics_data['p50_latency_sec']}",
-        "",
-        "# HELP inference_latency_p95_seconds P95 response latency in seconds",
-        "# TYPE inference_latency_p95_seconds gauge",
-        f"inference_latency_p95_seconds {metrics_data['p95_latency_sec']}",
-        "",
-        "# HELP inference_latency_p99_seconds P99 response latency in seconds",
-        "# TYPE inference_latency_p99_seconds gauge",
-        f"inference_latency_p99_seconds {metrics_data['p99_latency_sec']}",
-        "",
-        "# HELP inference_error_rate_percent Percentage of failed requests",
-        "# TYPE inference_error_rate_percent gauge",
-        f"inference_error_rate_percent {metrics_data['error_rate_pct']}",
-        "",
-        "# HELP inference_cache_hit_rate_percent Telemetry cache hit rate percentage",
-        "# TYPE inference_cache_hit_rate_percent gauge",
-        f"inference_cache_hit_rate_percent {cache_rate}",
-        "",
-        "# HELP inference_active_requests Current in-flight consultations",
-        "# TYPE inference_active_requests gauge",
-        f"inference_active_requests {concurrency_controller.active_count}"
-    ]
+    Rendered by :func:`app.observability.prometheus.render_prometheus`, the same function the
+    authenticated ``/v1/governance/prometheus-metrics`` endpoint uses, so the two can no
+    longer disagree about a metric's name or about how absent data is represented. See that
+    module for the two measured defects (malformed ``None`` samples; counters named after
+    consultation traffic while they counted every route) and how they are fixed.
 
-    return Response(content="\n".join(lines), media_type="text/plain; version=0.0.4")
+    Provider-level detail is deliberately excluded here: this endpoint is mounted outside
+    authentication so a scraper can reach it when a dependency is down, and which providers
+    are configured or failing is infrastructure detail, not a public metric.
+    """
+    return Response(
+        content=render_prometheus(include_provider_detail=False),
+        media_type="text/plain; version=0.0.4",
+    )

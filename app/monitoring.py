@@ -41,6 +41,7 @@ class PerformanceMonitor:
 
         # Debate engine metrics
         self.debate_durations: list[float] = []
+        self.total_deliberations = 0
         self.agent_calls: dict[str, int] = defaultdict(int)
 
     def record_request(self, latency_sec: float, success: bool = True) -> None:
@@ -69,13 +70,17 @@ class PerformanceMonitor:
     def get_api_metrics(self) -> dict[str, Any]:
         """Calculates p50, p95, p99 latencies, throughput, and error rate."""
         if not self.request_latencies:
+            # "nothing measured" is not "measured as zero": a 0.0 error rate with no sample
+            # count reads like a clean bill of health for a process that has served nothing.
             return {
                 "total_requests": self.total_requests,
-                "error_rate_pct": 0.0,
-                "p50_latency_sec": 0.0,
-                "p95_latency_sec": 0.0,
-                "p99_latency_sec": 0.0,
-                "avg_latency_sec": 0.0,
+                "samples": 0,
+                "error_rate_pct": None,
+                "p50_latency_sec": None,
+                "p95_latency_sec": None,
+                "p99_latency_sec": None,
+                "avg_latency_sec": None,
+                "basis": "no request latencies recorded in this process yet",
                 "uptime_seconds": round(time.time() - self.start_time, 1)
             }
 
@@ -84,6 +89,8 @@ class PerformanceMonitor:
 
         return {
             "total_requests": self.total_requests,
+            "samples": len(lats),
+            "latency_window": "most recent 5000 recorded requests",
             "error_rate_pct": err_pct,
             "p50_latency_sec": round(_percentile(lats, 50), 3),
             "p95_latency_sec": round(_percentile(lats, 95), 3),
@@ -115,12 +122,37 @@ class PerformanceMonitor:
             }
         return result
 
+    def record_deliberation(self, duration_sec: float) -> None:
+        """Record a completed multi-agent deliberation (bounded duration window)."""
+        self.debate_durations.append(duration_sec)
+        if len(self.debate_durations) > 5000:
+            self.debate_durations.pop(0)
+        self.total_deliberations += 1
+
     def get_debate_metrics(self) -> dict[str, Any]:
-        """Returns multi-agent debate metrics and participation frequencies."""
+        """Multi-agent deliberation metrics, measured or withheld.
+
+        ``recommendation_quality_score`` used to be the constant ``100.0`` with the comment
+        "Certified perfect 100/100 by audit suite" — a marketing number on an audit surface,
+        published even when no deliberation had ever run. There is no per-recommendation
+        outcome tracking in this process, so no quality score can be computed; the field is
+        reported as ``None`` with the reason, and ``total_deliberations`` now counts
+        deliberations rather than every HTTP request the process served.
+        """
+        durations = sorted(self.debate_durations)
         return {
             "agent_participation_counts": dict(self.agent_calls),
-            "total_deliberations": self.total_requests,
-            "recommendation_quality_score": 100.0  # Certified perfect 100/100 by audit suite
+            "total_deliberations": self.total_deliberations,
+            "total_api_requests": self.total_requests,
+            "debate_duration_samples": len(durations),
+            "debate_duration_p50_sec": round(_percentile(durations, 50), 3) if durations else None,
+            "debate_duration_p95_sec": round(_percentile(durations, 95), 3) if durations else None,
+            "recommendation_quality_score": None,
+            "recommendation_quality_basis": (
+                "withheld: this process does not track per-recommendation outcomes, so a "
+                "quality score cannot be derived; it was previously the constant 100.0"
+            ),
+            "evidence_class": "observed_deliberations" if durations else "no_deliberations_observed",
         }
 
 

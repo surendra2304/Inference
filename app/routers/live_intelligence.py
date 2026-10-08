@@ -14,8 +14,16 @@ live_router = APIRouter(prefix="/v1/trading/live", tags=["Live Capital Intellige
 
 
 class StressTestRequest(BaseModel):
-    portfolio_equity: float = Field(default=10000.0, description="Active portfolio equity in USD")
-    active_notional: float = Field(default=3000.0, description="Open notional position size in USD")
+    # allow_inf_nan=False states in the published contract what the arithmetic already
+    # assumes: equity and notional are finite quantities. Without it Pydantic accepts
+    # NaN/inf for a plain float, the stress engine arithmetic propagates them, and the
+    # response then cannot be encoded — a 500 caused by a value the schema said was fine.
+    portfolio_equity: float = Field(
+        default=10000.0, allow_inf_nan=False, description="Active portfolio equity in USD"
+    )
+    active_notional: float = Field(
+        default=3000.0, allow_inf_nan=False, description="Open notional position size in USD"
+    )
 
 
 @live_router.get("/intelligence", status_code=status.HTTP_200_OK)

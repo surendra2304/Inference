@@ -34,6 +34,25 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite:///data/universe.db"
 
+    #: Ceiling for the per-tenant request-id deduplication window. Each entry retains a
+    #: full response payload; a deduplicated response is an optimisation (a miss is
+    #: recomputed), so this trades memory for occasional recomputation.
+    DEDUP_CACHE_MAX_ENTRIES: int = 1000
+
+    #: Enables GET /v1/operational/memory/diagnostics (tracemalloc attribution of live
+    #: allocations). Off by default: the output names internal file paths and line numbers.
+    ENABLE_MEMORY_DIAGNOSTICS: bool = False
+
+    #: Allocator high-water guard. Measured (1,600 /ask requests, concurrency 6, tracemalloc
+    #: off): live Python blocks return to their baseline exactly, but RSS stays 1.3 MB higher
+    #: because glibc keeps freed arenas mapped. Left alone, every burst ratchets the resident
+    #: set up until a small container OOM-kills the process. The guard calls glibc's
+    #: ``malloc_trim`` once the resident set is above the threshold and no request is in
+    #: flight; it returns free memory only, so it cannot disturb live data.
+    MEMORY_TRIM_ENABLED: bool = True
+    MEMORY_TRIM_THRESHOLD_MB: float = 400.0
+    MEMORY_TRIM_COOLDOWN_SECONDS: float = 60.0
+
     # 7 Active Cloud Provider API Keys (Supports single or comma-separated lists)
     GEMINI_API_KEY: str | None = Field(default=None)
     GEMINI_API_KEYS: str | None = Field(default=None)
@@ -109,6 +128,156 @@ class Settings(BaseSettings):
     LITELLM_SUCCESS_CALLBACKS: str = Field(default="", description="LiteLLM success callback handlers")
     LITELLM_FAILURE_CALLBACKS: str = Field(default="", description="LiteLLM failure callback handlers")
     LITELLM_MODEL_ALIASES_JSON: str = Field(default="{}", description="JSON mapping for LiteLLM model aliases")
+
+    # ------------------------------------------------------------------
+    # Local (self-hosted) inference — the zero-cost, zero-quota tier.
+    #
+    # Disabled by default so that a deployment with no local server running does
+    # not pay a connection-refused penalty on every fallback. Enabling it adds
+    # `local` to the provider pool, to the routing candidates, and as the
+    # terminal rung of the fallback ladder.
+    # ------------------------------------------------------------------
+    LOCAL_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Enable the self-hosted OpenAI-compatible provider ('local'). Requires "
+            "LOCAL_BASE_URL to point at a running server (Ollama, llama.cpp, vLLM, SGLang)."
+        ),
+    )
+    LOCAL_BASE_URL: str = Field(
+        default="http://127.0.0.1:11434/v1",
+        description=(
+            "Base URL of the local OpenAI-compatible server, including the /v1 suffix. "
+            "Ollama 127.0.0.1:11434/v1, llama.cpp llama-server 127.0.0.1:8080/v1, vLLM 127.0.0.1:8000/v1."
+        ),
+    )
+    LOCAL_MODEL: str = Field(
+        default="local-model",
+        description=(
+            "Model id to request from the local server. Must match a tag the server has loaded; "
+            "run 'python -m app.core.key_inventory --probe-local' or GET /v1/providers/models to list them."
+        ),
+    )
+    LOCAL_API_KEY: str | None = Field(
+        default=None,
+        description=(
+            "Optional bearer token for the local server. Local servers normally need none; set this "
+            "only when the endpoint sits behind an authenticating reverse proxy."
+        ),
+    )
+    LOCAL_CONTEXT_WINDOW: int = Field(
+        default=16384,
+        description=(
+            "Context window of the locally loaded model. Deliberately explicit rather than assumed: "
+            "the cloud adapters advertise 128k, and letting the router believe a 4k local model has "
+            "128k would produce prompts the server rejects."
+        ),
+    )
+    LOCAL_SUPPORTS_TOOL_CALLING: bool = Field(
+        default=False,
+        description="Whether the locally loaded model supports OpenAI-style tool calling.",
+    )
+    HUMAN_RATE_LIMIT_PER_HOUR: int = Field(
+        default=600,
+        ge=1,
+        description=(
+            "Hourly request allowance for the interactive 'human' consumer profile, "
+            "enforced as a token bucket, so bursts are allowed and the sustained rate is "
+            "this value divided by 3600 seconds. The previous hardcoded value was 50/hour, "
+            "which contradicted the request-level limiter (120/minute) by ~72x and locked a "
+            "human operator out of the product after 50 requests. Default 600/hour = 10 "
+            "requests per minute sustained, which still leaves the other limiter as the "
+            "binding constraint for scripted traffic."
+        ),
+    )
+    SQLITE_POOL_SIZE: int = Field(
+        default=8,
+        ge=1,
+        le=64,
+        description=(
+            "Maximum concurrent SQLite connections per memory store. Each in-flight "
+            "connection holds ~37 file descriptors (db + -wal + -shm + pipe + thread), "
+            "so an unbounded connection-per-call pattern makes the OS descriptor limit "
+            "the service's real concurrency ceiling."
+        ),
+    )
+    PEER_COVERAGE_MAX_ATTEMPTS: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "How many peer specialists may be tried to cover one failed specialist. "
+            "Unbounded peer coverage is a stampede: every registered agent becomes an "
+            "extra sequential model call, so a single provider outage turns one request "
+            "into a minute of retries. Measured before this cap: 18 peer attempts x ~3s "
+            "= 55s for a request whose budget was 30s."
+        ),
+    )
+    PEER_COVERAGE_BUDGET_SECONDS: float = Field(
+        default=20.0,
+        gt=0.0,
+        description=(
+            "Wall-clock ceiling for the whole round-1 specialist phase, including peer "
+            "coverage. This is the backstop that keeps a request bounded when many "
+            "specialists fail at once: without it, the panel's runtime is proportional "
+            "to the number of registered agents rather than to its own deadline."
+        ),
+    )
+    LOCAL_MAX_CONCURRENCY: int = Field(
+        default=16,
+        ge=1,
+        description=(
+            "Maximum simultaneous requests to the self-hosted server. This — not a rate — is the real "
+            "constraint on local inference: the host has finite compute slots, but no quota."
+        ),
+    )
+    LOCAL_MAX_RPS: float = Field(
+        default=1000.0,
+        gt=0.0,
+        description=(
+            "Token-bucket refill rate for the self-hosted tier. Deliberately very high: a local server "
+            "has no vendor quota, and the panel fans one request out to 8+ model calls, so a low rate "
+            "silently ceilings throughput for the whole agent. Measured effect of the previous 10 req/s: "
+            "latency stepped from 0.11s to 0.80s once the bucket drained, and stayed there. Use "
+            "LOCAL_MAX_CONCURRENCY to protect the host instead."
+        ),
+    )
+    LOCAL_PREFERRED: bool = Field(
+        default=False,
+        description=(
+            "Air-gapped mode: answer every request from the self-hosted tier first and attempt no "
+            "outbound provider call. Use for offline development or when prompts must not leave the "
+            "machine. If the local tier fails, the request falls through to the cloud providers with a "
+            "loud warning — set LOCAL_ENABLED and leave LOCAL_PREFERRED off if you need cloud-first "
+            "behaviour instead."
+        ),
+    )
+
+    # ------------------------------------------------------------------
+    # Gateway deadline policy
+    # ------------------------------------------------------------------
+    PROVIDER_HEALTH_RECOVERY_SECONDS: float = Field(
+        default=30.0,
+        ge=0.0,
+        description=(
+            "Seconds after a provider's most recent failure before it is offered a half-open "
+            "probe. Callers skip providers reported unhealthy, and only a successful call can "
+            "clear an unhealthy verdict — so without this cooldown a provider that accumulated "
+            "consecutive failures could never be retried and would stay disabled for the life of "
+            "the process. Set to 0 for immediate probing."
+        ),
+    )
+    PRIMARY_ATTEMPT_FRACTION: float = Field(
+        default=0.6,
+        ge=0.1,
+        le=1.0,
+        description=(
+            "Fraction of the total request deadline a primary provider attempt may consume before the "
+            "gateway escalates to the fallback ladder. The remainder is reserved for fallbacks. Without "
+            "this reservation a primary that times out exhausts the whole budget and the ladder collapses "
+            "to re-raising the original error — i.e. the resilience design becomes unreachable exactly "
+            "when it is needed."
+        ),
+    )
 
     def get_provider_keys(self, provider_name: str) -> list[str]:
         """

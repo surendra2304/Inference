@@ -111,11 +111,11 @@ async def test_rate_limiter_keys_on_peer_not_forged_header():
     req = make_request(path="/v1/ask", headers={"X-Forwarded-For": "1.2.3.4"}, client=PUBLIC_PEER)
     resp = await mw.dispatch(req, _ok_next)
     assert resp.status_code == 200
-    assert mw._request_history, "the request should have been recorded"
-    assert all(PUBLIC_PEER[0] in k for k in mw._request_history), (
-        f"bucket keyed on a forged header: {list(mw._request_history)}"
+    assert mw._buckets, "the request should have been recorded"
+    assert all(PUBLIC_PEER[0] in k for k in mw._buckets), (
+        f"bucket keyed on a forged header: {list(mw._buckets)}"
     )
-    assert not any("1.2.3.4" in k for k in mw._request_history)
+    assert not any("1.2.3.4" in k for k in mw._buckets)
 
 
 async def test_rate_limiter_splits_callers_behind_a_local_proxy():
@@ -129,7 +129,7 @@ async def test_rate_limiter_splits_callers_behind_a_local_proxy():
         resp = await mw.dispatch(req, _ok_next)
         assert resp.status_code == 200
 
-    keys = list(mw._request_history)
+    keys = list(mw._buckets)
     assert len(keys) == 3, f"proxy case collapsed into {len(keys)} bucket(s): {keys}"
     for ip in ("203.0.113.10", "203.0.113.11", "203.0.113.12"):
         assert any(ip in k for k in keys), f"no bucket for {ip}"
@@ -142,7 +142,7 @@ async def test_dev_bypass_does_not_open_up_for_remote_peers(monkeypatch):
     req = make_request(path="/v1/ask", client=PUBLIC_PEER)
     resp = await mw.dispatch(req, _ok_next)
     assert resp.status_code == 200
-    assert mw._request_history, (
+    assert mw._buckets, (
         "a remote peer must be rate limited even when APP_ENV=development"
     )
     # The bypass would have stamped the synthetic 10000 allowance header.
@@ -155,7 +155,7 @@ async def test_loopback_peer_still_bypasses_in_explicit_dev_mode(monkeypatch):
     req = make_request(path="/v1/ask", client=LOOPBACK_PEER)
     resp = await mw.dispatch(req, _ok_next)
     assert resp.headers.get("X-RateLimit-Limit") == "10000"
-    assert mw._request_history == {}, "explicit local dev bypass should record nothing"
+    assert mw._buckets == {}, "explicit local dev bypass should record nothing"
 
 
 # ── ProductionSecurityMiddleware / APISecurityManager ─────────────────────────

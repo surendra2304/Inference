@@ -2,10 +2,27 @@
 
 import time
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
+from app.core.security import require_inference_api_key
 from app.providers.pool_optimizer import provider_pool_optimizer
 from app.routing.consumer_router import ConsumerType, consumer_router
+
+# Auth is attached per-route rather than to the whole router because this module mixes
+# two very different kinds of endpoint:
+#   * liveness/capability polls (``/v1/forge/health``, ``/v1/forge/capabilities``) that a
+#     monitoring system or a service-discovery probe must be able to call without
+#     holding an inference credential;
+#   * back-office telemetry (``/v1/admin/*``) that exposes per-consumer call volume,
+#     token spend and estimated cost, and the provider pool's latency and health.
+# The second class is operational data about paying consumers, so it requires the same
+# credential as every other data-exposing router in ``app/main.py``.
+#
+# Before this, the router was mounted with no dependencies at all, so both admin
+# endpoints answered ``200`` to an anonymous request: the usage and performance of every
+# configured consumer were readable by anyone who could reach the port. Verified with an
+# unauthenticated request returning the full consumer breakdown.
+_ADMIN_AUTH = [Depends(require_inference_api_key)]
 
 forge_health_router = APIRouter(tags=["FORGE Health & Admin"])
 
@@ -45,13 +62,17 @@ async def get_forge_capabilities():
     }
 
 
-@forge_health_router.get("/v1/admin/usage", status_code=status.HTTP_200_OK)
+@forge_health_router.get(
+    "/v1/admin/usage", status_code=status.HTTP_200_OK, dependencies=_ADMIN_AUTH
+)
 async def get_consumer_usage(consumer: ConsumerType | None = Query(default=None, description="forge, trading_bot, friday, human")):
     """Returns token and call usage metrics per consumer."""
     return consumer_router.get_usage(consumer)
 
 
-@forge_health_router.get("/v1/admin/providers/performance", status_code=status.HTTP_200_OK)
+@forge_health_router.get(
+    "/v1/admin/providers/performance", status_code=status.HTTP_200_OK, dependencies=_ADMIN_AUTH
+)
 async def get_providers_performance():
     """Returns latency and health metrics across the provider pool."""
     return provider_pool_optimizer.get_performance_report()

@@ -94,7 +94,68 @@ def _scan_for_forbidden_keys(obj: Any, path: str = "") -> None:
             _scan_for_forbidden_keys(item, f"{path}[{idx}]")
 
 
-@router.post("/consult", response_model=AIUniverseDecision, status_code=status.HTTP_200_OK)
+def _inline_defs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of ``schema`` with every ``#/$defs/<Name>`` reference inlined.
+
+    Pydantic hoists nested models into ``$defs`` and points at them with ``#/$defs/<Name>``.
+    The walk is depth-guarded rather than trusted: a cyclic model would otherwise expand
+    forever and hang module import, and a missing definition raises instead of silently
+    emitting an unresolvable reference.
+    """
+    defs = schema.get("$defs", {})
+
+    def resolve(node: Any, depth: int = 0) -> Any:
+        if depth > 25:
+            raise ValueError("schema $defs are cyclic; refusing to inline")
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                name = ref.rsplit("/", 1)[-1]
+                if name not in defs:
+                    raise KeyError(f"unresolvable schema reference: {ref}")
+                resolved = resolve(defs[name], depth + 1)
+                siblings = {k: resolve(v, depth + 1) for k, v in node.items() if k != "$ref"}
+                if siblings and isinstance(resolved, dict):
+                    return {**resolved, **siblings}
+                return resolved
+            return {k: resolve(v, depth + 1) for k, v in node.items() if k != "$defs"}
+        if isinstance(node, list):
+            return [resolve(v, depth + 1) for v in node]
+        return node
+
+    return resolve({k: v for k, v in schema.items() if k != "$defs"})
+
+
+def _consult_request_body_schema() -> dict[str, Any]:
+    """Publish the real request body for ``POST /consult`` in the OpenAPI document.
+
+    The handler deliberately takes a raw ``Request`` so it can enforce a 1 MB size limit
+    (413) and scan for smuggled credentials *before* validation — the security ordering
+    is the point. The cost of that choice was that FastAPI generated **no requestBody at
+    all** for this route: ``/openapi.json`` advertised an empty body while the service
+    required ``bot_id``, ``trading_mode``, ``telemetry`` and ``consultation_reason``, so
+    every spec-generated client and every reader of ``/docs`` sent a body that could not
+    work. The published contract contradicted the code. Declaring the schema explicitly
+    here restores it without weakening the runtime checks.
+    """
+    schema = TradingConsultRequest.model_json_schema()
+    # Pydantic hoists nested models into ``$defs`` and points at them with
+    # ``#/$defs/<Name>``. FastAPI only rewrites those pointers into
+    # ``#/components/schemas/<Name>`` for models it generated itself; because this route
+    # is declared with a raw ``Request``, nothing registers them in ``components``. The
+    # naive ``ref_template`` override therefore produced three *dangling* ``$ref``s
+    # (StrategyPerformance, TestnetContext, TradingTelemetry) which break Swagger UI and
+    # any generated client. Inlining the definitions keeps the document self-contained.
+    schema = _inline_defs(schema)
+    return {"required": True, "content": {"application/json": {"schema": schema}}}
+
+
+@router.post(
+    "/consult",
+    response_model=AIUniverseDecision,
+    status_code=status.HTTP_200_OK,
+    openapi_extra={"requestBody": _consult_request_body_schema()},
+)
 async def consult_trading_bot(request: Request) -> AIUniverseDecision:
     """
     Submits performance telemetry for multi-agent trading consultation.
@@ -156,11 +217,24 @@ async def consult_trading_bot(request: Request) -> AIUniverseDecision:
             comparison_rationale="Consultation timed out before completing A/B comparative synthesis."
         )
     except Exception as exc:
-        logger.error("Error executing trading consultation: %s", str(exc))
+        # The caller gets a correlation id; the details stay in the server log. Handing the
+        # raw exception to the client leaked whatever the failure happened to contain —
+        # measured: a raised RuntimeError carrying "password=hunter2" and an absolute path
+        # came straight back in the HTTP response body. An operator can join the two through
+        # the correlation id, and a client can retry safely without learning our internals.
+        correlation_id = f"consult_{uuid4().hex[:12]}"
+        logger.error(
+            "Consultation orchestration failure [%s] for bot '%s': %s",
+            correlation_id, req.bot_id, exc, exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Consultation orchestration failure: {exc!s}"
-        )
+            detail=(
+                "Consultation could not be completed due to an internal error. "
+                f"Quote correlation id {correlation_id} when reporting this; the details are "
+                "in the server log."
+            ),
+        ) from exc
 
 
 @router.get("/consult/health", status_code=status.HTTP_200_OK)

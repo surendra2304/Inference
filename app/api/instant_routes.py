@@ -6,6 +6,7 @@ speculative LPU completions across Groq and Gemini Flash.
 
 import json
 import time
+from typing import Any
 
 from fastapi import APIRouter, status
 from fastapi.responses import StreamingResponse
@@ -35,10 +36,15 @@ class InstantResponse(BaseModel):
     answer: str
     latency_ms: float
     source: str  # "instant_grounding", "l1_cache", "speculative_lpu", "fallback"
+    # ``provider``/``model`` describe what ACTUALLY served the text. ``speculative_race``
+    # carries the race bookkeeping separately, so a caller can see which candidate won
+    # the race and whether the answer was in fact served locally after a fallback,
+    # without the two facts being conflated into a vendor name that never ran.
     provider: str
     model: str
     task_id: str
     cached: bool
+    speculative_race: dict[str, Any] | None = None
 
 
 @instant_router.post("/ask", response_model=InstantResponse, status_code=status.HTTP_200_OK)
@@ -92,11 +98,13 @@ async def instant_ask(req: InstantRequest) -> InstantResponse:
             ["groq", "gemini"], prov_req, stage_name="instant_race"
         )
         lat_ms = round((time.perf_counter() - start) * 1000.0, 2)
-        winner = (
-            race_resp.raw_response.get("speculative_race", {}).get("winner", race_resp.provider)
-            if race_resp.raw_response
-            else race_resp.provider
-        )
+        race = (race_resp.raw_response or {}).get("speculative_race", {}) or {}
+        # Report the provider that produced the content, never the raced candidate's
+        # label. Measured before this fix: the local rig answered
+        # ("GATEWAY: Served capability 'general' from the self-hosted tier") while the
+        # response advertised provider="groq" / model="gemini-3.8-flash" — a vendor that
+        # never ran. Anything billing or routing on this field was being told a fiction.
+        served_by = race.get("served_by") or race_resp.provider
 
         if not req.no_cache:
             perf_cache.set_query(
@@ -110,16 +118,23 @@ async def instant_ask(req: InstantRequest) -> InstantResponse:
         return InstantResponse(
             answer=race_resp.content,
             latency_ms=lat_ms,
-            source="speculative_lpu",
-            provider=winner,
+            source="speculative_lpu" if not race.get("fell_back") else "speculative_lpu_local_fallback",
+            provider=served_by,
             model=race_resp.model,
             task_id=task_id,
             cached=False,
+            speculative_race=race or None,
         )
     except Exception as exc:
         logger.warning("Speculative race failed in instant_ask: %s", exc)
         lat_ms = round((time.perf_counter() - start) * 1000.0, 2)
-        fallback = f"Instant query processed: {req.prompt[:100]}... Verified operational status active."
+        # Do not claim verification that never happened: this string is returned when no
+        # model answered at all, and the previous wording ("Verified operational status
+        # active") asserted a check that was never performed.
+        fallback = (
+            f"No instant answer available for: {req.prompt[:100]} "
+            f"(no inference provider responded; this is a placeholder, not an answer)"
+        )
         return InstantResponse(
             answer=fallback,
             latency_ms=lat_ms,

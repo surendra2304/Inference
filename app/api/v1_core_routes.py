@@ -20,15 +20,18 @@ from __future__ import annotations
 
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, status
 
 from app.agents.base import Agent
-from app.agents.debate import debate_engine
+from app.agents.debate import AgentPanelUnavailable, debate_engine
 from app.agents.registry import agent_registry
 from app.core.astra_profile import astra_profile
 from app.core.dag import TaskComplexity
+from app.core.orchestrator import orchestrator
+from app.memory.base import TaskRecord
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
 from app.schemas.v1_models import (
     DebateRequest,
@@ -64,7 +67,13 @@ def _scrub_and_verify(raw_text: str, context: Any, trace_id: str) -> tuple[str, 
     except CredentialLeakError as exc:
         logger.error("Trace %s refused: %s", trace_id, exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            # The server is working correctly; it is refusing a request whose payload it
+            # cannot guarantee is clean. Answering 500 said the SERVER had broken, which
+            # told an on-call engineer to investigate a fault and told the client to stop
+            # retrying, while the actionable fact is that this payload carries something
+            # that looks like a credential. A 4xx also keeps a security refusal out of the
+            # server-fault bucket where it was indistinguishable from a real crash.
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Request refused: a credential could not be sanitized.",
         ) from exc
 
@@ -72,7 +81,7 @@ def _scrub_and_verify(raw_text: str, context: Any, trace_id: str) -> tuple[str, 
     if residual:
         logger.error("Trace %s refused; residual credentials: %s", trace_id, residual)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Request refused: a credential could not be sanitized.",
         )
     return clean_text, clean_context
@@ -128,6 +137,54 @@ async def v1_capabilities() -> dict[str, Any]:
         "executable_authority": False,
         "claim_gpt6": False,
     }
+
+
+#: Confidence for a single, unverified model call, used as the baseline for /v1/ask.
+#:
+#: This is a *policy prior*, not a measured accuracy: one model answered once, with
+#: no second opinion, no evidence retrieval and no cross-examination, so the honest
+#: claim is "probably useful, not verified". It is deliberately below every value the
+#: deliberation engine reports for a panel (a two-specialist review lands at ~0.83, a
+#: five-specialist debate at ~0.80): the shallowest path must not claim the most
+#: certainty.
+_SINGLE_CALL_BASE_CONFIDENCE = 0.65
+#: Ceiling applied when the provider stopped at its token limit; a truncated answer is
+#: materially incomplete. Kept equal to the deliberation engine's own truncation
+#: ceiling so the two stacks cannot disagree about what truncation means.
+_TRUNCATION_CONFIDENCE_CEILING = 0.55
+
+
+def _derive_single_call_confidence(
+    content: str,
+    *,
+    truncated: bool,
+    served_by_fallback: bool,
+) -> float:
+    """Derive a confidence for a single model call from evidence, never a constant.
+
+    Before this, ``/v1/ask`` returned a hardcoded ``0.92`` for *any* successful call,
+    regardless of what came back: a two-word answer and a thorough analysis scored
+    identically, a response from a fallback provider scored the same as a first-choice
+    one, and the number was higher than the deliberation engine's confidence for a
+    five-specialist debate. A constant published as calibrated confidence is a false
+    claim about how much the answer can be trusted, so it is replaced by a value that
+    moves with the evidence actually available.
+    """
+    if not content or not content.strip():
+        # Nothing came back; there is nothing to be confident about.
+        return 0.0
+
+    confidence = _SINGLE_CALL_BASE_CONFIDENCE
+    if len(content.strip()) >= 400:
+        # A substantive answer is weak evidence that the model engaged with the task.
+        confidence += 0.05
+    if served_by_fallback:
+        # The request did not reach the provider that was chosen for it; whatever it
+        # did reach is less well matched to the task's capability profile.
+        confidence -= 0.05
+    if truncated:
+        confidence = min(confidence, _TRUNCATION_CONFIDENCE_CEILING)
+    return round(max(0.0, min(confidence, 0.75)), 2)
 
 
 def _check_insufficient_data(text: str, context: dict[str, Any]) -> tuple[bool, list[str]]:
@@ -210,7 +267,148 @@ async def ask_v1(
             missing_data=missing_items,
         )
 
-    # 4. Dispatch reasoning via UnifiedProviderManager with ASTRA persona
+    # 4. Dispatch reasoning
+    #
+    # ``mode`` used to influence exactly one thing: ``fast_lane=(mode == "fast")``. Every
+    # other accepted value ("deliberative", "consensus", "review") produced the same single
+    # provider call, and the response said nothing about it — measured live, all four modes
+    # returned byte-identical answers with the same confidence. The multi-agent modes now
+    # run the deliberation engine and the response reports ``mode_requested`` /
+    # ``mode_used``; "consensus" is an *outcome* label in this service (the panel agreed),
+    # not a separate mode, so it maps onto "review" and the mapping is disclosed.
+    mode_requested = request.mode
+    multi_agent_mode = {"deliberative": "review", "consensus": "review", "review": "review",
+                        "debate": "debate"}.get(request.mode)
+    mode_mapping_note = (
+        f"mode '{request.mode}' ran the multi-agent engine as '{multi_agent_mode}'"
+        if multi_agent_mode and multi_agent_mode != request.mode
+        else None
+    )
+
+    if multi_agent_mode is not None:
+        try:
+            from app.core.orchestrator import OrchestrationRequest, orchestrator
+
+            result = await orchestrator.process_task(
+                OrchestrationRequest(
+                    question=clean_prompt,
+                    mode=multi_agent_mode,
+                    require_evidence=True,
+                    context_data=clean_context,
+                )
+            )
+        except AgentPanelUnavailable as exc:
+            # Every specialist went dark. This endpoint's contract carries ``status`` /
+            # ``failure_state`` / ``confidence`` precisely so a client can be told the panel
+            # produced nothing — in band, with no fabricated prose in ``answer``.
+            logger.warning("[V1_ASK] panel unavailable: %s", exc)
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+            await _record_task_outcome(
+                task_id, clean_prompt, f"Panel unavailable: {exc}", mode=request.mode,
+                status_value="failed", confidence=0.0,
+                metadata={"trace_id": trace_id, "error": str(exc)},
+            )
+            return InferenceTaskResponse(
+                task_id=task_id,
+                trace_id=trace_id,
+                answer=(
+                    "No specialist produced a result, so no answer is offered. "
+                    "Every configured provider and peer agent was unavailable for this request."
+                ),
+                reasoning_summary="Deliberation could not start: the specialist panel was unavailable.",
+                confidence=0.0,
+                uncertainty=1.0,
+                evidence=[],
+                agents_used=[],
+                recommendations=["Retry, or ask with mode='fast' for a single-model answer."],
+                proposed_actions=[],
+                authorization_required=False,
+                provider_metadata=ProviderMetadata(
+                    provider="multi_provider_council",
+                    model="deliberation_engine",
+                    latency_ms=latency_ms,
+                ),
+                failure_state=f"PANEL_UNAVAILABLE: {exc}",
+                status="DEGRADED",
+                mode_requested=mode_requested,
+                mode_used=None,
+                mode_mapping_note=mode_mapping_note,
+            )
+        except Exception as exc:  # noqa: BLE001 - reported, never fabricated over
+            logger.error("[V1_ASK] multi-agent deliberation failed: %s", exc, exc_info=True)
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+            await _record_task_outcome(
+                task_id, clean_prompt, f"Deliberation failed: {exc}", mode=request.mode,
+                status_value="failed", confidence=0.0,
+                metadata={"trace_id": trace_id, "error": str(exc)},
+            )
+            return InferenceTaskResponse(
+                task_id=task_id, trace_id=trace_id,
+                answer=(
+                    "Deliberation could not be completed: the multi-agent panel did not "
+                    f"produce a result ({exc}). No answer is fabricated in its place."
+                ),
+                reasoning_summary="Multi-agent deliberation failed before synthesis.",
+                confidence=0.0, uncertainty=1.0, evidence=[],
+                agents_used=[],
+                recommendations=["Retry, or ask with mode='fast' for a single-model answer."],
+                proposed_actions=[], authorization_required=False,
+                provider_metadata=ProviderMetadata(provider="multi_provider_council",
+                                                   model="deliberation_engine",
+                                                   latency_ms=latency_ms),
+                failure_state="DELIBERATION_FAILED", status="DEGRADED",
+                mode_requested=mode_requested, mode_used=None, mode_mapping_note=mode_mapping_note,
+            )
+
+        latency_ms = int((time.perf_counter() - start_time) * 1000)
+        await _record_task_outcome(
+            task_id, clean_prompt, result.answer, mode=result.mode_used,
+            status_value="degraded" if result.degraded else "completed",
+            confidence=result.confidence,
+            metadata={
+                "trace_id": trace_id, "run_id": result.run_id,
+                "deliberation_outcome": result.deliberation_outcome,
+                "agents_used": result.agents_used, "models_used": result.models_used,
+                "unresolved_disagreements": result.unresolved_disagreements,
+                "degraded": result.degraded, "degradation_reasons": result.degradation_reasons,
+                "failed_agents": result.failed_agents,
+            },
+        )
+        return InferenceTaskResponse(
+            task_id=task_id,
+            trace_id=trace_id,
+            answer=result.answer,
+            reasoning_summary=(
+                f"Deliberated in '{result.mode_used}' mode across {len(result.agents_used)} "
+                f"specialist role(s); outcome '{result.deliberation_outcome or 'n/a'}'."
+            ),
+            confidence=result.confidence,
+            uncertainty=round(max(0.0, 1.0 - result.confidence), 4),
+            evidence=result.key_evidence,
+            agents_used=result.agents_used,
+            recommendations=(
+                ["Resolve the recorded disagreements before acting on this answer."]
+                if result.unresolved_disagreements
+                else ["Proceed with the consensus view; monitor for contradicting evidence."]
+            ),
+            proposed_actions=[],
+            authorization_required=bool(result.unresolved_disagreements),
+            provider_metadata=ProviderMetadata(
+                provider=result.provider_used or "multi_provider_council",
+                model="deliberation_engine",
+                fallback_chain=result.models_used,
+                total_tokens=result.total_tokens,
+                latency_ms=latency_ms,
+            ),
+            failure_state=(
+                "; ".join(result.degradation_reasons) if result.degraded else None
+            ),
+            status="DEGRADED" if result.degraded else "SUCCESS",
+            mode_requested=mode_requested,
+            mode_used=result.mode_used,
+            mode_mapping_note=mode_mapping_note,
+        )
+
     try:
         astra_instruction = (
             f"[{astra_profile.name} DELIBERATIVE REASONING COUNCIL - {astra_profile.role}]\n"
@@ -269,6 +467,8 @@ async def ask_v1(
                 ),
                 failure_state=resp.error or "all_provider_calls_failed",
                 status="DEGRADED",
+                mode_requested=request.mode,
+                mode_used="fast",
             )
 
         # Formulate advisory proposed actions
@@ -286,13 +486,39 @@ async def ask_v1(
                 )
             )
 
+        # Derive the confidence from what actually came back instead of publishing a
+        # constant (see _derive_single_call_confidence).
+        truncated = (resp.finish_reason or "").lower() in ("length", "max_tokens")
+        # A policy substitution (self-hosted tier under LOCAL_PREFERRED) is the intended
+        # path, not a fault; only an actual fallback costs confidence.
+        served_by_fallback = bool(resp.served_by_provider) and not resp.served_by_policy
+        served_from_self_hosted = bool(resp.served_by_policy)
+        derived_confidence = _derive_single_call_confidence(
+            resp.content, truncated=truncated, served_by_fallback=served_by_fallback
+        )
+        basis = [
+            "one model call, no cross-examination",
+            f"provider={resp.provider_used}",
+        ]
+        if truncated:
+            basis.append("output truncated at the token ceiling")
+        if served_by_fallback:
+            basis.append(f"served by a fallback provider ({resp.served_by_provider})")
+        if served_from_self_hosted:
+            basis.append("served by the self-hosted tier (LOCAL_PREFERRED)")
+        if not (resp.content or "").strip():
+            basis.append("empty completion")
+
         return InferenceTaskResponse(
             task_id=task_id,
             trace_id=trace_id,
             answer=resp.content,
-            reasoning_summary=f"Synthesized across deliberative council via {resp.provider_used} ({resp.model_used}).",
-            confidence=0.92,
-            uncertainty=0.08,
+            reasoning_summary=(
+                f"Synthesized across deliberative council via {resp.provider_used} "
+                f"({resp.model_used}). Confidence basis: {', '.join(basis)}."
+            ),
+            confidence=derived_confidence,
+            uncertainty=round(1.0 - derived_confidence, 2),
             evidence=[f"Empirical provider verification via {resp.provider_used}:{resp.model_used}"],
             agents_used=["astra_council", resp.agent_role or "system_architect"],
             recommendations=["Review deliberative findings before initiating state-changing actions."],
@@ -308,6 +534,8 @@ async def ask_v1(
             ),
             failure_state=None,
             status="SUCCESS",
+            mode_requested=request.mode,
+            mode_used="fast",
         )
 
     except Exception as exc:
@@ -332,7 +560,44 @@ async def ask_v1(
             ),
             failure_state=str(exc),
             status="ERROR",
+            mode_requested=request.mode,
+            mode_used="fast",
         )
+
+
+async def _record_task_outcome(
+    task_id: str,
+    question: str,
+    result: str,
+    *,
+    mode: str,
+    status_value: str,
+    confidence: float | None,
+    metadata: dict[str, Any],
+) -> None:
+    """Persist a task record for a route that drives the engine directly.
+
+    ``GET /tasks/{task_id}`` is the documented way to read a task back, so every route
+    that answers with a ``task_id`` must make that id resolvable. Measured live: a
+    ``POST /v1/debate`` returned 200 with ``task_53017bc07162`` while the read-back
+    answered 404, because this route never went through ``Orchestrator.process_task``.
+    Persistence failure is logged and never fabricates success.
+    """
+    try:
+        await orchestrator.record_task(
+            TaskRecord(
+                id=task_id,
+                question=question,
+                mode=mode,
+                status=status_value,
+                result=result,
+                confidence=confidence,
+                completed_at=datetime.now(timezone.utc),
+                metadata=metadata,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - the answer already happened; report, don't mask
+        logger.error("[V1_DEBATE] Task record for %s could not be persisted: %s", task_id, exc)
 
 
 @v1_router.post("/debate", response_model=InferenceTaskResponse, status_code=status.HTTP_200_OK)
@@ -361,6 +626,20 @@ async def debate_v1(
     is_insufficient, missing_items = _check_insufficient_data(clean_topic, clean_context)
     if is_insufficient:
         latency_ms = int((time.perf_counter() - start_time) * 1000)
+        await _record_task_outcome(
+            task_id,
+            clean_topic,
+            "Debate halted: insufficient core evidence.",
+            mode="debate",
+            status_value="completed",
+            confidence=0.25,
+            metadata={
+                "failure_state": "INSUFFICIENT_DATA",
+                "missing_data": missing_items,
+                "trace_id": trace_id,
+                "provider": "debate_council",
+            },
+        )
         return InferenceTaskResponse(
             task_id=task_id,
             trace_id=trace_id,
@@ -421,6 +700,27 @@ async def debate_v1(
         # Extract agents used
         agents_used_ids = [a.id for a in participating_agents] if participating_agents else collab_result.participating_agents
 
+        await _record_task_outcome(
+            task_id,
+            clean_topic,
+            collab_result.final_answer,
+            mode="debate",
+            status_value="degraded" if collab_result.degraded else "completed",
+            confidence=collab_result.confidence,
+            metadata={
+                "trace_id": trace_id,
+                "debate_id": collab_result.debate_id,
+                "deliberation_outcome": collab_result.mode_used,
+                "agents_used": agents_used_ids,
+                "models_used": collab_result.models_used,
+                "unresolved_disagreements": collab_result.unresolved_disagreements,
+                "degraded": collab_result.degraded,
+                "degradation_reasons": collab_result.degradation_reasons,
+                "agent_coverage": collab_result.agent_coverage,
+                "failed_agents": collab_result.failed_agents,
+            },
+        )
+
         return InferenceTaskResponse(
             task_id=task_id,
             trace_id=trace_id,
@@ -453,6 +753,15 @@ async def debate_v1(
     except Exception as exc:
         logger.error(f"[V1_DEBATE] Debate execution failure: {exc}", exc_info=True)
         latency_ms = int((time.perf_counter() - start_time) * 1000)
+        await _record_task_outcome(
+            task_id,
+            topic,
+            f"Debate deliberation encountered an error: {exc}",
+            mode="debate",
+            status_value="failed",
+            confidence=0.0,
+            metadata={"trace_id": trace_id, "error": str(exc)},
+        )
         return InferenceTaskResponse(
             task_id=task_id,
             trace_id=trace_id,

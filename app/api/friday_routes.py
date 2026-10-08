@@ -54,6 +54,56 @@ class FridayResponse(BaseModel):
     provenance: dict[str, Any] = Field(default_factory=dict, description="Audit trail and deliberation lineage")
 
 
+def _fast_lane_confidence(exec_res: Any) -> tuple[float, str]:
+    """Derive a confidence for a single-pass fast-lane answer, with its basis.
+
+    The previous value was the constant ``0.98`` — the same number the degradation gate
+    directly above it warns about — so a one-shot, unreviewed completion claimed
+    near-certainty with nothing behind it. A fast lane performs no peer review and no
+    cross-checking, so it cannot honestly claim more than a single-pass answer warrants,
+    and a completion cut off at the token ceiling is materially incomplete.
+
+    Returns ``(confidence, basis)`` where ``basis`` is recorded in the response
+    provenance so the number can be audited rather than trusted.
+    """
+    finish_reason = (getattr(exec_res, "finish_reason", None) or "").lower()
+    if finish_reason in ("length", "max_tokens", "truncated"):
+        return 0.55, (
+            "single-pass fast-lane answer truncated at the token ceiling "
+            f"(finish_reason={finish_reason}); later content is missing"
+        )
+    if finish_reason in ("", "stop", "eos", "end_turn"):
+        return 0.80, (
+            "single-pass fast-lane completion; no panel review or evidence verification "
+            "was performed, so confidence is capped below deliberated modes"
+        )
+    return 0.70, f"single-pass fast-lane completion with unrecognised finish_reason={finish_reason!r}"
+
+
+def _fast_lane_evidence(exec_res: Any, elapsed_s: float) -> list[str]:
+    """Report only measurable facts about how this answer was produced.
+
+    The previous value was the constant
+    ``"Direct high-throughput Groq fast-lane inference (<500ms SLA)."``: it named a vendor
+    even when the self-hosted tier served the request (``exec_res.provider_used`` is read
+    two lines below for ``provenance``, so the true provider was in hand), and it asserted
+    a sub-500ms SLA that nothing checked.
+    """
+    provider = getattr(exec_res, "provider_used", None) or "unknown"
+    model = getattr(exec_res, "model_used", None) or "unknown"
+    evidence = [
+        f"Served by provider={provider!r} model={model!r} in {elapsed_s:.3f}s "
+        f"(measured; no SLA is claimed)."
+    ]
+    finish_reason = getattr(exec_res, "finish_reason", None)
+    if finish_reason:
+        evidence.append(f"Provider finish_reason={finish_reason!r}.")
+    substituted = getattr(exec_res, "served_by_provider", None)
+    if substituted and substituted != provider:
+        evidence.append(f"Request was originally routed to {substituted!r}.")
+    return evidence
+
+
 @friday_router.post("/ask", response_model=FridayResponse, status_code=status.HTTP_200_OK)
 async def friday_ask(request: FridayRequest) -> FridayResponse:
     """
@@ -130,18 +180,27 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
             run_id = f"deb_{uuid.uuid4().hex[:12]}"
             task_id = f"task_{uuid.uuid4().hex[:12]}"
 
+            confidence, confidence_basis = _fast_lane_confidence(exec_res)
+            usage = exec_res.token_usage or {}
+            reported_tokens = usage.get("total_tokens")
+            # Do not invent a token count from the word count. The gate above states the
+            # rule; this line previously broke it
+            # (``.get("total_tokens", len(exec_res.content.split()))``), which
+            # under-reports real token usage and makes cost attribution wrong.
+            token_source = "provider_usage" if reported_tokens is not None else "unavailable"
+
             resp = FridayResponse(
                 task_id=task_id,
                 run_id=run_id,
                 answer=exec_res.content,
                 mode_used="fast",
-                confidence=0.98,
+                confidence=confidence,
                 unresolved_disagreements=[],
-                key_evidence=["Direct high-throughput Groq fast-lane inference (<500ms SLA)."],
+                key_evidence=_fast_lane_evidence(exec_res, elapsed_s),
                 agents_used=["system_architect"],
                 models_used=[exec_res.model_used],
                 latency_seconds=elapsed_s,
-                total_tokens=exec_res.token_usage.get("total_tokens", len(exec_res.content.split())),
+                total_tokens=int(reported_tokens or 0),
                 provenance={
                     "caller_id": request.caller_id,
                     "platform": "Inference",
@@ -149,6 +208,10 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
                     "cached": False,
                     "fast_lane": True,
                     "provider": exec_res.provider_used,
+                    "model": exec_res.model_used,
+                    "confidence_basis": confidence_basis,
+                    "total_tokens_source": token_source,
+                    "finish_reason": exec_res.finish_reason,
                 }
             )
             if not request.no_cache:
@@ -284,11 +347,36 @@ async def friday_debate(request: FridayRequest) -> FridayResponse:
             )
 
         return resp
+    except HTTPException:
+        raise
     except Exception as exc:
+        # "no specialist produced output" means every provider was unreachable or
+        # unconfigured: the service is *unavailable*, not broken. The sibling /v1/friday/ask
+        # endpoint already answers that condition with 503, and returning 500 here made two
+        # endpoints report the same outage differently — 500 tells a client not to retry,
+        # 503 tells it to retry later.
+        message = str(exc)
+        unavailable = any(
+            marker in message
+            for marker in (
+                "no specialist produced output",
+                "no model provider produced output",
+                "ProviderUnconfiguredError",
+                "no configured credential",
+                "All speculative race candidates failed",
+            )
+        )
+        logger.error("FRIDAY debate orchestration failed (%s): %s",
+                     "unavailable" if unavailable else "internal", message)
+        if unavailable:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"FRIDAY debate degraded: no model provider produced output ({message}). No answer fabricated.",
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"FRIDAY debate orchestration failed: {exc!s}"
-        )
+            detail="FRIDAY debate orchestration failed internally; see server logs for the correlation id."
+        ) from exc
 
 
 @friday_router.post("/stream")

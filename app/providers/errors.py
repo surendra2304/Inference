@@ -51,6 +51,22 @@ class TimeoutError(GatewayError):
         return True
 
 
+class ProviderUnconfiguredError(GatewayError):
+    """The provider has no credential and cannot operate keyless.
+
+    This is a *configuration* fact, not a provider fault: no amount of retrying,
+    key-rotation, or waiting will make an unconfigured provider succeed. It is
+    deliberately **not** retryable, is never recorded against provider health
+    (recording it would poison the circuit breaker with information about the
+    deployment rather than about the provider), and is raised *before* the
+    per-provider rate limiter is acquired — waiting in a queue for a call that can
+    never be served is pure latency added to a request that is already doomed.
+    """
+
+    def is_retryable(self) -> bool:
+        return False
+
+
 class AuthenticationError(GatewayError):
     """Provider returned 401 Unauthorized or invalid API key."""
 

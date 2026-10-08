@@ -40,4 +40,4 @@ Inference provides enterprise-grade API governance, strict multi-tenant isolatio
 - `GET /v1/governance/tenants/{tenant_id}`: Tenant policy and spend status.
 - `POST /v1/governance/tenants/{tenant_id}/rotate-key`: Key rotation.
 - `GET /v1/governance/circuits`: Live circuit breaker state across all 7 cloud providers.
-- `GET /v1/governance/prometheus-metrics`: Formatted Prometheus metrics (`inference_requests_total`, `inference_request_duration_seconds`, `inference_provider_health`).
+- `GET /v1/governance/prometheus-metrics`: Formatted Prometheus metrics, rendered by the same `app/observability/prometheus.py` as the public `/metrics` endpoint (`inference_requests_total`, `inference_requests_failed_total`, `inference_request_duration_seconds{quantile=...}`, `inference_provider_circuit_state`, `inference_provider_success_ratio`, `inference_provider_health_score`). The provider-level families exist only here, because this route is authenticated and `/metrics` is not.

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -79,9 +79,13 @@ class InferenceTaskResponse(BaseModel):
     # 4. reasoning_summary
     reasoning_summary: str = Field(default="", description="High-level deliberation summary")
     # 5. confidence
-    confidence: float = Field(default=0.90, ge=0.0, le=1.0, description="Calibrated confidence (0.0 to 1.0)")
+    # No defaults: a response that omitted the confidence was silently published as 0.90
+    # confidence / 0.10 uncertainty, which is a claim nobody made. All construction sites in
+    # this service pass both explicitly, so requiring them costs nothing and removes the
+    # invented value.
+    confidence: float = Field(ge=0.0, le=1.0, description="Calibrated confidence (0.0 to 1.0)")
     # 6. uncertainty
-    uncertainty: float = Field(default=0.10, ge=0.0, le=1.0, description="Calibrated residual uncertainty (0.0 to 1.0)")
+    uncertainty: float = Field(ge=0.0, le=1.0, description="Calibrated residual uncertainty (0.0 to 1.0)")
     # 7. evidence
     evidence: list[str] = Field(default_factory=list, description="Verified factual evidence and citations")
     # 8. agents_used
@@ -100,6 +104,13 @@ class InferenceTaskResponse(BaseModel):
     # FRIDAY TaskEnvelope compatibility and audit extensions
     status: str = Field(default="SUCCESS")
     target_agent: str = Field(default="inference")
+    # Audit extensions: which mode was asked for, which mode actually ran, and — because
+    # /v1/ask implements fewer modes than it accepts — the mapping applied when the two
+    # differ. Measured before: fast/review/debate/deliberative all returned the same
+    # single-call answer with no field saying which mode had produced it.
+    mode_requested: str | None = Field(default=None)
+    mode_used: str | None = Field(default=None)
+    mode_mapping_note: str | None = Field(default=None)
     missing_data: list[str] = Field(default_factory=list, description="Explicitly identifies missing data if evidence is insufficient")
     completed_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -110,7 +121,14 @@ class InferenceAskRequest(BaseModel):
     prompt: str | None = Field(default=None, description="Primary prompt or question")
     question: str | None = Field(default=None, description="Alias for prompt")
     context: dict[str, Any] = Field(default_factory=dict, description="Structured query context")
-    mode: str = Field(default="deliberative", description="fast | deliberative | consensus | review")
+    #: ``Literal``, not ``str``: measured live, ``{"mode": "banana"}`` was accepted with
+    #: HTTP 200 and answered as if nothing were wrong, while the description told callers
+    #: which four values exist. An unvalidated enum field silently discards a caller's
+    #: intent.
+    mode: Literal["fast", "deliberative", "consensus", "review", "debate"] = Field(
+        default="deliberative",
+        description="fast | deliberative | consensus | review | debate",
+    )
     persona: str = Field(default="ASTRA", description="Reasoning persona/council profile")
     task_id: str | None = Field(default=None)
     trace_id: str | None = Field(default=None)

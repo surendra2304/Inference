@@ -23,6 +23,18 @@ _PEM_KEY_PATTERN = re.compile(
 _HEX_PRIVATE_KEY_PATTERN = re.compile(
     r"(?:private_key|priv_key|secret_key|secret|seed|mnemonic)?\s*[:=]?\s*(?:0x)?[0-9a-fA-F]{64}\b"
 )
+# A single character repeated 64 times is a hex-shaped run, not key material: the
+# probability that a real 256-bit key consists of one value is 16**-63. The pattern below
+# has an OPTIONAL context prefix, so any 64-hex-character run matches it — which meant
+# that pasting a long hex blob (or even "AAAA...") was refused as a leaked private key.
+# Measured before the fix: detect_credentials({'prompt': 'A' * 200000}) returned
+# ['hex_private_key'], and POST /v1/ask with a 200 KB body was refused.
+def _is_degenerate_hex(candidate: str) -> bool:
+    """True when ``candidate`` is a hex run that cannot be key material."""
+    hex_only = candidate[2:] if candidate.lower().startswith("0x") else candidate
+    return len(set(hex_only)) <= 1
+
+
 _JWT_PATTERN = re.compile(
     r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"
 )
@@ -99,9 +111,13 @@ def scrub_credentials(text: str) -> str:
 
     # 2. Hex Private Keys
     scrubbed = _HEX_PRIVATE_KEY_PATTERN.sub(
-        lambda m: m.group(0).split(":")[0] + ": [REDACTED_CREDENTIAL: HEX_PRIVATE_KEY]"
-        if ":" in m.group(0)
-        else "[REDACTED_CREDENTIAL: HEX_PRIVATE_KEY]",
+        lambda m: m.group(0)
+        if _is_degenerate_hex(m.group(0).split()[-1])
+        else (
+            m.group(0).split(":")[0] + ": [REDACTED_CREDENTIAL: HEX_PRIVATE_KEY]"
+            if ":" in m.group(0)
+            else "[REDACTED_CREDENTIAL: HEX_PRIVATE_KEY]"
+        ),
         scrubbed,
     )
 
@@ -195,7 +211,13 @@ def detect_credentials(data: Any) -> list[str]:
         # Hex keys and generic secret fields were previously scrubbed but never
         # detected, so the audit reported clean while redaction was actively
         # removing them - detection must cover every pattern scrubbing handles.
-        if _HEX_PRIVATE_KEY_PATTERN.search(data):
+        # Degenerate runs are excluded for the same reason scrubbing excludes them: a
+        # repeated single character is not key material, and flagging it refused requests
+        # that contained nothing secret.
+        if any(
+            not _is_degenerate_hex(m.group(0).split()[-1])
+            for m in _HEX_PRIVATE_KEY_PATTERN.finditer(data)
+        ):
             detected.append("hex_private_key")
         if _GENERIC_SECRET_FIELD_PATTERN.search(data):
             detected.append("generic_secret_field")

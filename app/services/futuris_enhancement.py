@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from app.analytics.usage_analytics import usage_analytics
 from app.routing.consumer_router import consumer_router
+from app.utils.bounded_store import DEFAULT_MAX_ENTRIES, BoundedStore
 
 
 class StatisticalForecastInput(BaseModel):
@@ -101,7 +102,14 @@ class FuturisEnhancementService:
     """Specialized qualitative enhancement service for Futuris statistical models."""
 
     def __init__(self) -> None:
-        self.provenance_store: dict[str, dict[str, Any]] = {}
+        # Bounded: one entry per request used to accumulate without limit
+        # (measured: +9.03 MB/1k requests on nexus, +5.19 on sentinel, retained
+        # after gc). Entries are evicted LRU beyond the ceiling; the store
+        # records how many, so a lookup miss can say "evicted" instead of
+        # pretending the id never existed.
+        self.provenance_store = BoundedStore[dict[str, Any]](
+            "futuris.provenance_store", max_entries=DEFAULT_MAX_ENTRIES
+        )
         self.grounding_engine = StatisticalGroundingEngine()
 
     async def enhance_forecast(self, req: FuturisEnhanceRequest) -> FuturisEnhanceResponse:
@@ -109,9 +117,14 @@ class FuturisEnhancementService:
 
         # Check deduplication cache
         from app.governance.tenant_manager import tenant_manager
-        cached = tenant_manager.check_deduplication(req.request_id)
-        if cached:
-            return FuturisEnhanceResponse(**cached)
+        # Typed lookup: a stored payload that does not match this response model is
+        # evicted and treated as a miss, so an inconsistent cache entry can never
+        # surface as HTTP 500 (it previously did — see app/governance/tenant_manager.py).
+        cached = tenant_manager.check_deduplication_model(
+            req.request_id, FuturisEnhanceResponse, namespace="futuris_enhancement"
+        )
+        if cached is not None:
+            return cached
 
         forecast = req.statistical_forecast
         context = req.target_context
@@ -192,25 +205,34 @@ class FuturisEnhancementService:
         }
 
         # Store in deduplication cache
-        tenant_manager.store_deduplication(req.request_id, response.model_dump())
+        tenant_manager.store_deduplication(
+            req.request_id, response.model_dump(), namespace="futuris_enhancement"
+        )
 
         # Track usage
-        consumer_router.record_usage("futuris", tokens=500, latency_sec=latency_ms / 1000.0)
+        consumer_router.record_usage("futuris", tokens=None, latency_sec=latency_ms / 1000.0)
+        # ``forecast.probability or 0.85`` replaced an absent probability with a
+        # measured-looking 0.85; an unmeasured confidence is now recorded as None.
         usage_analytics.log_request(
             consumer="futuris",
             service="futuris_enhance",
-            provider="gemini",
-            tokens_in=300,
-            tokens_out=200,
             latency_ms=latency_ms,
             success=True,
-            confidence=forecast.probability or 0.85
+            confidence=forecast.probability,
         )
 
         return response
 
     def get_provenance(self, request_id: str) -> dict[str, Any] | None:
         return self.provenance_store.get(request_id)
+
+    def provenance_retention(self) -> dict[str, Any]:
+        """How much provenance this service still holds, and what it has dropped.
+
+        Served so that a 404 on an audit endpoint can be attributed: "never recorded"
+        and "recorded but evicted" are different statements about the same request id.
+        """
+        return self.provenance_store.describe()
 
 
 futuris_enhancement_service = FuturisEnhancementService()

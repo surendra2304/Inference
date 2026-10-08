@@ -83,12 +83,20 @@ def test_verification_raises_when_scrub_cannot_remove_credential(monkeypatch):
 
     with pytest.raises(fastapi.HTTPException) as exc_info:
         v1_core_routes._scrub_and_verify("api_key=" + "G" * 24, {}, "trace_x")
-    assert exc_info.value.status_code == 500
+    # Fail closed *as a client error*. This was 500, which told the caller the server had
+    # broken (and pointed an on-call engineer at an internal fault) when in fact the
+    # service correctly refused a payload it could not guarantee was clean. The security
+    # outcome is identical — nothing is forwarded — but the status class now says whose
+    # problem it is, and keeps a security refusal out of the server-fault bucket.
+    assert exc_info.value.status_code == 400, (
+        "a deliberate credential refusal is a client error, not an internal fault"
+    )
+    assert not 500 <= exc_info.value.status_code < 600
     assert "credential" in exc_info.value.detail.lower()
 
 
 def test_route_refuses_request_when_residual_survives(monkeypatch):
-    """_scrub_and_verify answers 500 instead of letting the secret through."""
+    """_scrub_and_verify refuses with a 4xx instead of letting the secret through."""
     import fastapi
 
     # Residual path: context scrubbing leaves a raw credential behind.
@@ -98,7 +106,10 @@ def test_route_refuses_request_when_residual_survives(monkeypatch):
     )
     with pytest.raises(fastapi.HTTPException) as exc_info:
         v1_core_routes._scrub_and_verify("hello", {"api_key": "x"}, "trace_y")
-    assert exc_info.value.status_code == 500
+    assert exc_info.value.status_code == 400
+    assert not 500 <= exc_info.value.status_code < 600, (
+        "refusing a request is not a server fault"
+    )
     assert "credential" in exc_info.value.detail.lower()
 
 

@@ -59,16 +59,21 @@ async def report_consumer_outcome(req: DetailedOutcomeReport):
     """Universal outcome reporting endpoint for all consumers (trading_bot, forge, nexus, friday)."""
     # Record in learning engine
     res = outcome_learning_engine.record_outcome(req)
-    # Also log to consumer_outcome_tracker for compatibility
-    legacy_req = OutcomeReportRequest(
-        consumer="forge" if req.consumer not in ("forge", "trading_bot", "friday", "human") else req.consumer,
-        request_id=req.request_id,
-        outcome=req.outcome,
-        detail=req.detail,
-        provider_used=req.provider_used or "gemini",
-        service=req.task_type or "code_generation"
-    )
-    consumer_outcome_tracker.record_outcome(legacy_req)
+    # Also log to the legacy tracker, for the consumers it supports. Two fields used to be
+    # rewritten on the way in: every consumer outside its four-name enum was relabelled
+    # "forge" (so nexus and sentinel outcomes were counted as forge outcomes), and a missing
+    # provider/service was filled with "gemini"/"code_generation" rather than left unstated.
+    # Both corrupt the pass-rate summary the router adapts on.
+    if req.consumer in ("forge", "trading_bot", "friday", "human"):
+        legacy_req = OutcomeReportRequest(
+            consumer=req.consumer,
+            request_id=req.request_id,
+            outcome=req.outcome,
+            detail=req.detail,
+            provider_used=req.provider_used,
+            service=req.task_type,
+        )
+        consumer_outcome_tracker.record_outcome(legacy_req)
     self_optimizing_router.adapt_weights_from_outcomes()
     return res
 

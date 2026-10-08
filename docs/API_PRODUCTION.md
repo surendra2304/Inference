@@ -32,15 +32,30 @@ This guide details the production architecture, performance optimizations, monit
 - `GET /metrics`: Standard Prometheus metrics exporter.
 
 ### Key Prometheus Metrics
+`GET /metrics` (public, dependency-free) and `GET /v1/governance/prometheus-metrics`
+(authenticated) both render through `app/observability/prometheus.py`, so these names, their
+values and the handling of absent data are identical on both. A series with no measurement is
+omitted rather than printed as a placeholder such as `None`, which no scraper accepts.
+
 | Metric Name | Type | Description |
 | :--- | :--- | :--- |
-| `inference_requests_total` | Counter | Total completed consultation requests |
-| `inference_latency_p50_seconds` | Gauge | Median response latency |
-| `inference_latency_p95_seconds` | Gauge | 95th percentile response latency ($< 30$s SLA) |
-| `inference_latency_p99_seconds` | Gauge | 99th percentile response latency |
-| `inference_error_rate_percent` | Gauge | Ratio of failed consultations |
+| `inference_requests_total` | Counter | API requests recorded by this process |
+| `inference_requests_failed_total` | Counter | API requests that failed or returned 5xx |
+| `inference_latency_samples` | Gauge | Latency samples behind the percentiles below |
+| `inference_request_duration_seconds{quantile="0.50"}` | Gauge | Median response latency |
+| `inference_request_duration_seconds{quantile="0.95"}` | Gauge | 95th percentile response latency ($< 30$s SLA) |
+| `inference_request_duration_seconds{quantile="0.99"}` | Gauge | 99th percentile response latency |
+| `inference_error_rate_percent` | Gauge | Percentage of recorded requests that failed |
 | `inference_cache_hit_rate_percent` | Gauge | Cache hit percentage |
-| `inference_active_requests` | Gauge | In-flight active consultations |
+| `inference_active_requests` | Gauge | In-flight requests |
+| `inference_uptime_seconds` | Gauge | Process uptime |
+
+The governance endpoint additionally publishes `inference_tracked_tenants`,
+`inference_provider_circuit_available`, `inference_provider_circuit_state`,
+`inference_provider_success_ratio`, `inference_provider_health_score` and
+`inference_provider_rate_limited_keys`. Those stay on the authenticated endpoint on purpose:
+which providers exist and which of them are failing is deployment detail, and `/metrics` is
+reachable without a key.
 
 ---
 

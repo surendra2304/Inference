@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.analytics.usage_analytics import usage_analytics
 from app.routing.consumer_router import consumer_router
+from app.utils.bounded_store import DEFAULT_MAX_ENTRIES, BoundedStore
 
 AnalysisType = Literal[
     "vulnerability_assessment",
@@ -140,7 +141,14 @@ class SentinelIntelligenceService:
     }
 
     def __init__(self) -> None:
-        self.provenance_store: dict[str, dict[str, Any]] = {}
+        # Bounded: one entry per request used to accumulate without limit
+        # (measured: +9.03 MB/1k requests on nexus, +5.19 on sentinel, retained
+        # after gc). Entries are evicted LRU beyond the ceiling; the store
+        # records how many, so a lookup miss can say "evicted" instead of
+        # pretending the id never existed.
+        self.provenance_store = BoundedStore[dict[str, Any]](
+            "sentinel.provenance_store", max_entries=DEFAULT_MAX_ENTRIES
+        )
 
     def _compute_risk_score(self, findings: list[SecurityFinding], exposure: ExposureLevel) -> tuple[float, SeverityLevel]:
         if not findings:
@@ -185,9 +193,14 @@ class SentinelIntelligenceService:
 
         # Check deduplication cache
         from app.governance.tenant_manager import tenant_manager
-        cached = tenant_manager.check_deduplication(req.request_id)
-        if cached:
-            return SentinelAnalysisResponse(**cached)
+        # Typed lookup: a stored payload that does not match this response model is
+        # evicted and treated as a miss, so an inconsistent cache entry can never
+        # surface as HTTP 500 (it previously did — see app/governance/tenant_manager.py).
+        cached = tenant_manager.check_deduplication_model(
+            req.request_id, SentinelAnalysisResponse, namespace="sentinel_analyze"
+        )
+        if cached is not None:
+            return cached
 
         agents = self.ANALYSIS_AGENT_MAPPING.get(req.analysis_type, ["security_analyst", "critic"])
         risk_score, risk_tier = self._compute_risk_score(req.findings, req.target_context.exposure_level)
@@ -331,25 +344,34 @@ class SentinelIntelligenceService:
         }
 
         # Store in deduplication cache
-        tenant_manager.store_deduplication(req.request_id, response.model_dump())
+        tenant_manager.store_deduplication(
+            req.request_id, response.model_dump(), namespace="sentinel_analyze"
+        )
 
         # Track usage
-        consumer_router.record_usage("sentinel", tokens=550, latency_sec=latency_ms / 1000.0)
+        consumer_router.record_usage("sentinel", tokens=None, latency_sec=latency_ms / 1000.0)
+        # Deterministic engine path: provider identity and token counts are not measurable
+        # here and are recorded as such (they used to be hardcoded "gemini"/300/250).
         usage_analytics.log_request(
             consumer="sentinel",
             service=f"sentinel_{req.analysis_type}",
-            provider="gemini",
-            tokens_in=300,
-            tokens_out=250,
             latency_ms=latency_ms,
             success=True,
-            confidence=confidence
+            confidence=confidence,
         )
 
         return response
 
     def get_provenance(self, request_id: str) -> dict[str, Any] | None:
         return self.provenance_store.get(request_id)
+
+    def provenance_retention(self) -> dict[str, Any]:
+        """How much provenance this service still holds, and what it has dropped.
+
+        Served so that a 404 on an audit endpoint can be attributed: "never recorded"
+        and "recorded but evicted" are different statements about the same request id.
+        """
+        return self.provenance_store.describe()
 
 
 sentinel_intelligence_service = SentinelIntelligenceService()

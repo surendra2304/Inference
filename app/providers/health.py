@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
+
 
 class ProviderHealthReport(BaseModel):
     """Health metrics and operational status for an individual provider."""
@@ -84,7 +86,24 @@ class ProviderHealthTracker:
         stats["quarantined_keys"] = quarantined_count
 
     def get_provider_health(self, provider_name: str) -> ProviderHealthReport:
-        """Calculates and returns live health status for a specific provider."""
+        """Calculates and returns live health status for a specific provider.
+
+        Recovery semantics matter as much as the penalty calculation here. Two
+        independent paths could previously banish a provider **permanently**:
+
+        1. ``consecutive_failures >= 4`` → unhealthy. The only thing that resets that
+           counter is :meth:`record_success`, but the callers that record successes are
+           the same callers that skip unhealthy providers
+           (``debate.py::_invoke_single_model``), so the counter never resets and the
+           provider is never called again for the lifetime of the process.
+        2. A low *lifetime* success rate keeps ``health_score`` under 0.3 even after a
+           fresh success, so the score gate alone can hold a recovered provider out.
+
+        Both are fixed by treating health as a circuit breaker rather than a verdict:
+        a provider that has succeeded since its last failure is healthy again, and one
+        that has been quiet for the recovery window is offered a half-open probe. A
+        failed probe re-arms the window; a successful probe clears the failure count.
+        """
         prov = provider_name.lower().strip()
         stats = self._get_or_create(prov)
 
@@ -99,7 +118,30 @@ class ProviderHealthTracker:
             penalty += min(0.2, (stats["429_count"] / total_requests) * 0.4)
 
         health_score = max(0.0, min(1.0, success_rate - penalty))
-        is_healthy = health_score >= 0.3 and stats["consecutive_failures"] < 4
+
+        last_success = stats["last_success"]
+        last_failure = stats["last_failure"]
+
+        # (1) Proven recovery: a success more recent than the last failure means the
+        # provider is answering right now, whatever the lifetime ratio says.
+        recovered_since_failure = (
+            last_success is not None and (last_failure is None or last_success >= last_failure)
+        )
+
+        # (2) Half-open probe: after the cooldown, report healthy so a caller will
+        # actually try the provider. Without this the failure counter can never be
+        # cleared, because nothing ever gets through to record a success.
+        cooldown_elapsed = (
+            last_failure is not None
+            and (time.time() - last_failure) >= float(settings.PROVIDER_HEALTH_RECOVERY_SECONDS)
+            and stats["consecutive_failures"] > 0
+        )
+
+        is_healthy = (
+            (health_score >= 0.3 and stats["consecutive_failures"] < 4)
+            or recovered_since_failure
+            or cooldown_elapsed
+        )
 
         return ProviderHealthReport(
             provider_name=prov,

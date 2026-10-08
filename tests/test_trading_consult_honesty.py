@@ -216,3 +216,61 @@ async def test_insufficient_data_path_discloses_missing_panel(service, monkeypat
     assert "no model output" in decision.debate_summary
     assert "no panel deliberation" in decision.debate_summary
     assert "unanimously" not in decision.debate_summary
+
+
+async def test_open_circuit_substitutes_a_healthy_provider_instead_of_giving_up(
+    service, monkeypatch
+):
+    """An open circuit must not mean "no answer" while a healthy provider sits idle.
+
+    [FACT] Before this, ``_invoke_agent`` returned deterministic fallback text the moment the
+    agent's preferred provider was unavailable, even with other providers configured, healthy
+    and unused — while ``/v1/admin/routing/status`` advertised routing weights that should have
+    made exactly this decision. The request is now re-routed by weight and the substitution is
+    recorded, including on the run record.
+    """
+    from app.routing.self_optimizer import self_optimizing_router
+
+    module = sys.modules["app.services.trading_consult_service"]
+    monkeypatch.setattr(module, "model_gateway", FakeGateway("success"))
+    monkeypatch.setattr(module.circuit_breaker, "is_available", lambda name: name != "groq")
+    monkeypatch.setattr(module, "provider_has_credentials", lambda name: name == "gemini")
+
+    await service.memory.initialize()
+    await service.consult(make_request())
+
+    async with service.memory.connect() as db:
+        async with db.execute("SELECT provider, status, error FROM runs ORDER BY created_at") as cursor:
+            rows = await cursor.fetchall()
+    providers = {row["provider"] for row in rows}
+    assert rows, "runs must be persisted"
+    assert "groq" not in providers, "the unavailable provider was used anyway"
+    assert "gemini" in providers, "the healthy substitution candidate was never tried"
+    assert all(
+        row["status"] == "completed" for row in rows if row["provider"] == "gemini"
+    )
+    # The substitution must be visible on the run record, so an operator can tell a substituted
+    # success from a first-choice one.
+    substituted = [row for row in rows if row["provider"] == "gemini"]
+    assert substituted and all(
+        (row["error"] is None or "routed to" in (row["error"] or "")) for row in substituted
+    )
+    assert self_optimizing_router.decisions, "the router must record that it decided this"
+
+
+async def test_no_substitution_when_nothing_else_is_available(service, monkeypatch):
+    """With every provider unavailable the honest outcome is still a degraded decision."""
+    module = sys.modules["app.services.trading_consult_service"]
+    monkeypatch.setattr(module, "model_gateway", FakeGateway("all_fail"))
+    monkeypatch.setattr(module.circuit_breaker, "is_available", lambda name: False)
+    monkeypatch.setattr(module, "provider_has_credentials", lambda name: False)
+
+    await service.memory.initialize()
+    decision = await service.consult(make_request())
+    assert decision.degraded is True
+    async with service.memory.connect() as db:
+        async with db.execute("SELECT status, error FROM runs ORDER BY created_at") as cursor:
+            rows = await cursor.fetchall()
+    assert rows
+    assert all(row["status"] == "failed" for row in rows)
+    assert all("no other configured provider" in (row["error"] or "") for row in rows)

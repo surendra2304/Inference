@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from app.core.config import settings
+
 ConsumerType = Literal["trading_bot", "forge", "friday", "human", "nexus", "sentinel", "intelx", "futuris"]
 
 
@@ -16,11 +18,26 @@ class ConsumerProfile(BaseModel):
 
 
 class ConsumerUsageRecord(BaseModel):
+    """Per-consumer usage, with unknown kept separate from zero.
+
+    ``total_tokens`` used to start at 0 and every caller passed a *fixed* number — nexus 650,
+    intelx 600, sentinel 550, futuris 500 — none of which came from a provider (none of those
+    services calls one). The admin view then presented the sum as measured usage and derived
+    ``estimated_cost_usd`` from it. A consumer whose tokens were never measured now reports
+    ``None`` and ``unmeasured_calls``, not a plausible-looking number.
+    """
+
     consumer: ConsumerType
     total_calls: int = 0
-    total_tokens: int = 0
+    #: Sum of measured tokens, or ``None`` when no call reported usage.
+    total_tokens: int | None = None
+    #: Number of calls that reported token usage, so a total is readable next to its coverage.
+    tokens_measured_calls: int = 0
     total_latency_seconds: float = 0.0
-    estimated_cost_usd: float = 0.0
+    latency_measured_calls: int = 0
+    #: Derived from measured tokens only.
+    estimated_cost_usd: float | None = None
+    unmeasured_calls: int = 0
 
 
 class MultiConsumerRouter:
@@ -78,7 +95,14 @@ class MultiConsumerRouter:
         ),
         "human": ConsumerProfile(
             name="human",
-            rate_limit_per_hour=50,
+            # Settings-driven, not hardcoded. Two independent limiters guard this API and
+            # their limits disagreed by ~72x: this profile allowed 50 requests per hour
+            # while ``ProductionSecurityMiddleware`` allowed 120 per *minute*, so the
+            # tighter one silently governed and a human operator driving the agent hit the
+            # ceiling after 50 requests, then waited ~72 seconds per request for the rest
+            # of the hour. A quota that blocks the product's own operator from using it is
+            # a defect, and a hardcoded quota cannot be tuned per deployment.
+            rate_limit_per_hour=int(settings.HUMAN_RATE_LIMIT_PER_HOUR),
             priority=4,
             mode="interactive",
             description="Direct human developer queries with detailed explanations."
@@ -105,14 +129,31 @@ class MultiConsumerRouter:
             return "friday"
         return "human"
 
-    def record_usage(self, consumer: ConsumerType, tokens: int, latency_sec: float) -> None:
-        """Accumulates usage metrics."""
+    #: $0.0005 per 1k tokens, applied only to measured tokens.
+    TOKEN_COST_PER_1K_USD = 0.0005
+
+    def record_usage(
+        self,
+        consumer: ConsumerType,
+        tokens: int | None,
+        latency_sec: float | None,
+    ) -> None:
+        """Accumulates usage metrics, keeping "not measured" out of the totals."""
         rec = self.usage_records.get(consumer)
-        if rec:
-            rec.total_calls += 1
-            rec.total_tokens += tokens
-            rec.total_latency_seconds += latency_sec
-            rec.estimated_cost_usd += (tokens / 1000.0) * 0.0005  # $0.0005 per 1k tokens proxy
+        if not rec:
+            return
+        rec.total_calls += 1
+        if tokens is None:
+            rec.unmeasured_calls += 1
+        else:
+            rec.total_tokens = (rec.total_tokens or 0) + tokens
+            rec.tokens_measured_calls += 1
+            rec.estimated_cost_usd = round(
+                (rec.estimated_cost_usd or 0.0) + (tokens / 1000.0) * self.TOKEN_COST_PER_1K_USD, 6
+            )
+        if latency_sec is not None:
+            rec.total_latency_seconds = round(rec.total_latency_seconds + latency_sec, 6)
+            rec.latency_measured_calls += 1
 
     def get_usage(self, consumer: ConsumerType | None = None) -> dict[str, Any]:
         """Returns usage stats."""

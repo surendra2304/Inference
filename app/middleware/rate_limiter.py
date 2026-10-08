@@ -26,8 +26,10 @@ class EnhancedRateLimiterMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app, max_tracked_keys: int = 10000) -> None:
         super().__init__(app)
-        self._request_history: dict[str, list[float]] = {}
-        self._window_seconds = 3600.0  # 1 hour sliding window
+        # key -> (tokens_remaining, last_updated_epoch). See the token-bucket
+        # commentary in ``dispatch`` for why this is a bucket and not a window.
+        self._buckets: dict[str, tuple[float, float]] = {}
+        self._window_seconds = 3600.0  # quota period (1 hour)
         self._max_tracked_keys = max_tracked_keys
         self._lock = threading.RLock()
 
@@ -66,47 +68,81 @@ class EnhancedRateLimiterMiddleware(BaseHTTPMiddleware):
 
         now = time.time()
         key = f"{consumer_id}:{client_ip}"
-        limit = profile.rate_limit_per_hour
-        burst_limit = limit * 2
+        limit = float(profile.rate_limit_per_hour)
+        # Continuous refill, in tokens per second, that yields exactly the documented
+        # hourly quota over an hour.
+        refill_per_second = limit / self._window_seconds
+        capacity = limit
 
         with self._lock:
-            # Memory bounding: periodic / capacity-based eviction
-            if len(self._request_history) >= self._max_tracked_keys:
-                expired = [k for k, h in self._request_history.items() if not h or (now - h[-1]) >= self._window_seconds]
+            # Memory bounding: drop buckets idle past a full window, then evict the
+            # oldest entries if the table is still at capacity.
+            if len(self._buckets) >= self._max_tracked_keys:
+                expired = [
+                    k for k, (_, ts) in self._buckets.items()
+                    if (now - ts) >= self._window_seconds
+                ]
                 for k in expired:
-                    self._request_history.pop(k, None)
-                if len(self._request_history) >= self._max_tracked_keys:
-                    for k in list(self._request_history.keys())[:1000]:
-                        self._request_history.pop(k, None)
+                    self._buckets.pop(k, None)
+                if len(self._buckets) >= self._max_tracked_keys:
+                    oldest = sorted(self._buckets.items(), key=lambda kv: kv[1][1])
+                    for k, _ in oldest[:1000]:
+                        self._buckets.pop(k, None)
 
-            history = self._request_history.get(key, [])
-            history = [ts for ts in history if now - ts < self._window_seconds]
+            # ---------------------------------------------------------------
+            # Token bucket instead of a sliding-window cliff.
+            #
+            # The previous implementation counted requests in a rolling 1-hour
+            # window and rejected everything once the count reached the quota.
+            # Because the quota is small (the "human" profile allows 50/hour) and
+            # the window is long, a client that legitimately bursts — a load test,
+            # a batch job, a retry storm — consumed the *entire hour's* allowance in
+            # seconds and was then locked out until the window slid, i.e. for up to
+            # 60 minutes, with no way to make progress. Measured: a 60-second soak
+            # left the caller rejected with HTTP 429 on every subsequent request for
+            # the remainder of the hour.
+            #
+            # A bucket grants the same burst and the same long-run average (capacity
+            # = quota, refill = quota/hour) but degrades gracefully: after the burst
+            # the caller is throttled to the sustained rate rather than cut off. The
+            # worst case changes from "no service for an hour" to "service at the
+            # documented rate", which is what a rate limit is supposed to mean.
+            # ---------------------------------------------------------------
+            tokens, updated = self._buckets.get(key, (capacity, now))
+            tokens = min(capacity, tokens + max(0.0, now - updated) * refill_per_second)
 
-            if len(history) >= burst_limit:
-                earliest_ts = history[0] if history else now
-                reset_seconds = max(1, int(self._window_seconds - (now - earliest_ts)))
-                logger.warning("Rate limit exceeded for consumer '%s' (IP: %s)", consumer_id, client_ip)
+            if tokens < 1.0:
+                retry_after = max(1, int((1.0 - tokens) / refill_per_second) + 1)
+                logger.warning(
+                    "Rate limit exceeded for consumer '%s' (IP: %s): %.2f tokens left, retry in %ds",
+                    consumer_id, client_ip, tokens, retry_after,
+                )
                 return JSONResponse(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     content={
-                        "detail": f"Rate limit exceeded for consumer '{consumer_id}'. Limit: {limit}/hour.",
-                        "retry_after_seconds": reset_seconds
+                        "detail": (
+                            f"Rate limit exceeded for consumer '{consumer_id}'. "
+                            f"Limit: {int(limit)}/hour (sustained)."
+                        ),
+                        "retry_after_seconds": retry_after,
                     },
                     headers={
-                        "X-RateLimit-Limit": str(limit),
+                        "X-RateLimit-Limit": str(int(limit)),
                         "X-RateLimit-Remaining": "0",
-                        "X-RateLimit-Reset": str(int(now + reset_seconds)),
-                        "Retry-After": str(reset_seconds)
-                    }
+                        "X-RateLimit-Reset": str(int(now + retry_after)),
+                        "Retry-After": str(retry_after),
+                    },
                 )
 
-            history.append(now)
-            self._request_history[key] = history
-            remaining = max(0, limit - len(history))
+            remaining = int(tokens - 1.0)
+            self._buckets[key] = (tokens - 1.0, now)
 
         response = await call_next(request)
-        response.headers["X-RateLimit-Limit"] = str(limit)
+        response.headers["X-RateLimit-Limit"] = str(int(limit))
         response.headers["X-RateLimit-Remaining"] = str(remaining)
-        response.headers["X-RateLimit-Reset"] = str(int(now + self._window_seconds))
+        seconds_until_next_token = 1.0 / refill_per_second
+        response.headers["X-RateLimit-Reset"] = str(
+            int(now + (seconds_until_next_token if remaining == 0 else self._window_seconds))
+        )
 
         return response

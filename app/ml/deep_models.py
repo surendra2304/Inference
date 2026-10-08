@@ -78,6 +78,11 @@ class DeepLearningPricePredictor:
             "inference_latency_ms": latency_ms,
             "model_version": "econometric-v1.0-ewma-garch",
             "model_family": "statistical_econometrics",
+            "calibration": (
+                "parametric heuristic (EWMA/GARCH-style volatility estimate plus a momentum "
+                "t-statistic); parameters are fixed constants, not fitted, and the output is "
+                "not calibrated against realised outcomes"
+            ),
             "sample_size": seq_len,
             "horizons": {
                 "1h": {
