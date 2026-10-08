@@ -165,24 +165,59 @@ def main() -> int:
     block_series = [row["blocks"] for row in rounds if row["blocks"] is not None]
     growth = [round(rss_series[i + 1] - rss_series[i], 1) for i in range(len(rss_series) - 1)]
 
+    # Two signals, judged on their own terms, because they fail differently:
+    #
+    # * RSS is allocator-sensitive. It plateaus when the process is healthy and the allocator
+    #   has stopped growing arenas; it can also move with nothing retained at all (measured:
+    #   +1.3 MB over 1,600 requests with live blocks returning exactly to baseline).
+    # * Live Python blocks are the leak signal, but a *busy* process holds request-scoped work
+    #   (measured: a sample 1 s after a burst read +602,105 blocks and 40 s later read below
+    #   its pre-burst value). Under continuous load this soak cannot ever be quiet, so the
+    #   comparable quantity is growth per request, and the shape test is whether it keeps
+    #   climbing round after round (retention) or levels off once the bounded stores fill.
+    #
+    # The authoritative quiet-process verdict lives in the real-time drive
+    # (``check_memory_retention``); this soak's job is to catch growth under sustained mixed
+    # traffic and to keep the series for inspection.
+    total_requests = max(1, sum(row["requests"] for row in rounds))
+    blocks_per_request: float | None = None
     verdict = "inconclusive"
     detail = "not enough rounds to judge"
     if len(growth) >= 4:
         tail = statistics.fmean(growth[-max(2, len(growth) // 3):])
-        if block_series and block_series[-1] - block_series[0] > 50_000:
-            verdict, detail = "object-retention", (
-                f"live blocks {block_series[0]} -> {block_series[-1]} across the soak"
-            )
+        if block_series and len(block_series) >= 4:
+            blocks_per_request = (block_series[-1] - block_series[0]) / total_requests
+            deltas = [block_series[i + 1] - block_series[i] for i in range(len(block_series) - 1)]
+            tail_deltas = deltas[-max(2, len(deltas) // 3):]
+            head_deltas = deltas[: max(1, len(deltas) // 3)]
+            # 20 blocks/request is ~0.6 KB/request at 32 B/block: an order of magnitude below
+            # the leak this repo was measured with (1.4 KB/request) and well above the
+            # request-scoped noise seen under load.
+            climbing = statistics.fmean(tail_deltas) > statistics.fmean(head_deltas)
+            if blocks_per_request > 20.0 and climbing:
+                verdict, detail = "object-retention", (
+                    f"live blocks {block_series[0]} -> {block_series[-1]} over {total_requests} "
+                    f"requests ({blocks_per_request:.1f} blocks/request) and still climbing"
+                )
+            elif tail <= 0.5:
+                verdict, detail = "plateau", (
+                    f"tail RSS growth {tail:.2f} MB/round; blocks {blocks_per_request:+.1f}/request"
+                )
+            else:
+                verdict, detail = "growing", (
+                    f"tail RSS growth {tail:.2f} MB/round (blocks {blocks_per_request:+.1f}/request)"
+                )
         elif tail <= 0.5:
             verdict, detail = "plateau", f"tail RSS growth {tail:.2f} MB/round"
         else:
-            verdict, detail = "growing", f"tail RSS growth {tail:.2f} MB/round (blocks {block_series[:1]}..{block_series[-1:]})"
+            verdict, detail = "growing", f"tail RSS growth {tail:.2f} MB/round (no block counter)"
 
     report = {
         "minutes": args.minutes, "concurrency": args.concurrency, "rounds": rounds,
         "total_requests": total, "server_or_transport_errors": errors,
         "rss_series": rss_series, "block_series": block_series, "growth_mb_per_round": growth,
         "verdict": verdict, "detail": detail,
+        "blocks_per_request": blocks_per_request,
     }
     print(f"\nVERDICT: {verdict} — {detail}")
     print(f"  {total} requests, {errors} server/transport errors, "

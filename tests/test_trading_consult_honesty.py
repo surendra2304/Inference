@@ -274,3 +274,56 @@ async def test_no_substitution_when_nothing_else_is_available(service, monkeypat
     assert rows
     assert all(row["status"] == "failed" for row in rows)
     assert all("no other configured provider" in (row["error"] or "") for row in rows)
+
+
+# ------------------------------------------------------------------------------------
+# The per-bot rate limit: configurable, and it tells the client when to come back.
+# ------------------------------------------------------------------------------------
+
+
+def test_rate_limit_is_read_from_settings_not_a_frozen_constant(monkeypatch):
+    """A hardcoded 20/hour could only be changed by editing the router.
+
+    Measured in the mixed soak: the endpoint answered 92 x 429 in a 60 s round (every
+    attempt, since the 12-shape workload revisits it at a fixed cadence) while the operator
+    had no way to tune it and the response carried no Retry-After.
+    """
+    import app.routers.trading as trading_router
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "TRADING_CONSULT_RATE_LIMIT_PER_HOUR", 7)
+    assert trading_router.rate_limit_max_requests() == 7
+
+
+def test_rate_limit_falls_back_safely_when_configuration_is_broken(monkeypatch):
+    import app.routers.trading as trading_router
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "TRADING_CONSULT_RATE_LIMIT_PER_HOUR", "not-a-number")
+    assert trading_router.rate_limit_max_requests() == trading_router.DEFAULT_RATE_LIMIT_MAX_REQUESTS
+
+
+def test_exceeding_the_limit_answers_429_with_retry_after(monkeypatch):
+    import time
+
+    import pytest as _pytest
+
+    import app.routers.trading as trading_router
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "TRADING_CONSULT_RATE_LIMIT_PER_HOUR", 2)
+    bot = f"retry-after-bot-{time.time()}"
+    trading_router._check_rate_limit(bot)
+    trading_router._check_rate_limit(bot)
+
+    with _pytest.raises(Exception) as caught:
+        trading_router._check_rate_limit(bot)
+
+    error = caught.value
+    assert getattr(error, "status_code", None) == 429
+    headers = getattr(error, "headers", {}) or {}
+    retry_after = int(headers.get("Retry-After"))
+    assert 1 <= retry_after <= 3601, f"Retry-After must be inside the window, got {retry_after}"
+    assert "TRADING_CONSULT_RATE_LIMIT_PER_HOUR" in error.detail, (
+        "the message must name the setting that changes this, so the operator is not stuck"
+    )

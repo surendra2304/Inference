@@ -194,6 +194,10 @@ class Settings(BaseSettings):
             "binding constraint for scripted traffic."
         ),
     )
+    #: Per-bot ceiling for POST /v1/trading/consult (sliding hour). A bot that consults on
+    #: every drawdown event can legitimately exceed the 20/hour default, and the operator of
+    #: the bot is the one who knows the right number.
+    TRADING_CONSULT_RATE_LIMIT_PER_HOUR: int = 20
     SQLITE_POOL_SIZE: int = Field(
         default=8,
         ge=1,

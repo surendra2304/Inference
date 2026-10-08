@@ -309,7 +309,10 @@ async def ask_v1(
                 task_id, clean_prompt,
                 f"Panel unavailable: {scrub_credentials(str(exc))}", mode=request.mode,
                 status_value="failed", confidence=0.0,
-                metadata={"trace_id": trace_id, "error": str(exc)},
+                # Scrubbed at write time: this metadata is served back verbatim by
+                # ``GET /tasks/{id}`` (``orchestrator.get_task_status`` -> ``model_dump()``),
+                # so a raw exception stored here becomes a leak one request later.
+                metadata={"trace_id": trace_id, "error": scrub_credentials(str(exc))},
             )
             return InferenceTaskResponse(
                 task_id=task_id,
@@ -352,7 +355,10 @@ async def ask_v1(
                 task_id, clean_prompt,
                 f"Deliberation failed: {scrub_credentials(str(exc))}", mode=request.mode,
                 status_value="failed", confidence=0.0,
-                metadata={"trace_id": trace_id, "error": str(exc)},
+                # Scrubbed at write time: this metadata is served back verbatim by
+                # ``GET /tasks/{id}`` (``orchestrator.get_task_status`` -> ``model_dump()``),
+                # so a raw exception stored here becomes a leak one request later.
+                metadata={"trace_id": trace_id, "error": scrub_credentials(str(exc))},
             )
             return InferenceTaskResponse(
                 task_id=task_id, trace_id=trace_id,

@@ -28,10 +28,31 @@ from app.utils.logger import logger
 
 router = APIRouter(prefix="/v1/trading", tags=["Trading Consultation"])
 
-# In-memory sliding-window rate limiter: max 20 requests per bot_id per hour (3600s)
+# In-memory sliding-window rate limiter, per bot_id. The ceiling used to be a module constant
+# (20/hour) that an operator could only change by editing this file, and the 429 carried no
+# ``Retry-After`` — so a client that hit it had to guess when to come back. Measured on the
+# mixed soak: `/v1/trading/consult` produced exactly 92 x 429 in a 60 s round (1/12 of the
+# traffic, i.e. every attempt) once the window filled, with the body naming the limit and the
+# headers describing the *global* middleware limit instead.
 _bot_request_timestamps: dict[str, list[float]] = defaultdict(list)
 RATE_LIMIT_WINDOW_SECONDS = 3600.0
-RATE_LIMIT_MAX_REQUESTS = 20
+DEFAULT_RATE_LIMIT_MAX_REQUESTS = 20
+
+
+def rate_limit_max_requests() -> int:
+    """Per-bot ceiling for consultations, configurable without a code change.
+
+    A trading bot may legitimately consult on every drawdown event and on a scheduled review;
+    20/hour is a starting point, not a law of nature, and the person operating the bot is the
+    one who knows the right number.
+    """
+    try:
+        from app.core.config import settings
+
+        return max(1, int(getattr(settings, "TRADING_CONSULT_RATE_LIMIT_PER_HOUR",
+                                  DEFAULT_RATE_LIMIT_MAX_REQUESTS)))
+    except Exception:  # configuration must never turn a request into a 500
+        return DEFAULT_RATE_LIMIT_MAX_REQUESTS
 # bot_id is supplied in the request body, so every distinct value would
 # otherwise create a permanent dict entry - a trivial memory-exhaustion vector.
 MAX_TRACKED_BOT_IDS = 10_000
@@ -63,17 +84,30 @@ def _evict_stale_bot_windows(now: float) -> None:
 
 
 def _check_rate_limit(bot_id: str) -> None:
-    """Enforces max 20 consultations per bot_id per hour."""
+    """Enforce the per-bot consultation ceiling, telling the client when to retry."""
     now = time.time()
     cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+    limit = rate_limit_max_requests()
     _evict_stale_bot_windows(now)
     # Clean expired timestamps
     _bot_request_timestamps[bot_id] = [ts for ts in _bot_request_timestamps[bot_id] if ts > cutoff]
-    if len(_bot_request_timestamps[bot_id]) >= RATE_LIMIT_MAX_REQUESTS:
-        logger.warning("Rate limit exceeded for bot_id '%s' (%d requests in 1 hour)", bot_id, len(_bot_request_timestamps[bot_id]))
+    if len(_bot_request_timestamps[bot_id]) >= limit:
+        oldest = min(_bot_request_timestamps[bot_id])
+        retry_after = max(1, int(RATE_LIMIT_WINDOW_SECONDS - (now - oldest)) + 1)
+        logger.warning(
+            "Rate limit exceeded for bot_id '%s' (%d requests in the last hour, limit %d)",
+            bot_id, len(_bot_request_timestamps[bot_id]), limit,
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit exceeded for bot '{bot_id}': Maximum {RATE_LIMIT_MAX_REQUESTS} consultations per hour allowed."
+            # ``Retry-After`` is the standard signal; without it a client can only guess, and
+            # the guessing client is usually a retry loop.
+            headers={"Retry-After": str(retry_after)},
+            detail=(
+                f"Rate limit exceeded for bot '{bot_id}': {limit} consultations per hour are "
+                f"allowed. Retry in {retry_after}s, or raise "
+                "TRADING_CONSULT_RATE_LIMIT_PER_HOUR if this bot legitimately consults more."
+            ),
         )
     _bot_request_timestamps[bot_id].append(now)
 

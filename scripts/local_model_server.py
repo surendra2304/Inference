@@ -135,9 +135,16 @@ def resolve_fault_schedule(schedule: dict[str, str], persona: str) -> str:
     Accepts an exact persona match or a substring match in either direction, so both
     ``{"critic": "503"}`` and ``{"researcher": "429"}`` target the right specialist
     without the operator having to know how the rig slugified the role.
+
+    ``{"*": "500"}`` fails *every* call, which is what a provider outage looks like from the
+    agent's side. Without it there was no way to express "everything is down" through the
+    control endpoint — the fault sweep needed it, and the alternatives (killing the rig
+    process, pointing the agent at a dead port) could not be switched back without a restart.
     """
     if not schedule:
         return ""
+    if "*" in schedule:
+        return schedule["*"]
     if persona in schedule:
         return schedule[persona]
     for key, value in schedule.items():

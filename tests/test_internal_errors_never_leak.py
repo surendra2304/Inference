@@ -241,3 +241,52 @@ def test_benign_text_is_not_mangled_by_key_scrubbing(benign):
     from app.security.prompt_isolation import scrub_credentials
 
     assert scrub_credentials(benign) == benign
+
+
+async def test_task_record_metadata_does_not_carry_raw_exception_text(client, monkeypatch):
+    """``GET /tasks/{id}`` serves the stored metadata back, so the *write* must be clean too.
+
+    ``ask_v1`` stores ``{"error": str(exc)}`` on the durable task record; ``get_task_status``
+    returns ``task_record.model_dump()`` and the route publishes it. Measured in this test
+    before the fix: a caller fetching the task by id received the credential marker that the
+    original response had been scrubbed of.
+    """
+    import app.api.routes as api_routes
+    import app.core.orchestrator as orchestrator_module
+
+    calls: list[dict] = []
+
+    async def record_outcome(task_id, question, result, **kwargs):
+        calls.append({"task_id": task_id, "result": result, "metadata": kwargs.get("metadata")})
+
+    monkeypatch.setattr(orchestrator_module.orchestrator, "_record_task_outcome",
+                        record_outcome, raising=False)
+    monkeypatch.setattr("app.api.v1_core_routes._record_task_outcome", record_outcome)
+
+    async def explode(*_args, **_kwargs):
+        raise Boom(SECRET_TEXT)
+
+    monkeypatch.setattr(orchestrator_module.orchestrator, "process_task", explode)
+    await client.post("/v1/ask", json={"question": "record a failure", "mode": "review"})
+
+    assert calls, "the failure path must still record the task outcome"
+    stored = calls[-1]["metadata"] or {}
+    assert MARKER not in (stored.get("error") or ""), (
+        f"raw exception text was stored on the task record: {stored.get('error')!r}"
+    )
+    assert calls[-1]["result"], "a result string is still recorded for the audit trail"
+
+
+def test_reading_a_task_record_scrubs_metadata_keys_on_the_way_out():
+    """A writer that forgets must not become a published credential."""
+    from app.security.prompt_isolation import scrub_credentials_dict
+
+    stored = {
+        "trace_id": "trace_x",
+        "error": "provider rejected api_key=AKIAIOSFODNN7EXAMPLE",
+        "model": "should-survive",
+    }
+    clean = scrub_credentials_dict(stored)
+    assert "AKIAIOSFODNN7EXAMPLE" not in clean["error"]
+    assert clean["model"] == "should-survive"
+    assert clean["trace_id"] == "trace_x"

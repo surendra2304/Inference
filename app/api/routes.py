@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.agents.debate import AgentPanelUnavailable
 from app.core.orchestrator import OrchestrationRequest, orchestrator
 from app.core.security import require_inference_api_key
+from app.security.prompt_isolation import scrub_credentials_dict
 from app.utils.errors import internal_error, unavailable_detail
 from app.utils.logger import logger
 
@@ -221,6 +222,10 @@ async def trigger_debate(request: DebateRequest) -> DebateResponse:
 async def get_task(task_id: str):
     """Retrieve details and state of a task by ID."""
     status_data = await orchestrator.get_task_status(task_id)
+    if status_data:
+        # The record's metadata carries whatever the failing component stored. Scrubbing on
+        # read means a writer that forgets cannot turn into a published credential.
+        status_data = scrub_credentials_dict(status_data)
     if not status_data:
         # A bounded recent-task cache makes "never recorded" and "recorded, then dropped
         # from the window" different facts; answer with the one that is true.
