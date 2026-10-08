@@ -463,3 +463,28 @@ Every item here was found by *driving the agent*, not by reading it. Commit chai
       (identical question text returns the first answer, so "outage" scenarios echoed the
       baseline); and it set `hang_seconds` without selecting the hang fault, injecting nothing.
 - [x] Suite: **472 passed**, ruff clean, mypy clean (239 files).
+
+### Increment 31 addendum — the block-counter growth, explained by measurement
+
+After a 30-minute mixed soak the live block count was climbing ~7 per request while RSS stayed
+flat (182 MB). Two possibilities: genuine retention, or a bounded store still filling. Measured
+over 240 s of the soak:
+
+    delta blocks +23,234 | analytics records +611 | sentinel provenance +305
+    blocks per new analytics record: 38.0
+    analytics store occupancy: 5,800/10,000
+
+`RequestAnalyticsRecord` in the live-object census reads **5,800**, and
+`usage_analytics.records` reports `used: 5,800` — every live record is accounted for by the
+bounded store, and the store is 42% short of its ceiling. So the block growth is the store
+*filling* (38 blocks per record: the model, its nested lists/dicts and its slot in the
+BoundedList), not memory the process is failing to release. The soak's verdict logic was
+extended with the same "filling" precondition the leak probe learned, so it reports
+`filling — N entries of store capacity remain unfilled` instead of either "plateau" (which
+would hide real growth) or "object-retention" (which would be wrong).
+
+The conclusion is the same one the 40k-request soak produced for `/v1/nexus/intelligence`:
+growth stops when the ceilings are reached. The difference here is that the mixed workload
+fills `usage_analytics.records` (10,000) and `sentinel.provenance_store` (2,048) slowly enough
+that a 30-minute soak does not reach saturation, so the honest verdict for a run this short is
+"filling", not "plateau".

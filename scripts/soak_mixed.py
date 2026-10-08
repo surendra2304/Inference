@@ -116,11 +116,14 @@ def main() -> int:
 
     print(f"  soak: {args.minutes:.0f} min, concurrency {args.concurrency}, "
           f"{len(WORKLOADS)} workload shapes", flush=True)
+    stores_start = {row["name"]: row for row in
+                    (overview(base, args.key, "/memory/stores").get("stores") or [])}
     while time.time() < deadline:
         round_started = time.time()
         codes: Counter[int] = Counter()
         latencies: list[float] = []
         per_path_errors: Counter[str] = Counter()
+        non_2xx_by_path: Counter[str] = Counter()
         requests = 0
         with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
             while time.time() - round_started < args.round_seconds and time.time() < deadline:
@@ -132,6 +135,13 @@ def main() -> int:
                     requests += 1
                     if status >= 500 or status == -1:
                         per_path_errors[path] += 1
+                    if not 200 <= status < 300:
+                        # Attribution for every non-2xx. Without it a 429 count is just a
+                        # number: the mixed soak's ~8% of responses were 429 and the report
+                        # could not say *which* endpoint produced them (it is the per-bot
+                        # consultation ceiling, i.e. intended behaviour, but that has to be
+                        # provable from the report rather than assumed).
+                        non_2xx_by_path[f"{status} {path}"] += 1
 
         runtime = overview(base, args.key, "/metrics/runtime")
         blocks = overview(base, args.key, "/memory/diagnostics?action=blocks")
@@ -148,6 +158,7 @@ def main() -> int:
             "trims": guard.get("trims"),
             "reclaimed_mb": guard.get("reclaimed_total_mb"),
             "server_errors_by_path": dict(per_path_errors),
+            "non_2xx_by_path": dict(non_2xx_by_path),
             "within_bound": (runtime.get("retention") or {}).get("within_bound"),
         }
         rounds.append(row)
@@ -161,6 +172,23 @@ def main() -> int:
     total = sum(row["requests"] for row in rounds)
     errors = sum(sum(v for k, v in row["codes"].items() if int(k) >= 500 or int(k) == -1)
                  for row in rounds)
+
+    # A bounded store that is still filling grows *by design*, and no rule based on RSS or on
+    # live blocks can tell that apart from retention. [FACT] This soak's own numbers did
+    # exactly that: blocks climbed ~7 per request for twenty rounds while
+    # ``usage_analytics.records`` sat at 4,946 of its 10,000 ceiling and
+    # ``sentinel.provenance_store`` at 1,210 of 2,048. Saturation is therefore a precondition
+    # for any retention verdict, and it is reported explicitly rather than assumed.
+    stores_end = {row["name"]: row for row in
+                  (overview(base, args.key, "/memory/stores").get("stores") or [])}
+    growing_unfilled: dict[str, int] = {}
+    for name, row in stores_end.items():
+        before = (stores_start.get(name) or {}).get("used") or 0
+        used = row.get("used") or 0
+        ceiling = row.get("max_entries") or 0
+        if ceiling and used > before:
+            growing_unfilled[name] = max(0, ceiling - used)
+    still_filling = sum(growing_unfilled.values()) > 0
     rss_series = [row["rss_mb"] for row in rounds if row["rss_mb"] is not None]
     block_series = [row["blocks"] for row in rounds if row["blocks"] is not None]
     growth = [round(rss_series[i + 1] - rss_series[i], 1) for i in range(len(rss_series) - 1)]
@@ -194,7 +222,14 @@ def main() -> int:
             # the leak this repo was measured with (1.4 KB/request) and well above the
             # request-scoped noise seen under load.
             climbing = statistics.fmean(tail_deltas) > statistics.fmean(head_deltas)
-            if blocks_per_request > 20.0 and climbing:
+            if still_filling and not (blocks_per_request > 20.0 and climbing):
+                verdict, detail = "filling", (
+                    f"{sum(growing_unfilled.values())} entries of store capacity remain "
+                    f"unfilled ({growing_unfilled}); blocks {blocks_per_request:+.1f}/request, "
+                    f"tail RSS growth {tail:.2f} MB/round — drive more traffic before calling "
+                    "retention"
+                )
+            elif blocks_per_request > 20.0 and climbing:
                 verdict, detail = "object-retention", (
                     f"live blocks {block_series[0]} -> {block_series[-1]} over {total_requests} "
                     f"requests ({blocks_per_request:.1f} blocks/request) and still climbing"
@@ -218,6 +253,7 @@ def main() -> int:
         "rss_series": rss_series, "block_series": block_series, "growth_mb_per_round": growth,
         "verdict": verdict, "detail": detail,
         "blocks_per_request": blocks_per_request,
+        "still_filling_stores": growing_unfilled or None,
     }
     print(f"\nVERDICT: {verdict} — {detail}")
     print(f"  {total} requests, {errors} server/transport errors, "
