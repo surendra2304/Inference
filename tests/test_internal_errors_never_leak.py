@@ -251,7 +251,6 @@ async def test_task_record_metadata_does_not_carry_raw_exception_text(client, mo
     before the fix: a caller fetching the task by id received the credential marker that the
     original response had been scrubbed of.
     """
-    import app.api.routes as api_routes
     import app.core.orchestrator as orchestrator_module
 
     calls: list[dict] = []

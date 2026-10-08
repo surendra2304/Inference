@@ -39,6 +39,13 @@ RATE_LIMIT_WINDOW_SECONDS = 3600.0
 DEFAULT_RATE_LIMIT_MAX_REQUESTS = 20
 
 
+#: Backwards-compatible name. ``RATE_LIMIT_MAX_REQUESTS`` was a module constant that callers
+#: (and tests) import directly; keeping it as a property-like accessor would break those, so
+#: the function above is the live value and this alias preserves the old spelling for the
+#: default. New code should call :func:`rate_limit_max_requests`.
+RATE_LIMIT_MAX_REQUESTS = DEFAULT_RATE_LIMIT_MAX_REQUESTS
+
+
 def rate_limit_max_requests() -> int:
     """Per-bot ceiling for consultations, configurable without a code change.
 
