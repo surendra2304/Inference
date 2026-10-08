@@ -59,8 +59,29 @@ _SESSION_COOKIE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _GENERIC_SECRET_FIELD_PATTERN = re.compile(
-    r"(?:api_key|api_secret|auth_token|access_token|refresh_token|password|passphrase)\s*[:=]\s*['\"]?([A-Za-z0-9_\-.~+/=]{16,})['\"]?",
+    r"(?:api_key|api_secret|auth_token|access_token|refresh_token|password|passphrase)\s*[:=]\s*['\"]?([A-Za-z0-9_\-.~+/=]{8,})['\"]?",
     re.IGNORECASE,
+)
+
+# Bare provider key literals: how an upstream API actually reports a rejected credential.
+# Measured need: a 401 body of the form "... key=sk-<id>" travelled through the provider
+# failure text, and the named-field pattern above did not match it because nothing preceded
+# the value with ``api_key=`` — the provider just quotes the key. Each prefix below is a real
+# vendor format; the leading ``\b`` (and case sensitivity) is what keeps prose such as
+# "task-..." or "risk-..." from being redacted, since those have a word character before "sk".
+_PROVIDER_KEY_LITERAL_PATTERN = re.compile(
+    r"\b(?:"
+    r"sk-(?:proj-|or-v1-|live-|test-)?[A-Za-z0-9_\-]{16,}"
+    r"|gsk_[A-Za-z0-9]{20,}"
+    r"|hf_[A-Za-z0-9]{20,}"
+    r"|nvapi-[A-Za-z0-9_\-]{20,}"
+    r"|xai-[A-Za-z0-9]{20,}"
+    r"|pplx-[A-Za-z0-9]{20,}"
+    r"|cohere-[A-Za-z0-9]{20,}"
+    r"|AIza[0-9A-Za-z_\-]{35}"
+    r"|r8_[A-Za-z0-9]{20,}"
+    r"|mistral-[A-Za-z0-9]{20,}"
+    r")\b"
 )
 
 # Known forbidden credential keys in structured dictionaries
@@ -151,7 +172,12 @@ def scrub_credentials(text: str) -> str:
         scrubbed,
     )
 
-    # 9. Generic secrets
+    # 9. Bare provider key literals (sk-..., gsk_..., AIza..., nvapi-..., ...)
+    scrubbed = _PROVIDER_KEY_LITERAL_PATTERN.sub(
+        "[REDACTED_CREDENTIAL: PROVIDER_KEY]", scrubbed
+    )
+
+    # 10. Generic secrets
     scrubbed = _GENERIC_SECRET_FIELD_PATTERN.sub(
         lambda m: m.group(0).split("=")[0] + "=[REDACTED_CREDENTIAL: SECRET_KEY]"
         if "=" in m.group(0)

@@ -15,7 +15,7 @@ Every new defect gets appended immediately with a measurement. If empty, re-audi
 - [x] Q7. 6 residual `PytestUnhandledThreadExceptionWarning` (loop ownership). Repro + fix.
       CLOSED in increment 28 — see "Q7 (aiosqlite loop ownership) — FIXED" below for the
       owner-loop design, the 3× suite runs with 0 warnings, and the regression file.
-- [ ] Q9. "distinct answers 1/3" — identical question must not yield divergent answers across modes.
+- [x] Q9. "distinct answers 1/3" — CLOSED in increment 30: `mode` is a validated `Literal`, each declared mode reports `mode_used`, and `deliberative`/`consensus` map to `review` with a `mode_mapping_note`; `tests/test_declared_modes_are_honored.py` (5 tests) pins it.
 
 ## Closed (with evidence)
 

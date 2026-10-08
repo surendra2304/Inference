@@ -15,6 +15,7 @@ from app.performance_cache import perf_cache
 from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.gateway import model_gateway
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
+from app.utils.errors import internal_error
 from app.utils.ids import generate_task_id
 from app.utils.logger import logger
 from app.version import VERSION
@@ -277,10 +278,9 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
 
         return resp
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"FRIDAY task orchestration failed: {exc!s}"
-        )
+        detail, _ = internal_error(logger, exc, doing_what="FRIDAY task orchestration",
+                                   prefix="friday")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
 
 
 @friday_router.post("/debate", response_model=FridayResponse, status_code=status.HTTP_200_OK)

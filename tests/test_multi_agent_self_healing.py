@@ -111,8 +111,16 @@ async def test_ask_returns_503_when_entire_panel_is_dark(monkeypatch, auth):
     assert r.status_code == 503, f"expected 503, got {r.status_code}: {r.text[:300]}"
     detail = r.json()["detail"]
     assert "no specialist produced output" in detail.lower()
-    # The real failure reasons must be carried through, not hidden.
-    assert "simulated outage" in detail
+    # The failure must be carried through, not hidden — but in a form that cannot publish
+    # whatever an upstream provider chose to quote back. [FACT] the previous assertion here
+    # required the gateway's own text ("simulated outage") in the response; measured on the
+    # trading route, that same pass-through published a rejected credential verbatim
+    # (tests/test_internal_errors_never_leak.py). The specialist id and the failure *kind*
+    # are the parts an operator can act on, and they are still present.
+    assert "researcher" in detail, "the failing specialist must be named"
+    assert "AgentCallUnavailable" in detail, "the failure kind must be reported"
+    assert "simulated outage" not in detail, "free-form provider text must not be published"
+    assert "correlation id" in detail
 
 
 @pytest.mark.asyncio

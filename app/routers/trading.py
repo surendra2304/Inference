@@ -23,6 +23,7 @@ from app.schemas.trading_consult import (
 )
 from app.services.experiment_service import experiment_service
 from app.services.trading_consult_service import trading_consult_service
+from app.utils.errors import internal_error
 from app.utils.logger import logger
 
 router = APIRouter(prefix="/v1/trading", tags=["Trading Consultation"])
@@ -222,19 +223,11 @@ async def consult_trading_bot(request: Request) -> AIUniverseDecision:
         # measured: a raised RuntimeError carrying "password=hunter2" and an absolute path
         # came straight back in the HTTP response body. An operator can join the two through
         # the correlation id, and a client can retry safely without learning our internals.
-        correlation_id = f"consult_{uuid4().hex[:12]}"
-        logger.error(
-            "Consultation orchestration failure [%s] for bot '%s': %s",
-            correlation_id, req.bot_id, exc, exc_info=True,
+        detail, _ = internal_error(
+            logger, exc, doing_what="trading consultation", prefix="consult",
+            extra=f"bot={req.bot_id}",
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=(
-                "Consultation could not be completed due to an internal error. "
-                f"Quote correlation id {correlation_id} when reporting this; the details are "
-                "in the server log."
-            ),
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail) from exc
 
 
 @router.get("/consult/health", status_code=status.HTTP_200_OK)

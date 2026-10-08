@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.agents.debate import AgentPanelUnavailable
 from app.core.orchestrator import OrchestrationRequest, orchestrator
 from app.core.security import require_inference_api_key
+from app.utils.errors import internal_error, unavailable_detail
 from app.utils.logger import logger
 
 router = APIRouter()
@@ -154,15 +155,17 @@ async def ask_question(request: AskRequest) -> AskResponse:
         # Every specialist (and every peer that tried to cover) went dark.
         # 503 Service Unavailable is the truthful status: the service could not
         # perform the requested inference, and we refuse to fabricate an answer.
+        # The per-specialist reasons are summarised to agent id + failure *kind* rather than
+        # the provider's own exception text, which can quote the credential it rejected
+        # (see app/utils/errors.py).
+        logger.error("Agent panel unavailable for task %s: %s", exc.task_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
+            detail=unavailable_detail(exc, failures=exc.failures, prefix="panel"),
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Task orchestration failed: {exc!s}"
-        )
+        detail, _ = internal_error(logger, exc, doing_what="task orchestration", prefix="ask")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
 
 
 @router.post("/debate", response_model=DebateResponse, status_code=status.HTTP_200_OK, dependencies=[Depends(require_inference_api_key)])
@@ -204,15 +207,14 @@ async def trigger_debate(request: DebateRequest) -> DebateResponse:
             failed_agents=result.failed_agents,
         )
     except AgentPanelUnavailable as exc:
+        logger.error("Agent panel unavailable for debate %s: %s", exc.task_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
+            detail=unavailable_detail(exc, failures=exc.failures, prefix="panel"),
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Debate orchestration failed: {exc!s}"
-        )
+        detail, _ = internal_error(logger, exc, doing_what="debate orchestration", prefix="debate")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
 
 
 @router.get("/tasks/{task_id}", dependencies=[Depends(require_inference_api_key)])

@@ -33,6 +33,7 @@ from app.memory.sqlite import SQLiteMemory
 from app.providers.base import ProviderMessage, ProviderRequest, ProviderResponse
 from app.providers.gateway import model_gateway
 from app.providers.health import provider_health_tracker
+from app.security.prompt_isolation import scrub_credentials
 from app.utils.ids import generate_debate_id, generate_message_id, generate_run_id
 from app.utils.logger import logger
 
@@ -674,7 +675,9 @@ class CollaborationEngine:
                     )
                     return result
                 # Nobody could cover: record the reason and let the gather decide.
-                degradation_reasons.append(str(primary_err))
+                # Scrubbed, because this string reaches clients through the v1 failure_state
+                # field and provider libraries routinely echo the credential they rejected.
+                degradation_reasons.append(scrub_credentials(str(primary_err)))
                 raise
 
         # Execute all specialist perspectives simultaneously. One dark agent must not
@@ -710,7 +713,7 @@ class CollaborationEngine:
             degradation_reasons.append(
                 f"specialist phase exceeded its {panel_budget:.1f}s budget; "
                 f"cancelled: {', '.join(timed_out)}"
-            )
+            )  # agent ids only: nothing provider-supplied enters this line
 
         r1_results = []
         panel_failures: list[str] = []
@@ -730,7 +733,12 @@ class CollaborationEngine:
             except asyncio.CancelledError as cancelled:
                 raise cancelled
             except BaseException as exc:  # noqa: BLE001 - one dark agent is not a panel failure
-                panel_failures.append(f"{agent.id}: {exc}")
+                # The exception *type* is the part a caller can act on and the part that is
+                # safe to publish (``UnavailableDetail`` extracts it); the message follows,
+                # scrubbed, for the server log and the audit trail.
+                panel_failures.append(
+                    f"{agent.id}: {type(exc).__name__}: {scrub_credentials(str(exc))}"
+                )
                 continue
             if isinstance(outcome, asyncio.CancelledError):
                 raise outcome
@@ -930,7 +938,9 @@ class CollaborationEngine:
             # instead of inventing a consensus — and never fail the whole task when
             # we still have genuine specialist analysis to hand back.
             synthesis_degraded = True
-            degradation_reasons.append(f"synthesizer unavailable: {syn_err}")
+            degradation_reasons.append(
+                f"synthesizer unavailable: {scrub_credentials(str(syn_err))}"
+            )
             syn_tokens, syn_models = 0, []
             logger.warning(
                 "Collaboration %s: synthesizer unavailable (%s) — returning raw specialist panel output",

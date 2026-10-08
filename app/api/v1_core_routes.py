@@ -43,10 +43,12 @@ from app.schemas.v1_models import (
 from app.security.prompt_isolation import (
     CredentialLeakError,
     detect_credentials,
+    scrub_credentials,
     scrub_credentials_dict,
     scrub_credentials_verified,
     wrap_untrusted_data,
 )
+from app.utils.errors import correlation_id, unavailable_detail
 from app.utils.logger import logger
 from app.version import VERSION
 
@@ -304,7 +306,8 @@ async def ask_v1(
             logger.warning("[V1_ASK] panel unavailable: %s", exc)
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             await _record_task_outcome(
-                task_id, clean_prompt, f"Panel unavailable: {exc}", mode=request.mode,
+                task_id, clean_prompt,
+                f"Panel unavailable: {scrub_credentials(str(exc))}", mode=request.mode,
                 status_value="failed", confidence=0.0,
                 metadata={"trace_id": trace_id, "error": str(exc)},
             )
@@ -328,17 +331,26 @@ async def ask_v1(
                     model="deliberation_engine",
                     latency_ms=latency_ms,
                 ),
-                failure_state=f"PANEL_UNAVAILABLE: {exc}",
+                # Agent ids and failure *kinds* only. The exception's own text carries the
+                # provider's message, and a provider's 401 typically quotes the key it
+                # rejected; [FACT] the sibling DELIBERATION_FAILED path below was measured
+                # publishing "password=..." verbatim inside ``answer``.
+                failure_state=unavailable_detail(exc, failures=exc.failures, prefix="panel"),
                 status="DEGRADED",
                 mode_requested=mode_requested,
                 mode_used=None,
                 mode_mapping_note=mode_mapping_note,
             )
         except Exception as exc:  # noqa: BLE001 - reported, never fabricated over
-            logger.error("[V1_ASK] multi-agent deliberation failed: %s", exc, exc_info=True)
+            reference = correlation_id("deliberation")
+            logger.error(
+                "[V1_ASK] multi-agent deliberation failed [%s]: %s", reference, exc,
+                exc_info=True,
+            )
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             await _record_task_outcome(
-                task_id, clean_prompt, f"Deliberation failed: {exc}", mode=request.mode,
+                task_id, clean_prompt,
+                f"Deliberation failed: {scrub_credentials(str(exc))}", mode=request.mode,
                 status_value="failed", confidence=0.0,
                 metadata={"trace_id": trace_id, "error": str(exc)},
             )
@@ -346,7 +358,7 @@ async def ask_v1(
                 task_id=task_id, trace_id=trace_id,
                 answer=(
                     "Deliberation could not be completed: the multi-agent panel did not "
-                    f"produce a result ({exc}). No answer is fabricated in its place."
+                    "produce a result. No answer is fabricated in its place."
                 ),
                 reasoning_summary="Multi-agent deliberation failed before synthesis.",
                 confidence=0.0, uncertainty=1.0, evidence=[],
@@ -356,7 +368,8 @@ async def ask_v1(
                 provider_metadata=ProviderMetadata(provider="multi_provider_council",
                                                    model="deliberation_engine",
                                                    latency_ms=latency_ms),
-                failure_state="DELIBERATION_FAILED", status="DEGRADED",
+                failure_state=f"DELIBERATION_FAILED (correlation id {reference})",
+                status="DEGRADED",
                 mode_requested=mode_requested, mode_used=None, mode_mapping_note=mode_mapping_note,
             )
 
@@ -401,7 +414,10 @@ async def ask_v1(
                 latency_ms=latency_ms,
             ),
             failure_state=(
-                "; ".join(result.degradation_reasons) if result.degraded else None
+                # Scrubbed again at the boundary: whatever composed these reasons, the client
+                # must not receive credential-looking text (see app/utils/errors.py for the
+                # measured case that motivated the rule).
+                scrub_credentials("; ".join(result.degradation_reasons)) if result.degraded else None
             ),
             status="DEGRADED" if result.degraded else "SUCCESS",
             mode_requested=mode_requested,
@@ -751,21 +767,33 @@ async def debate_v1(
         )
 
     except Exception as exc:
-        logger.error(f"[V1_DEBATE] Debate execution failure: {exc}", exc_info=True)
+        # Both ``answer`` and ``failure_state`` used to interpolate the exception verbatim,
+        # so a panel failure published the provider text of every specialist that went dark —
+        # measured: "Provider 'groq' has no configured credential..." repeated six times, and
+        # with a real provider's 401 the rejected key travels the same path. The client gets
+        # what it needs (the debate could not run, why in aggregate, and a correlation id);
+        # the exception text goes to the server log where it belongs.
+        reference = correlation_id("debate")
+        logger.error("[V1_DEBATE] debate execution failure [%s]: %s", reference, exc,
+                     exc_info=True)
         latency_ms = int((time.perf_counter() - start_time) * 1000)
         await _record_task_outcome(
             task_id,
             topic,
-            f"Debate deliberation encountered an error: {exc}",
+            f"Debate deliberation encountered an error (correlation id {reference})",
             mode="debate",
             status_value="failed",
             confidence=0.0,
-            metadata={"trace_id": trace_id, "error": str(exc)},
+            metadata={"trace_id": trace_id, "error": scrub_credentials(str(exc))},
         )
         return InferenceTaskResponse(
             task_id=task_id,
             trace_id=trace_id,
-            answer=f"Debate deliberation encountered an error: {exc}",
+            answer=(
+                "Debate deliberation encountered an error and no consensus was produced. "
+                f"Quote correlation id {reference} when reporting this; the details are in "
+                "the server log."
+            ),
             reasoning_summary="Multi-agent debate interrupted by provider or system error.",
             confidence=0.0,
             uncertainty=1.0,
@@ -779,7 +807,7 @@ async def debate_v1(
                 model="none",
                 latency_ms=latency_ms,
             ),
-            failure_state=str(exc),
+            failure_state=f"DEBATE_FAILED (correlation id {reference})",
             status="ERROR",
         )
 

@@ -57,8 +57,14 @@ queue item; then the Q7 citation check and the final sweep. The tree is green at
 - [x] 7. #62–#65 backlog items. #62 fixed (`65c1c50`), #63/#64 verified fixed with new
       regression tests (the #63 test fails against the old `confidence: float = 0.90`
       default - falsified by restoring it), #65 fixed earlier. #29 is item 8.
-- [ ] 8. #29 backlog item.
-- [ ] 9. Q7 citation check (sqlite loop ownership).
+- [x] 8. #29 cross-endpoint dedup collision. Already fixed and pinned end-to-end by
+      `tests/test_api_contract_fuzz.py::test_cross_endpoint_cache_collision_is_impossible_over_http`
+      (same `request_id` to `/v1/nexus/intelligence` then `/v1/sentinel/analyze`; the second
+      endpoint answers with its own schema), backed by `TenantManager._dedup_key(request_id,
+      namespace)` at `app/governance/tenant_manager.py:187`. Test passes on the current tree.
+- [x] 9. Q7 citation check. `app/memory/sqlite.py` owns every aiosqlite connection on one
+      process-wide loop (`_DB_EXECUTOR`, `:128`, `loop`/`submit`/`run` at `:99-121`) and
+      `tests/test_sqlite_loop_ownership.py` passes (6 tests) with no thread-exception warnings.
 - [ ] 10. Final sweep: full pytest + ruff + mypy + real-life harness green.
 
 ## Memory-leak investigation, closed (second pass)
