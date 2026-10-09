@@ -129,7 +129,13 @@ class FuturisEnhancementService:
         if resp.degraded or not resp.content:
             return {"status": "not_performed", "reason": "no model produced output"}
 
-        parsed = extract_json_object(resp.content)
+        try:
+            parsed = extract_json_object(resp.content)
+        except ValueError:
+            # The helper raises on prose (the documented contract). A reply that does not parse is
+            # reported as unparsed. Before this, the exception escaped and every request with a
+            # model reachable returned HTTP 500.
+            return {"status": "unparsed", "reason": "model answer contained no JSON object"}
         keys = ("key_risks", "contextual_drivers", "uncertainty_factors", "qualitative_adjustments", "dissent")
         if not isinstance(parsed, dict) or not all(isinstance(parsed.get(k), list) for k in keys):
             return {"status": "unparsed", "reason": "model answer was not the expected JSON object"}

@@ -98,12 +98,15 @@ class SchemaBodies:
                 return None
         if "enum" in schema:
             values = schema["enum"]
-            return values[0] if variant == "A" else values[-1]
+            return values[0] if variant == "A" else (values[len(values) // 2] if variant == "C" else values[-1])
         kind = schema.get("type")
         if "const" in schema:
             return schema["const"]
         if kind == "object" or "properties" in schema:
             body: dict[str, Any] = {}
+            if schema.get("minProperties", 0) >= 1 and not schema.get("properties") and schema.get("additionalProperties"):
+                # e.g. a positions map that must hold at least one entry (empty map was a 422)
+                body["item_1"] = self.build(schema["additionalProperties"], variant, depth + 1)
             required = set(schema.get("required", []))
             for name, sub in schema.get("properties", {}).items():
                 if name in required or depth == 0:
@@ -118,12 +121,19 @@ class SchemaBodies:
         if kind == "string":
             if "file" in (schema.get("format") or ""):
                 return "a.py"
-            text = TEXT_A if variant == "A" else TEXT_B
+            if "pattern" in schema:
+                # Values must satisfy the schema's own pattern, or the probe measures its own bad input.
+                candidates = {"A": "BTCUSDT", "B": "ETHUSDT", "C": "SOLUSDT"}
+                pattern = re.compile(schema["pattern"])
+                for cand in (candidates[variant], "ABC", "XYZ1"):
+                    if pattern.fullmatch(cand):
+                        return cand
+            text = {"A": TEXT_A, "B": TEXT_B}.get(variant, TEXT_A + " " + TEXT_B)
             return text[: int(schema.get("maxLength", 200))]
         if kind in ("integer", "number"):
             low = schema.get("minimum", 0)
             high = schema.get("maximum", 1000)
-            base = 5 if variant == "A" else 17
+            base = {"A": 5, "B": 17}.get(variant, 2)
             value = min(max(base, low), high)
             return int(value) if kind == "integer" else float(value)
         if kind == "boolean":
@@ -196,37 +206,40 @@ def probe(base: str, api_key: str, spec: dict[str, Any], timeout: float) -> list
         if schema is None:
             results.append(OperationResult(path, "POST", "skipped", note="no JSON body"))
             continue
-        body_a = builder.build(schema, "A")
-        body_b = builder.build(schema, "B")
-        body_a = body_a if body_a is not None else {}
-        body_b = body_b if body_b is not None else {}
-        status_a, resp_a, _ = send(base, api_key, path, body_a, timeout)
-        status_b, resp_b, _ = send(base, api_key, path, body_b, timeout)
+        bodies = {v: builder.build(schema, v) for v in ("A", "B", "C")}
+        bodies = {v: (b if b is not None else {}) for v, b in bodies.items()}
+        responses: dict[str, Any] = {}
+        statuses: dict[str, int | None] = {}
+        for variant, body in bodies.items():
+            status_v, resp_v, _ = send(base, api_key, path, body, timeout)
+            statuses[variant] = status_v
+            responses[variant] = resp_v
+        status_a, status_b = statuses["A"], statuses["B"]
         result = OperationResult(path, "POST", "", status_a, status_b)
-        if status_a is None or status_b is None:
+        if any(s is None for s in statuses.values()):
             result.classification = "unreachable"
             results.append(result)
             continue
-        if status_a >= 500 or status_b >= 500:
+        if any(s >= 500 for s in statuses.values()):
             result.classification = "server_error"
+            result.note = f"statuses {statuses}"
             results.append(result)
             continue
-        if status_a != 200 or status_b != 200:
+        if any(s not in (200, 201) for s in statuses.values()):  # 201 Created is a success too
             result.classification = "rejected"
-            result.note = f"body A {status_a}, body B {status_b}"
+            result.note = f"statuses {statuses}"
             results.append(result)
             continue
-        leaves_a = _numeric_leaves(_strip_noise(resp_a))
-        leaves_b = _numeric_leaves(_strip_noise(resp_b))
-        judge_a, judge_b = _judgement(leaves_a), _judgement(leaves_b)
-        result.judgement_a, result.judgement_b = judge_a, judge_b
-        result.texts_differ = json.dumps(_strip_noise(resp_a), sort_keys=True) != json.dumps(
-            _strip_noise(resp_b), sort_keys=True)
-        if not judge_a and not judge_b:
+        judgements = {v: _judgement(_numeric_leaves(_strip_noise(r))) for v, r in responses.items()}
+        result.judgement_a, result.judgement_b = judgements["A"], judgements["B"]
+        result.texts_differ = len({json.dumps(_strip_noise(r), sort_keys=True) for r in responses.values()}) > 1
+        if not any(judgements.values()):
             result.classification = "no_judgement"
-        elif judge_a == judge_b:
+        elif all(j == judgements["A"] for j in judgements.values()):
+            # Insensitive only when identical across all three variants (small, large, middle), so a
+            # formula that saturates at one extreme is not mistaken for a constant.
             result.classification = "insensitive"
-            result.note = "judgement fields identical for two different inputs"
+            result.note = "judgement fields identical for three different inputs"
         else:
             result.classification = "sensitive"
         results.append(result)

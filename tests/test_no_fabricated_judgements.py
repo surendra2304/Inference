@@ -349,3 +349,46 @@ def test_futuris_probability_is_not_defaulted_to_0_80():
 
     f = StatisticalForecastInput(point_estimate=1.0, confidence_interval=[0.9, 1.1], model_used="x")
     assert f.probability is None
+
+
+async def test_futuris_prose_reply_is_unparsed_not_a_500(monkeypatch):
+    """Found live: a model that answered in prose made the review raise JSONDecodeError and the
+    whole endpoint returned HTTP 500. The suite never reached this path because it has no model."""
+    from app.providers import unified_manager as um
+    from app.services.futuris_enhancement import FuturisEnhanceRequest, futuris_enhancement_service
+
+    async def prose(req):
+        return SimpleNamespace(content="Here is my view, no JSON at all.", degraded=False,
+                               model_used="m", provider_used="p", finish_reason="stop")
+
+    monkeypatch.setattr(um.unified_provider_manager, "execute", prose)
+    req = FuturisEnhanceRequest(
+        request_id="fut-prose-1",
+        statistical_forecast={"model_used": "GARCH", "point_estimate": 0.05, "confidence_interval": [0.04, 0.06]},
+    )
+    out = await futuris_enhancement_service.enhance_forecast(req)
+    assert out.provenance["qualitative_review_status"] == "unparsed"
+    assert out.provenance["agents_consulted"] == []
+
+
+async def test_futuris_json_reply_is_used_and_attributed(monkeypatch):
+    from app.providers import unified_manager as um
+    from app.services.futuris_enhancement import FuturisEnhanceRequest, futuris_enhancement_service
+
+    reply = ('{"key_risks":["Liquidity thins below 0.04"],"contextual_drivers":["Volume rising"],'
+             '"uncertainty_factors":["Sample is 30 days"],"qualitative_adjustments":["Tighten stops"],'
+             '"dissent":["Regime may have shifted"]}')
+
+    async def json_reply(req):
+        return SimpleNamespace(content=reply, degraded=False, model_used="m", provider_used="p", finish_reason="stop")
+
+    monkeypatch.setattr(um.unified_provider_manager, "execute", json_reply)
+    req = FuturisEnhanceRequest(
+        request_id="fut-json-1",
+        statistical_forecast={"model_used": "GARCH", "point_estimate": 0.05, "confidence_interval": [0.04, 0.06]},
+    )
+    out = await futuris_enhancement_service.enhance_forecast(req)
+    assert out.provenance["qualitative_review_status"] == "parsed"
+    assert out.provenance["agents_consulted"] == ["qualitative_model_review"]
+    assert "Liquidity thins below 0.04" in out.enhanced_assessment.key_risks
+    assert out.dissent == ["Regime may have shifted"]
