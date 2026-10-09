@@ -179,6 +179,23 @@ def test_synthetic_alternative_data_does_not_set_the_direction(monkeypatch):
     assert out["synthetic_legs"]
 
 
+def test_neutral_model_read_is_not_published_as_bearish(monkeypatch):
+    """Pre-fix: the LSTM leg was ``1.0 if BULLISH else -1.0``, so a NEUTRAL 24h read counted as bearish.
+    Live: /v1/predict/btc with rising returns gave BEARISH (-0.40) because the 24h horizon was NEUTRAL."""
+    from app.ml import prediction_aggregator as pa
+
+    monkeypatch.setattr(pa.deep_models_engine, "predict_horizons",
+                        lambda *a, **k: {"horizons": {"24h": {"predicted_direction": "NEUTRAL"}}})
+    fixture = {
+        "evidence_class": "synthetic_fixture",
+        "news_intelligence": {"sentiment_score": 0.0},
+        "onchain_intelligence": {"exchange_netflow_24h_usd": 0.0},
+    }
+    monkeypatch.setattr(pa.alt_data_engine, "get_consolidated_alternative_data", lambda symbol: fixture)
+    out = pa.PredictionAggregationEngine().aggregate_prediction("BTCUSDT", 65000.0, [0.004, 0.005, 0.006])
+    assert out["unified_direction"] == "NEUTRAL"
+
+
 # --- sentiment ------------------------------------------------------------------------------------
 
 def test_sentiment_without_keywords_is_neutral_and_social_is_not_measured():
@@ -352,6 +369,19 @@ def test_live_attribution_post_rejects_trades_with_missing_prices(auth):
         headers=auth,
     )
     assert resp.status_code == 422
+
+
+def test_conservative_rationale_does_not_claim_a_consensus_it_never_computed():
+    """Pre-fix: any confidence >= 0.80 got 'High confidence statistical validation across multi-agent
+    consensus.' regardless of input. Live: the /v1/trading/live/intelligence response carried it."""
+    from app.services.conservative_engine import conservative_engine
+
+    rec = conservative_engine.generate_conservative_recommendation(
+        strategy_name="s", current_drawdown_pct=1.0, profit_factor=1.45, confidence=0.9)
+    assert rec["recommended_action"] == "OPTIMIZE_PARAMETERS"
+    assert "multi-agent consensus" not in rec["rationale"].split("No multi-agent")[0]
+    assert "0.90" in rec["rationale"] and "1.45" in rec["rationale"]
+    assert "No multi-agent consensus was computed" in rec["rationale"]
 
 
 # --- agents and adjudication --------------------------------------------------------------------

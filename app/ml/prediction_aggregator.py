@@ -32,7 +32,10 @@ class PredictionAggregationEngine:
         alt_data = alt_data_engine.get_consolidated_alternative_data(symbol)
 
         # Signal components
-        lstm_signal = 1.0 if dl_pred["horizons"]["24h"]["predicted_direction"] == "BULLISH" else -1.0
+        # Three states, three values. The previous ternary mapped NEUTRAL to -1 (bearish): a 24h read
+        # of NEUTRAL (the mean-reversion damping case) was published as a BEARISH call.
+        lstm_direction_24h = dl_pred["horizons"]["24h"]["predicted_direction"]
+        lstm_signal = {"BULLISH": 1.0, "BEARISH": -1.0}.get(lstm_direction_24h, 0.0)
 
         # The news and on-chain legs come from the alternative-data table, which is a static
         # fixture (evidence_class "synthetic_fixture"). A fixture cannot move a directional call,
