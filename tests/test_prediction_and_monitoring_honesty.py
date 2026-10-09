@@ -172,7 +172,10 @@ def test_prediction_with_supplied_inputs_reports_a_number(auth):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["inputs_simulated"] is False
-    assert body["unified_confidence"] is not None
+    # No calibration against realised outcomes exists, so no confidence is published. The previous
+    # mapping produced a number from an uncalibrated score; the payload now says why it is withheld.
+    assert body["unified_confidence"] is None
+    assert body["confidence_basis"].startswith("withheld")
     # The price/return legs are now real, but the four alternative-data legs are still a
     # static fixture table, and the payload has to say so.
     assert body["evidence_class"] == "caller_supplied_price_and_returns_with_synthetic_alt_data"
