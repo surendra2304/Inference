@@ -16,24 +16,32 @@ class MultiMarketDebateEngine:
         reg_data = regime_intel.classify_market_regime()
         liq_data = liquidity_intel.analyze_asset_liquidity("BTCUSDT")
 
+        # Specialist confidences were fixed literals (0.85 / 0.89 / 0.88, overall 0.87). None of them
+        # is computed from an input, so each is None: "not measured", not a number.
+        liquidity_known = liq_data.get("global_liquidity_score") is not None
+        liquidity_findings = (
+            f"Global Liquidity Score: {liq_data['global_liquidity_score']}. Best Execution: {liq_data['best_execution_venue']}."
+            if liquidity_known else
+            "Liquidity not measured: no venue order-book feed is configured."
+        )
         specialist_deliberations = [
             {
                 "specialist": "Macro Analyst",
                 "findings": f"Macro Regime: {reg_data['macro_regime']}. BTC Dominance: {reg_data['leading_indicators']['btc_dominance_trend']}.",
                 "bias": "BULLISH_RISK_ON",
-                "confidence": 0.85
+                "confidence": None,
             },
             {
                 "specialist": "Liquidity Analyst",
-                "findings": f"Global Liquidity Score: {liq_data['global_liquidity_score']}. Best Execution: {liq_data['best_execution_venue']}.",
-                "bias": "FAVOR_DEEP_POOLS",
-                "confidence": 0.89
+                "findings": liquidity_findings,
+                "bias": "FAVOR_DEEP_POOLS" if liquidity_known else "NOT_MEASURED",
+                "confidence": None,
             },
             {
                 "specialist": "Correlation Analyst",
                 "findings": f"Portfolio BTC Correlation: {corr_data['weighted_btc_correlation']}. Concentration Risk: {corr_data['concentration_risk_warning']}.",
                 "bias": "CAUTION_ON_CORRELATION" if corr_data['concentration_risk_warning'] else "BALANCED",
-                "confidence": 0.88
+                "confidence": None,
             }
         ]
 
@@ -41,7 +49,8 @@ class MultiMarketDebateEngine:
 
         return {
             "portfolio_market_consensus": consensus,
-            "overall_confidence": 0.87,
+            "overall_confidence": None,
+            "confidence_basis": "no specialist confidence is computed; see each specialist entry",
             "specialist_deliberations": specialist_deliberations,
             "regime_intelligence": reg_data,
             "liquidity_intelligence": liq_data,

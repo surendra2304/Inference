@@ -1,5 +1,6 @@
 """Dedicated API routes and typed contracts for FRIDAY integration."""
 
+import hashlib
 import json
 import time
 import uuid
@@ -7,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.core.orchestrator import OrchestrationRequest, orchestrator
 from app.core.security import verify_friday_api_key
@@ -15,9 +16,36 @@ from app.performance_cache import perf_cache
 from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.gateway import model_gateway
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
+from app.security.prompt_isolation import scrub_credentials
+from app.utils.confidence import CURATED_ENTRY_CONFIDENCE, UNVERIFIED_MODEL_CONFIDENCE
+from app.utils.errors import correlation_id, internal_error
 from app.utils.ids import generate_task_id
 from app.utils.logger import logger
 from app.version import VERSION
+
+FRIDAY_ASK_NS = "friday.ask"
+FRIDAY_DEBATE_NS = "friday.debate"
+
+
+def _context_scope(context: dict[str, Any] | None) -> dict[str, Any]:
+    """Cache scope for the caller's private context. The same question with a different context
+    is a different question; before this, answers were shared across contexts."""
+    if not context:
+        return {}
+    digest = hashlib.sha256(json.dumps(context, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return {"context": digest}
+
+
+def _as_friday_response(cached: Any) -> "FridayResponse | None":
+    """A cache hit is a FridayResponse dict or a miss. Any other shape is logged and treated as a
+    miss: a cache must never turn a valid request into a 500."""
+    if cached is None:
+        return None
+    try:
+        return FridayResponse.model_validate(cached)
+    except (ValidationError, TypeError, ValueError):
+        logger.warning("friday cache held a value of an unexpected shape; treating it as a miss")
+        return None
 
 friday_router = APIRouter(
     prefix="/v1/friday",
@@ -54,6 +82,56 @@ class FridayResponse(BaseModel):
     provenance: dict[str, Any] = Field(default_factory=dict, description="Audit trail and deliberation lineage")
 
 
+def _fast_lane_confidence(exec_res: Any) -> tuple[float, str]:
+    """Derive a confidence for a single-pass fast-lane answer, with its basis.
+
+    The previous value was the constant ``0.98`` — the same number the degradation gate
+    directly above it warns about — so a one-shot, unreviewed completion claimed
+    near-certainty with nothing behind it. A fast lane performs no peer review and no
+    cross-checking, so it cannot honestly claim more than a single-pass answer warrants,
+    and a completion cut off at the token ceiling is materially incomplete.
+
+    Returns ``(confidence, basis)`` where ``basis`` is recorded in the response
+    provenance so the number can be audited rather than trusted.
+    """
+    finish_reason = (getattr(exec_res, "finish_reason", None) or "").lower()
+    if finish_reason in ("length", "max_tokens", "truncated"):
+        return 0.55, (
+            "single-pass fast-lane answer truncated at the token ceiling "
+            f"(finish_reason={finish_reason}); later content is missing"
+        )
+    if finish_reason in ("", "stop", "eos", "end_turn"):
+        return 0.80, (
+            "single-pass fast-lane completion; no panel review or evidence verification "
+            "was performed, so confidence is capped below deliberated modes"
+        )
+    return 0.70, f"single-pass fast-lane completion with unrecognised finish_reason={finish_reason!r}"
+
+
+def _fast_lane_evidence(exec_res: Any, elapsed_s: float) -> list[str]:
+    """Report only measurable facts about how this answer was produced.
+
+    The previous value was the constant
+    ``"Direct high-throughput Groq fast-lane inference (<500ms SLA)."``: it named a vendor
+    even when the self-hosted tier served the request (``exec_res.provider_used`` is read
+    two lines below for ``provenance``, so the true provider was in hand), and it asserted
+    a sub-500ms SLA that nothing checked.
+    """
+    provider = getattr(exec_res, "provider_used", None) or "unknown"
+    model = getattr(exec_res, "model_used", None) or "unknown"
+    evidence = [
+        f"Served by provider={provider!r} model={model!r} in {elapsed_s:.3f}s "
+        f"(measured; no SLA is claimed)."
+    ]
+    finish_reason = getattr(exec_res, "finish_reason", None)
+    if finish_reason:
+        evidence.append(f"Provider finish_reason={finish_reason!r}.")
+    substituted = getattr(exec_res, "served_by_provider", None)
+    if substituted and substituted != provider:
+        evidence.append(f"Request was originally routed to {substituted!r}.")
+    return evidence
+
+
 @friday_router.post("/ask", response_model=FridayResponse, status_code=status.HTTP_200_OK)
 async def friday_ask(request: FridayRequest) -> FridayResponse:
     """
@@ -72,7 +150,7 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
                 run_id="instant_grounding",
                 answer=grounded_ans,
                 mode_used="instant_grounding",
-                confidence=0.99,
+                confidence=CURATED_ENTRY_CONFIDENCE,
                 unresolved_disagreements=[],
                 key_evidence=["Ecosystem core topology verification"],
                 agents_used=["system_architect"],
@@ -91,9 +169,11 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
 
     # 1. Check L1 In-Memory Response Cache (Sub-millisecond hit path)
     if not request.no_cache:
-        cached_data = perf_cache.get_query(request.question, mode="auto", caller_id=request.caller_id)
-        if cached_data is not None:
-            cached_resp = FridayResponse.model_validate(cached_data)
+        cached_data = perf_cache.get_query(
+            request.question, mode="auto", caller_id=request.caller_id,
+            extra=_context_scope(request.context_data), namespace=FRIDAY_ASK_NS)
+        cached_resp = _as_friday_response(cached_data)
+        if cached_resp is not None:
             cached_resp.latency_seconds = 0.0005
             cached_resp.provenance["cached"] = True
             cached_resp.provenance["cache_tier"] = "L1_IN_MEMORY"
@@ -130,18 +210,27 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
             run_id = f"deb_{uuid.uuid4().hex[:12]}"
             task_id = f"task_{uuid.uuid4().hex[:12]}"
 
+            confidence, confidence_basis = _fast_lane_confidence(exec_res)
+            usage = exec_res.token_usage or {}
+            reported_tokens = usage.get("total_tokens")
+            # Do not invent a token count from the word count. The gate above states the
+            # rule; this line previously broke it
+            # (``.get("total_tokens", len(exec_res.content.split()))``), which
+            # under-reports real token usage and makes cost attribution wrong.
+            token_source = "provider_usage" if reported_tokens is not None else "unavailable"
+
             resp = FridayResponse(
                 task_id=task_id,
                 run_id=run_id,
                 answer=exec_res.content,
                 mode_used="fast",
-                confidence=0.98,
+                confidence=confidence,
                 unresolved_disagreements=[],
-                key_evidence=["Direct high-throughput Groq fast-lane inference (<500ms SLA)."],
+                key_evidence=_fast_lane_evidence(exec_res, elapsed_s),
                 agents_used=["system_architect"],
                 models_used=[exec_res.model_used],
                 latency_seconds=elapsed_s,
-                total_tokens=exec_res.token_usage.get("total_tokens", len(exec_res.content.split())),
+                total_tokens=int(reported_tokens or 0),
                 provenance={
                     "caller_id": request.caller_id,
                     "platform": "Inference",
@@ -149,6 +238,10 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
                     "cached": False,
                     "fast_lane": True,
                     "provider": exec_res.provider_used,
+                    "model": exec_res.model_used,
+                    "confidence_basis": confidence_basis,
+                    "total_tokens_source": token_source,
+                    "finish_reason": exec_res.finish_reason,
                 }
             )
             if not request.no_cache:
@@ -158,6 +251,8 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
                     value=resp.model_dump(),
                     caller_id=request.caller_id,
                     ttl=600.0,
+                    extra=_context_scope(request.context_data),
+                    namespace=FRIDAY_ASK_NS,
                 )
             return resp
         except HTTPException:
@@ -209,15 +304,16 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
                 mode="auto",
                 value=resp.model_dump(),
                 caller_id=request.caller_id,
-                ttl=180.0
+                ttl=180.0,
+                extra=_context_scope(request.context_data),
+                namespace=FRIDAY_ASK_NS
             )
 
         return resp
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"FRIDAY task orchestration failed: {exc!s}"
-        )
+        detail, _ = internal_error(logger, exc, doing_what="FRIDAY task orchestration",
+                                   prefix="friday")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
 
 
 @friday_router.post("/debate", response_model=FridayResponse, status_code=status.HTTP_200_OK)
@@ -231,9 +327,11 @@ async def friday_debate(request: FridayRequest) -> FridayResponse:
 
     # Check L1 In-Memory Response Cache
     if not request.no_cache:
-        cached_data = perf_cache.get_query(request.question, mode="debate", caller_id=request.caller_id)
-        if cached_data is not None:
-            cached_resp = FridayResponse.model_validate(cached_data)
+        cached_data = perf_cache.get_query(
+            request.question, mode="debate", caller_id=request.caller_id,
+            extra=_context_scope(request.context_data), namespace=FRIDAY_DEBATE_NS)
+        cached_resp = _as_friday_response(cached_data)
+        if cached_resp is not None:
             cached_resp.latency_seconds = 0.001
             cached_resp.provenance["cached"] = True
             cached_resp.provenance["cache_tier"] = "L1_IN_MEMORY"
@@ -280,15 +378,50 @@ async def friday_debate(request: FridayRequest) -> FridayResponse:
                 mode="debate",
                 value=resp.model_dump(),
                 caller_id=request.caller_id,
-                ttl=300.0
+                ttl=300.0,
+                extra=_context_scope(request.context_data),
+                namespace=FRIDAY_DEBATE_NS
             )
 
         return resp
+    except HTTPException:
+        raise
     except Exception as exc:
+        # "no specialist produced output" means every provider was unreachable or
+        # unconfigured: the service is *unavailable*, not broken. The sibling /v1/friday/ask
+        # endpoint already answers that condition with 503, and returning 500 here made two
+        # endpoints report the same outage differently — 500 tells a client not to retry,
+        # 503 tells it to retry later.
+        message = str(exc)
+        unavailable = any(
+            marker in message
+            for marker in (
+                "no specialist produced output",
+                "no model provider produced output",
+                "ProviderUnconfiguredError",
+                "no configured credential",
+                "All speculative race candidates failed",
+            )
+        )
+        # The raw ``message`` names the attempted provider/model pairs and configuration
+        # variables. It is logged (scrubbed) under a correlation id and never returned: a 503
+        # that carries it tells the caller which credentials are missing.
+        reference = correlation_id("debate")
+        logger.error("FRIDAY debate orchestration failed [%s] (%s): %s",
+                     reference, "unavailable" if unavailable else "internal", scrub_credentials(message))
+        if unavailable:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "FRIDAY debate degraded: no model provider produced output. No answer was "
+                    f"fabricated. Quote correlation id {reference} when reporting this; the "
+                    "per-provider reasons are in the server log."
+                ),
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"FRIDAY debate orchestration failed: {exc!s}"
-        )
+            detail="FRIDAY debate orchestration failed internally; see server logs for the correlation id."
+        ) from exc
 
 
 @friday_router.post("/stream")
@@ -335,7 +468,7 @@ async def friday_stream(request: FridayRequest) -> StreamingResponse:
                     run_id=f"stream_{task_id}",
                     answer=full_text,
                     mode_used="stream",
-                    confidence=0.95,
+                    confidence=UNVERIFIED_MODEL_CONFIDENCE,
                     unresolved_disagreements=[],
                     key_evidence=[],
                     agents_used=[specialist_id],
@@ -349,7 +482,9 @@ async def friday_stream(request: FridayRequest) -> StreamingResponse:
                     mode="auto",
                     value=cached_resp.model_dump(),
                     caller_id=request.caller_id,
-                    ttl=180.0
+                    ttl=180.0,
+                    extra=_context_scope(request.context_data),
+                    namespace=FRIDAY_ASK_NS
                 )
 
             yield f"data: {json.dumps({'done': True, 'task_id': task_id, 'total_chars': len(full_text)})}\n\n"

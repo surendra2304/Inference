@@ -1,6 +1,7 @@
 """Code Generation Service optimized for FORGE autonomous software engineering engine."""
 
 import hashlib
+import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any, Literal
@@ -13,7 +14,37 @@ from app.providers.unified_manager import (
     UnifiedExecutionRequest,
     unified_provider_manager,
 )
+from app.services.quality_assurance import quality_assurance_service
+from app.utils.confidence import (
+    DEGRADED_CONFIDENCE,
+    PARSER_VERIFIED_CONFIDENCE,
+    UNVERIFIED_MODEL_CONFIDENCE,
+)
 from app.utils.logger import logger
+
+_FENCED_BLOCK = re.compile(r"```[ \t]*[A-Za-z0-9_+.-]*[ \t]*\n(.*?)```", re.S)
+
+
+def extract_code(text: str) -> str:
+    """Return the code a model meant to write, not the whole reply.
+
+    Models wrap code in prose ("Here is the module:") and in fences. The earlier extraction
+    kept lines between the first line and the next fence, so a fence that came *after* prose
+    closed on its own opening line and the "code" was just the prose. [FACT] measured: a reply
+    of ``"Here it is:\\n```python\\nx = 1\\n```"`` returned ``"Here it is:"``.
+
+    Rules: the first non-empty fenced block wins; an unclosed fence (the model hit its token
+    ceiling mid-block) yields the body after the opening fence, which will then fail the
+    syntax check honestly rather than pass as complete code; unfenced text is returned as is.
+    """
+    blocks = [block.strip("\n") for block in _FENCED_BLOCK.findall(text) if block.strip()]
+    if blocks:
+        return blocks[0].strip()
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()[1:]
+        return "\n".join(lines).strip()
+    return stripped
 
 
 class CodeGenerationRequest(BaseModel):
@@ -32,7 +63,7 @@ class CodeGenerationRequest(BaseModel):
 class CodeGenerationResponse(BaseModel):
     code: str
     confidence: float
-    generation_path: Literal["agent", "template_fallback", "degraded"]
+    generation_path: Literal["agent", "template_fallback", "degraded", "invalid_output"]
     token_usage: int
     latency_ms: float
     filename: str
@@ -79,25 +110,14 @@ class CodeGenerationService:
         exec_res = await unified_provider_manager.execute(exec_req)
         elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
 
-        code_text = exec_res.content
-        if "```" in code_text:
-            lines = code_text.splitlines()
-            start_idx = 0
-            end_idx = len(lines)
-            for i, line in enumerate(lines):
-                if line.startswith("```") and i == 0:
-                    start_idx = 1
-                elif line.startswith("```") and i > 0:
-                    end_idx = i
-                    break
-            code_text = "\n".join(lines[start_idx:end_idx]).strip()
+        code_text = extract_code(exec_res.content or "")
 
         if exec_res.degraded:
             # No model produced code. Report the true path, zero confidence, and
             # zero tokens rather than labelling an empty result as agent output.
             response = CodeGenerationResponse(
                 code="",
-                confidence=0.0,
+                confidence=DEGRADED_CONFIDENCE,
                 generation_path="degraded",
                 token_usage=0,
                 latency_ms=elapsed_ms,
@@ -109,7 +129,35 @@ class CodeGenerationService:
             return response
 
         gen_path: Literal["agent", "template_fallback"] = "template_fallback" if exec_res.status == "fallback_success" else "agent"
-        confidence = 0.92 if gen_path == "agent" else 0.55
+
+        # The model answered, but what it answered is not code of the requested type. Returning
+        # it as ``code`` with a fixed confidence is the failure this branch exists to prevent:
+        # [FACT] measured on /v1/forge/generate-code, a prose reply went back as ``code`` at
+        # confidence 0.92. The response says so, carries no code, and is not cached, so a retry
+        # can produce valid output.
+        verdict = quality_assurance_service.check_output(code_text, req.file_type)
+        if verdict.verified and not verdict.is_valid:
+            logger.warning(
+                "Code generation for %s returned output that does not parse as %s: %s",
+                req.filename, req.file_type, verdict.error,
+            )
+            return CodeGenerationResponse(
+                code="",
+                confidence=DEGRADED_CONFIDENCE,
+                generation_path="invalid_output",
+                token_usage=exec_res.token_usage.get("total_tokens", 0),
+                latency_ms=elapsed_ms,
+                filename=req.filename,
+                error=f"model output did not parse as {req.file_type}: {verdict.error}",
+            )
+
+        # 0.92 is a fixed prior for output that passed a real parser, and 0.55 for output that
+        # could not be verified at all. Neither is a calibrated accuracy: the quality report says
+        # calibration is not measured, and these constants do not claim otherwise.
+        if verdict.verified:
+            confidence = PARSER_VERIFIED_CONFIDENCE if gen_path == "agent" else UNVERIFIED_MODEL_CONFIDENCE
+        else:
+            confidence = UNVERIFIED_MODEL_CONFIDENCE
 
         response = CodeGenerationResponse(
             code=code_text,

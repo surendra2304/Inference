@@ -13,10 +13,14 @@ class TimeSeriesPoint(BaseModel):
 
 
 class TemporalPatternResult(BaseModel):
-    trend: Literal["UPWARD", "DOWNWARD", "STABLE", "VOLATILE"]
+    #: NO_DATA when the series is empty; the former empty-series answer was "STABLE".
+    trend: Literal["UPWARD", "DOWNWARD", "STABLE", "VOLATILE", "NO_DATA"]
     seasonality_detected: bool = False
     changepoints: list[float] = Field(default_factory=list)
-    confidence: float = 0.85
+    #: None: no calibration exists for these rules. The former fixed 0.85 / 0.88 / 0.70 were
+    #: returned whatever the series was, including an empty one.
+    confidence: float | None = None
+    confidence_basis: str = "not calibrated: trend and changepoints are computed directly from the series"
     summary: str
 
 
@@ -34,11 +38,12 @@ class TemporalReasoningEngine:
         """Evaluates trend, changepoint anomalies, and seasonality over time series data."""
         if not time_series:
             return TemporalPatternResult(
-                trend="STABLE",
+                trend="NO_DATA",
                 seasonality_detected=False,
                 changepoints=[],
-                confidence=0.70,
-                summary=temporal_context_note or "Baseline telemetry stable over observation period."
+                confidence=None,
+                confidence_basis="no observations supplied",
+                summary=temporal_context_note or "No time series was supplied; no trend was measured."
             )
 
         values = [pt.value for pt in time_series]
@@ -68,7 +73,7 @@ class TemporalReasoningEngine:
             trend=trend,
             seasonality_detected=len(time_series) >= 7,
             changepoints=changepoints,
-            confidence=0.88,
+            confidence=None,
             summary=summary
         )
 

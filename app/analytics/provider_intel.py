@@ -2,29 +2,83 @@
 
 from typing import Any
 
+from app.analytics.usage_analytics import usage_analytics
+
+#: Observed calls a (provider, service) cell needs before its figures are reported as a rate.
+MIN_CALLS_PER_CELL = 5
+
 
 class ProviderPerformanceIntelligence:
-    """Analyzes provider performance matrices across services, failure patterns, and generates routing recommendations."""
+    """Provider performance computed from observed calls only.
+
+    The previous version returned a fixed matrix (for example groq/code_generation at 98.2% success,
+    35 ms and "confidence 0.93"), a fixed failure table and routing advice such as "Groq is 40%
+    faster". None of that came from a call. The matrix is now derived from the observed request
+    records in ``usage_analytics``; a cell with fewer than ``MIN_CALLS_PER_CELL`` calls is labelled
+    ``insufficient_calls`` instead of being given a rate.
+    """
 
     def get_performance_matrix(self) -> dict[str, Any]:
-        return {
-            "provider_service_matrix": {
-                "groq": {"code_generation": {"success_rate_pct": 98.2, "avg_latency_ms": 35.0, "confidence": 0.93}, "trading_consult": {"success_rate_pct": 97.5, "avg_latency_ms": 42.0, "confidence": 0.91}},
-                "gemini": {"code_generation": {"success_rate_pct": 99.1, "avg_latency_ms": 55.0, "confidence": 0.94}, "architecture": {"success_rate_pct": 98.8, "avg_latency_ms": 68.0, "confidence": 0.95}},
-                "nvidia": {"architecture": {"success_rate_pct": 99.4, "avg_latency_ms": 72.0, "confidence": 0.96}},
-                "openrouter": {"review": {"success_rate_pct": 96.5, "avg_latency_ms": 60.0, "confidence": 0.92}},
-                "cohere": {"documentation": {"success_rate_pct": 99.0, "avg_latency_ms": 50.0, "confidence": 0.94}},
-                "mistral": {"devops": {"success_rate_pct": 97.8, "avg_latency_ms": 58.0, "confidence": 0.93}}
-            },
-            "failure_pattern_analysis": [
-                {"provider": "groq", "dominant_error": "rate_limit_exceeded_on_spikes", "frequency_pct": 1.5, "mitigation": "Fallback to Gemini on 429"},
-                {"provider": "openrouter", "dominant_error": "upstream_timeout", "frequency_pct": 2.1, "mitigation": "Reduced timeout ceiling to 15s"}
-            ],
-            "routing_recommendations": [
-                "Groq is 40% faster on code generation; prioritize for interactive drafts and unit tests.",
-                "Gemini provides highest syntactic correctness for complex multi-file architectures.",
-                "NVIDIA Nemotron achieves highest structural cohesion for system manifests."
+        observed = [r for r in usage_analytics.records if r.source == "observed" and r.provider]
+        if not observed:
+            return {
+                "status": "no_observed_calls",
+                "provider_service_matrix": {},
+                "failure_pattern_analysis": [],
+                "routing_recommendations": [],
+            }
+
+        cells: dict[tuple[str, str], list[Any]] = {}
+        for record in observed:
+            cells.setdefault((record.provider or "unattributed", record.service), []).append(record)
+
+        matrix: dict[str, dict[str, Any]] = {}
+        for (provider, service), records in sorted(cells.items()):
+            calls = len(records)
+            latencies = [r.latency_ms for r in records if r.latency_ms is not None]
+            reported = [r.confidence for r in records if r.confidence is not None]
+            cell: dict[str, Any] = {"calls": calls, "status": "measured" if calls >= MIN_CALLS_PER_CELL else "insufficient_calls"}
+            if calls >= MIN_CALLS_PER_CELL:
+                cell["success_rate_pct"] = round(sum(1 for r in records if r.success) / calls * 100.0, 1)
+                cell["avg_latency_ms"] = round(sum(latencies) / len(latencies), 1) if latencies else None
+                cell["mean_caller_reported_confidence"] = round(sum(reported) / len(reported), 3) if reported else None
+            matrix.setdefault(provider, {})[service] = cell
+
+        failures: list[dict[str, Any]] = []
+        by_provider: dict[str, list[Any]] = {}
+        for record in observed:
+            by_provider.setdefault(record.provider or "unattributed", []).append(record)
+        for provider, records in sorted(by_provider.items()):
+            failed = sum(1 for r in records if not r.success)
+            if failed:
+                failures.append({
+                    "provider": provider,
+                    "failed_calls": failed,
+                    "frequency_pct": round(failed / len(records) * 100.0, 2),
+                    "dominant_error": "not_recorded: request records carry no error class",
+                })
+
+        recommendations: list[str] = []
+        for service in sorted({r.service for r in observed}):
+            ranked = [
+                (provider, cell)
+                for provider, services in matrix.items()
+                for svc, cell in services.items()
+                if svc == service and cell.get("avg_latency_ms") is not None
             ]
+            if len(ranked) >= 2:
+                ranked.sort(key=lambda item: item[1]["avg_latency_ms"])
+                (fast, fc), (slow, sc) = ranked[0], ranked[1]
+                recommendations.append(
+                    f"{service}: {fast} has the lower mean latency ({fc['avg_latency_ms']} ms over "
+                    f"{fc['calls']} calls) than {slow} ({sc['avg_latency_ms']} ms over {sc['calls']} calls)."
+                )
+
+        return {
+            "status": "measured",
+            "provider_service_matrix": matrix,
+            "failure_pattern_analysis": failures,
+            "routing_recommendations": recommendations,
         }
 
 

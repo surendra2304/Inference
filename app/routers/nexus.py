@@ -7,6 +7,7 @@ from app.services.nexus_intelligence import (
     IntelligenceResponse,
     nexus_intelligence_service,
 )
+from app.utils.bounded_store import missing_entry_detail
 
 nexus_router = APIRouter(prefix="/v1/nexus", tags=["Nexus Intelligence"])
 
@@ -22,8 +23,10 @@ async def get_nexus_intelligence_record(request_id: str = Path(..., description=
     """Retrieves full request and response record with complete provenance for audit and explanation."""
     record = nexus_intelligence_service.get_provenance(request_id)
     if not record:
+        # Distinguishes "never recorded" from "recording expired out of the retention
+        # window"; the two are different statements (see app/utils/bounded_store.py).
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Intelligence record for request_id '{request_id}' not found in provenance ledger."
+            detail=missing_entry_detail(nexus_intelligence_service.provenance_store, request_id, "intelligence provenance record"),
         )
     return record

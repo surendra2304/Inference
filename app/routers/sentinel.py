@@ -7,6 +7,7 @@ from app.services.sentinel_intelligence import (
     SentinelAnalysisResponse,
     sentinel_intelligence_service,
 )
+from app.utils.bounded_store import missing_entry_detail
 
 sentinel_router = APIRouter(prefix="/v1/sentinel", tags=["Sentinel Security Intelligence"])
 
@@ -22,8 +23,10 @@ async def get_sentinel_analysis_record(request_id: str = Path(..., description="
     """Retrieves full request and response record with provenance for security audit and compliance."""
     record = sentinel_intelligence_service.get_provenance(request_id)
     if not record:
+        # Distinguishes "never recorded" from "recording expired out of the retention
+        # window"; the two are different statements (see app/utils/bounded_store.py).
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Security intelligence record for request_id '{request_id}' not found in provenance ledger."
+            detail=missing_entry_detail(sentinel_intelligence_service.provenance_store, request_id, "security analysis provenance record"),
         )
     return record

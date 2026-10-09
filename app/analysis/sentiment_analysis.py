@@ -20,7 +20,9 @@ class SentimentAnalysisEngine:
     def analyze_news(self, news_items: list[dict[str, Any]]) -> dict[str, Any]:
         """Calculates time-decayed, credibility-weighted sentiment scores across news feeds."""
         if not news_items:
-            return {"overall_score": 0.0, "classification": "NEUTRAL", "item_count": 0}
+            # No items means no measurement. A 0.0 "NEUTRAL" here was a fabricated reading that the
+            # trajectory model then used as a sentiment input.
+            return {"overall_score": None, "classification": "NO_DATA", "item_count": 0}
 
         now = time.time()
         weighted_scores = []
@@ -43,7 +45,9 @@ class SentimentAnalysisEngine:
             elif neg_matches > pos_matches:
                 score = -0.6 - min(0.35, neg_matches * 0.15)
             else:
-                score = 0.05
+                # No keyword evidence either way: neutral. The former 0.05 was a small invented
+                # bullish bias on every headline with no bullish or bearish keyword.
+                score = 0.0
 
             weighted_scores.append(score * cred * time_decay)
 
@@ -66,10 +70,14 @@ class SentimentAnalysisEngine:
             "item_count": len(news_items),
             "extracted_entities": list(entities),
             "detected_events": list(set(events)),
+            # Reddit and Twitter sentiment were the news score scaled by 1.1 and 0.95, and
+            # news_confidence was a fixed 0.88. Neither social feed is read here, so both are
+            # None (not measured) and the news confidence is withheld.
             "social_breakdown": {
-                "news_confidence": 0.88,
-                "reddit_sentiment": round(avg_score * 1.1, 3),
-                "twitter_sentiment": round(avg_score * 0.95, 3)
+                "news_confidence": None,
+                "reddit_sentiment": None,
+                "twitter_sentiment": None,
+                "social_feed_status": "not_measured: no reddit or twitter feed is read by this engine",
             }
         }
 

@@ -26,12 +26,14 @@ from app.agents.reasoning import (
     StructuredEvidence,
 )
 from app.agents.registry import agent_registry
+from app.core.config import settings
 from app.core.dag import TaskComplexity
 from app.memory.base import BaseMemory, MessageRecord, RunRecord
 from app.memory.sqlite import SQLiteMemory
 from app.providers.base import ProviderMessage, ProviderRequest, ProviderResponse
 from app.providers.gateway import model_gateway
 from app.providers.health import provider_health_tracker
+from app.security.prompt_isolation import scrub_credentials
 from app.utils.ids import generate_debate_id, generate_message_id, generate_run_id
 from app.utils.logger import logger
 
@@ -100,6 +102,10 @@ class CollaborationResult(BaseModel):
     adjudication: AdjudicationResult | None = None
     participating_agents: list[str] = Field(default_factory=list)
     rounds: list[CollaborationRoundLog] = Field(default_factory=list)
+    #: How this collaboration concluded: "fast" (single specialist), "consensus" (the
+    #: panel agreed) or "debate" (a rebuttal round was needed). This is an OUTCOME, not
+    #: the execution mode — the caller's requested mode lives on OrchestrationResult.
+    #: Do not publish this value in a field named ``mode_used``.
     mode_used: str = "consensus"
     complexity: str = "simple"
     models_used: list[str] = Field(default_factory=list)
@@ -128,6 +134,34 @@ class CollaborationEngine:
         self.memory = memory or SQLiteMemory()
         self.registry = registry or agent_registry
 
+    def _resolve_gate_provider(self, model_cfg: AgentModelConfig) -> str:
+        """Return the name of the provider that will *actually* serve this model config.
+
+        The health gate used to check ``model_cfg.provider`` unconditionally. Under
+        ``LOCAL_PREFERRED`` that is the wrong provider: the self-hosted tier answers
+        first and the named cloud provider is never called (see
+        ``ModelGateway.execute``), while the local tier's own health is recorded under
+        the name ``"local"``. The result was that a stale, unrelated cloud provider
+        could veto a request that the local model was perfectly able to serve — and,
+        symmetrically, a dead local tier was invisible to the gate. Resolving the
+        effective provider keeps the gate honest in both directions.
+        """
+        if (
+            settings.LOCAL_PREFERRED
+            and settings.LOCAL_ENABLED
+            and model_cfg.provider != "local"
+            and settings.LOCAL_BASE_URL
+        ):
+            return "local"
+        return model_cfg.provider
+
+    def _provider_is_usable(self, model_cfg: AgentModelConfig) -> bool:
+        """Health-gate predicate for candidate selection (advisory, not absolute)."""
+        health = provider_health_tracker.get_provider_health(self._resolve_gate_provider(model_cfg))
+        return bool(health.is_healthy) and not (
+            health.quarantined_keys_count > 0 and health.active_keys_count == 0
+        )
+
     async def _invoke_single_model(
         self,
         task_id: str,
@@ -138,16 +172,35 @@ class CollaborationEngine:
         messages: list[ProviderMessage],
         system_instruction: str,
         max_tokens: int = 1024,
+        enforce_health: bool = True,
     ) -> tuple[ProviderResponse | None, float, Exception | None]:
-        """Invoke a specific model configuration through the ModelGateway with health check."""
+        """Invoke a specific model configuration through the ModelGateway with health check.
+
+        ``enforce_health=False`` turns the circuit breaker from a *prohibition* into a
+        *preference*. This matters when every candidate looks unhealthy: a breaker is a
+        load-shedding device — it exists so traffic can go somewhere better — and when
+        there is nowhere better it stops protecting anything and starts causing the very
+        outage it was built to prevent. In that situation one attempt is strictly better
+        than a guaranteed failure, and the outcome re-arms or clears the breaker on real
+        evidence rather than on the absence of it.
+        """
         # 1. Health check: if provider is unhealthy / rate-limited, fail fast to next model
-        health = provider_health_tracker.get_provider_health(model_cfg.provider)
-        if not health.is_healthy or (health.quarantined_keys_count > 0 and health.active_keys_count == 0):
+        gate_provider = self._resolve_gate_provider(model_cfg)
+        health = provider_health_tracker.get_provider_health(gate_provider)
+        if enforce_health and (
+            not health.is_healthy or (health.quarantined_keys_count > 0 and health.active_keys_count == 0)
+        ):
             logger.warning(
                 "Skipping provider %s for agent %s (health score: %.2f, 429 count: %d)",
-                model_cfg.provider, agent.id, health.health_score, health.rate_limit_429_count
+                gate_provider, agent.id, health.health_score, health.rate_limit_429_count
             )
-            return None, 0.0, RuntimeError(f"Provider {model_cfg.provider} currently rate-limited/unhealthy")
+            return None, 0.0, RuntimeError(f"Provider {gate_provider} currently rate-limited/unhealthy")
+        if not enforce_health and not health.is_healthy:
+            logger.warning(
+                "Provider %s is marked unhealthy, but it is the last candidate for agent %s; "
+                "attempting anyway (health score: %.2f).",
+                gate_provider, agent.id, health.health_score,
+            )
 
         start_time = time.perf_counter()
         req = ProviderRequest(
@@ -178,13 +231,19 @@ class CollaborationEngine:
         agent: Agent,
         messages: list[ProviderMessage],
         system_override: str | None = None,
-        complexity: TaskComplexity = TaskComplexity.SIMPLE
+        complexity: TaskComplexity = TaskComplexity.SIMPLE,
+        notes: list[str] | None = None,
     ) -> tuple[str, int, float, list[str]]:
         """
         Executes an agent call with complexity awareness:
         - SIMPLE / EASY: calls ONLY the 1st model in the agent's preferred_models list.
         - COMPLEX / STRATEGIC: calls top 2-3 models IN PARALLEL via asyncio.gather, then merges outputs.
         - Skips rate-limited providers dynamically.
+        - Discards empty completions and reports truncated ones.
+
+        ``notes`` — when supplied, human-readable warnings (truncated output, empty
+        completions) are appended so they can reach the caller's
+        ``degradation_reasons`` instead of being lost inside this method.
         """
         run_id = generate_run_id()
         msg_id = generate_message_id()
@@ -197,7 +256,7 @@ class CollaborationEngine:
         ]
 
         if complexity == TaskComplexity.SIMPLE:
-            healthy = [cfg for cfg in preferred if provider_health_tracker.get_provider_health(cfg.provider).is_healthy]
+            healthy = [cfg for cfg in preferred if self._provider_is_usable(cfg)]
             # Prioritize ultra-low latency providers (groq, gemini) for simple tasks
             fast_candidates = [cfg for cfg in (healthy or preferred) if cfg.provider.lower() in ("groq", "gemini")]
             fast_candidates.sort(key=lambda c: 0 if c.provider.lower() == "groq" else 1)
@@ -209,8 +268,15 @@ class CollaborationEngine:
                 configs_to_run = preferred[:1]
         else:
             # For complex tasks, prioritize healthy configs up to 3, falling back to all available
-            healthy = [cfg for cfg in preferred if provider_health_tracker.get_provider_health(cfg.provider).is_healthy]
+            healthy = [cfg for cfg in preferred if self._provider_is_usable(cfg)]
             configs_to_run = healthy[:3] if healthy else preferred[:min(3, len(preferred))]
+
+        # If candidate selection found nothing healthy, we are in last-resort territory:
+        # the fallback above deliberately keeps the declared configs so the request can
+        # still be attempted. Without this flag the per-call health gate immediately
+        # rejected those very configs, making the fallback dead code and turning every
+        # transient provider wobble into a hard client-visible failure.
+        last_resort = not healthy
 
         token_limit = 1024 if (complexity != TaskComplexity.SIMPLE or agent.id == "synthesizer") else 220
         if complexity == TaskComplexity.SIMPLE:
@@ -230,6 +296,7 @@ class CollaborationEngine:
                 messages=messages,
                 system_instruction=system_instruction,
                 max_tokens=token_limit,
+                enforce_health=not last_resort,
             )
 
         if len(configs_to_run) == 1:
@@ -242,10 +309,57 @@ class CollaborationEngine:
                 (r[0], r[1], r[2], cfg) for r, cfg in zip(raw_results, configs_to_run)
             ]
 
-        # Gather successful responses
-        successful_resps: list[tuple[ProviderResponse, AgentModelConfig]] = [
-            (resp, cfg) for resp, lat, err, cfg in model_results if resp is not None
-        ]
+        # ------------------------------------------------------------------
+        # Classify each model result. An HTTP 200 is NOT proof that a model
+        # answered, and this distinction is the whole honesty contract:
+        #
+        #  * ``choices: []`` (or a whitespace-only completion) arrives as a
+        #    perfectly successful-looking response whose content is empty. Treating
+        #    it as a successful deliberation publishes a confident, evidence-free
+        #    result for a request no model ever answered — the same fabrication the
+        #    exception path was already fixed against, via a different door.
+        #  * ``finish_reason == "length"`` means the model was cut off mid-answer.
+        #    The fragment is real output, so it still counts, but silently
+        #    presenting it as a complete analysis loses information the caller
+        #    needs in order to trust the synthesis.
+        # ------------------------------------------------------------------
+        successful_resps: list[tuple[ProviderResponse, AgentModelConfig]] = []
+        empty_completions: list[str] = []
+        truncated_models: list[str] = []
+
+        for resp, lat, err, cfg in model_results:
+            if resp is None:
+                continue
+            if not (resp.content or "").strip():
+                empty_completions.append(f"{cfg.provider}:{cfg.model}")
+                # An empty completion is a provider defect, not a neutral event: it
+                # must count against the provider's health so the panel stops
+                # preferring it, exactly as a 5xx would.
+                provider_health_tracker.record_failure(
+                    cfg.provider,
+                    "empty completion (HTTP 200 with no content)",
+                    latency_seconds=lat,
+                )
+                logger.warning(
+                    "Collaboration %s: agent '%s' received an EMPTY completion from %s:%s; "
+                    "discarding it rather than counting it as an answer.",
+                    task_id, agent.id, cfg.provider, cfg.model,
+                )
+                continue
+            if (resp.finish_reason or "").lower() in ("length", "max_tokens"):
+                truncated_models.append(f"{cfg.provider}:{cfg.model}")
+            successful_resps.append((resp, cfg))
+
+        if truncated_models and notes is not None:
+            notes.append(
+                f"{agent.id} output truncated by the provider token ceiling "
+                f"({', '.join(sorted(set(truncated_models)))})"
+            )
+        if empty_completions and notes is not None:
+            notes.append(
+                f"{agent.id} returned empty completions from "
+                f"{', '.join(sorted(set(empty_completions)))} (not counted as an answer)"
+            )
 
         total_tokens = sum(r.total_tokens or 0 for r, _ in successful_resps)
         models_used = [r.model for r, _ in successful_resps]
@@ -294,7 +408,17 @@ class CollaborationEngine:
         # Fallback if all attempted models failed
         latency = time.perf_counter() - start_time
         errors = [str(err) for _, _, err, _ in model_results if err]
-        error_msg = errors[0] if errors else "all provider models unavailable"
+        if errors:
+            error_msg = errors[0]
+        elif empty_completions:
+            # Distinguish "did not answer" from "could not be reached": the operator
+            # needs to know that the transport worked and the model said nothing.
+            error_msg = (
+                f"provider returned empty completions (no model output) from "
+                f"{', '.join(sorted(set(empty_completions)))}"
+            )
+        else:
+            error_msg = "all provider models unavailable"
         logger.warning("Collaboration call for agent %s in %s had an issue: %s", agent.id, stage_name, error_msg)
 
         run_rec = RunRecord(
@@ -316,8 +440,16 @@ class CollaborationEngine:
         # Do NOT hand back a prose placeholder: a failed call is an error, not an
         # answer. The caller (run_collaboration) decides whether a peer can cover
         # this agent, and ultimately surfaces a degraded panel.
+        #
+        # Report the providers the gateway ACTUALLY attempted, not the agent's
+        # declared primary. Naming `agent.model_provider` produced messages such as
+        # "researcher (gemini): GROQ_API_KEY is not configured", which sends the
+        # operator to the wrong provider's configuration and hides the fact that the
+        # fallback ladder was walked at all.
+        attempted = sorted({f"{cfg.provider}:{cfg.model}" for _, _, _, cfg in model_results})
+        attempted_label = ", ".join(attempted) if attempted else agent.model_provider
         raise AgentCallUnavailable(
-            f"{agent.id} ({agent.model_provider}): {error_msg}"
+            f"{agent.id} (attempted {attempted_label}): {error_msg}"
         ) from (next((e for e in (err for _, _, err, _ in model_results) if e), None))
 
     async def _execute_multi_model_synthesis(
@@ -488,9 +620,19 @@ class CollaborationEngine:
                 round_number=1,
                 agent=target,
                 messages=[ProviderMessage(role="user", content=prompt)],
-                complexity=complexity
+                complexity=complexity,
+                notes=degradation_reasons,
             )
             return target, text, t_count, models
+
+        # Round-1 budget. Peer coverage is a recovery mechanism, not a licence to run an
+        # unbounded number of model calls: without a ceiling, a total provider outage
+        # makes the request's runtime a function of how many specialists happen to be
+        # registered, and the client waits far past its own timeout. The budget is
+        # checked before each peer attempt, and the attempt count is capped
+        # independently so that a fast-failing provider still cannot produce a stampede.
+        peer_budget_deadline = time.monotonic() + float(settings.PEER_COVERAGE_BUDGET_SECONDS)
+        max_peer_attempts = int(settings.PEER_COVERAGE_MAX_ATTEMPTS)
 
         async def analyze_agent(agent: Agent):
             """Run one specialist, self-healing through peers when its models are dark."""
@@ -502,7 +644,21 @@ class CollaborationEngine:
                     "Collaboration %s: specialist '%s' unavailable (%s) — attempting peer coverage",
                     session_id, agent.id, primary_err
                 )
+                attempts = 0
                 for peer in _peer_candidates(agent):
+                    if attempts >= max_peer_attempts:
+                        logger.warning(
+                            "Collaboration %s: peer-coverage attempt cap reached (%d) while covering '%s'",
+                            session_id, max_peer_attempts, agent.id
+                        )
+                        break
+                    if time.monotonic() >= peer_budget_deadline:
+                        logger.warning(
+                            "Collaboration %s: peer-coverage budget (%.1fs) exhausted while covering '%s'",
+                            session_id, settings.PEER_COVERAGE_BUDGET_SECONDS, agent.id
+                        )
+                        break
+                    attempts += 1
                     try:
                         result = await _attempt(peer, covering_for=agent)
                     except AgentCallUnavailable as peer_err:
@@ -519,20 +675,71 @@ class CollaborationEngine:
                     )
                     return result
                 # Nobody could cover: record the reason and let the gather decide.
-                degradation_reasons.append(str(primary_err))
+                # Scrubbed, because this string reaches clients through the v1 failure_state
+                # field and provider libraries routinely echo the credential they rejected.
+                degradation_reasons.append(scrub_credentials(str(primary_err)))
                 raise
 
-        # Execute all specialist perspectives simultaneously. return_exceptions=True
-        # so one dark agent does not abort the whole panel (that is the point of
-        # peer coverage): we collect outcomes and only fail if EVERYONE is dark.
-        r1_raw = await asyncio.gather(
-            *[analyze_agent(agent) for agent in participating_agents],
-            return_exceptions=True,
-        )
+        # Execute all specialist perspectives simultaneously. One dark agent must not
+        # abort the whole panel (that is the point of peer coverage), so outcomes are
+        # collected individually and the panel only fails if EVERYONE is dark.
+        #
+        # The phase is additionally bounded by the panel budget. Without that bound the
+        # budget only gated *between* attempts, so a single unresponsive provider held
+        # the whole request for the full per-call timeout (30s) regardless of a 20s
+        # panel budget — the deadline was advisory rather than enforced.
+        #
+        # ``asyncio.wait`` is used rather than wrapping the gather in ``wait_for``
+        # because a gather is cancelled as a unit: a timeout would discard the finished
+        # work of every specialist that answered promptly. Waiting on the individual
+        # tasks keeps those results, cancels only the stragglers, and records the
+        # cancellation as a per-agent failure — real output is never thrown away to
+        # punish a slow peer.
+        panel_budget = float(settings.PEER_COVERAGE_BUDGET_SECONDS)
+        r1_tasks = [asyncio.ensure_future(analyze_agent(agent)) for agent in participating_agents]
+        r1_done, r1_pending = await asyncio.wait(r1_tasks, timeout=panel_budget)
+        if r1_pending:
+            for task in r1_pending:
+                task.cancel()
+            await asyncio.gather(*r1_pending, return_exceptions=True)
+            timed_out = [
+                agent.id for agent, task in zip(participating_agents, r1_tasks) if task in r1_pending
+            ]
+            logger.warning(
+                "Collaboration %s: %d specialist(s) exceeded the %.1fs panel budget and were "
+                "cancelled: %s",
+                session_id, len(timed_out), panel_budget, ", ".join(timed_out),
+            )
+            degradation_reasons.append(
+                f"specialist phase exceeded its {panel_budget:.1f}s budget; "
+                f"cancelled: {', '.join(timed_out)}"
+            )  # agent ids only: nothing provider-supplied enters this line
 
         r1_results = []
         panel_failures: list[str] = []
-        for agent, outcome in zip(participating_agents, r1_raw):
+        for agent, task in zip(participating_agents, r1_tasks):
+            if task in r1_pending:
+                # Record the cancellation in the structured failure list too, not only in
+                # the prose reason: a consumer that reads `failed_agents` to render which
+                # specialists are missing must see the timed-out one, or the structured
+                # metadata under-reports the damage the response itself admits to.
+                failed_agents.add(agent.id)
+                panel_failures.append(
+                    f"{agent.id}: exceeded the {panel_budget:.1f}s specialist-phase budget"
+                )
+                continue
+            try:
+                outcome = task.result()
+            except asyncio.CancelledError as cancelled:
+                raise cancelled
+            except BaseException as exc:  # noqa: BLE001 - one dark agent is not a panel failure
+                # The exception *type* is the part a caller can act on and the part that is
+                # safe to publish (``UnavailableDetail`` extracts it); the message follows,
+                # scrubbed, for the server log and the audit trail.
+                panel_failures.append(
+                    f"{agent.id}: {type(exc).__name__}: {scrub_credentials(str(exc))}"
+                )
+                continue
             if isinstance(outcome, asyncio.CancelledError):
                 raise outcome
             if isinstance(outcome, BaseException):
@@ -620,6 +827,48 @@ class CollaborationEngine:
                 "failed_agents": sorted(failed_agents),
             }
 
+        def _confidence_ceiling() -> float | None:
+            """Highest confidence this result is permitted to report, given its damage.
+
+            ``degraded`` used to be decided by one rule (any degradation reason at all)
+            while the confidence cap used another, much narrower one (only when the
+            *synthesizer itself* was dark). The two could — and did — disagree: a panel
+            whose outputs were all truncated by the provider token ceiling came back
+            flagged ``degraded=True`` while still reporting confidence 0.77, i.e. the
+            number a caller uses to decide how much to trust the answer ignored the very
+            damage the same response was reporting. Any response that admits damage must
+            price that damage into its confidence, so both now derive from one policy.
+
+            Returns ``None`` when nothing was degraded (no ceiling).
+            """
+            reasons = " ".join(degradation_reasons + sorted(failed_agents)).lower()
+            if not reasons:
+                return None
+            if synthesis_degraded:
+                # No synthesis at all: the answer is raw, unmerged, cross-examined by
+                # nobody. This is the most severe case and keeps its original ceiling.
+                return 0.45
+            if "truncated" in reasons:
+                # A real answer, but cut off mid-thought: materially incomplete.
+                return 0.55
+            if "unavailable specialists" in reasons or "unavailable" in reasons:
+                # The intended voice was replaced by a peer, or lost entirely.
+                return 0.65
+            return 0.7
+
+        def _apply_confidence_ceiling(raw: float) -> float:
+            """Lower ``raw`` to honour the degradation policy; never raise it."""
+            ceiling = _confidence_ceiling()
+            if ceiling is None:
+                return raw
+            capped = min(raw, ceiling)
+            if capped < raw:
+                logger.info(
+                    "Collaboration %s: confidence lowered %.2f -> %.2f to match reported degradation",
+                    session_id, raw, capped,
+                )
+            return round(capped, 2)
+
         # Optimization: In fast / simple 1-agent mode, return the specialist's direct response immediately
         if len(participating_agents) == 1 and complexity == TaskComplexity.SIMPLE:
             direct_ans = round_1_messages[0].content if round_1_messages else ""
@@ -642,7 +891,7 @@ class CollaborationEngine:
                 participating_agents=[a.id for a in participating_agents],
                 models_used=all_models_used,
                 rounds=rounds_log,
-                confidence=calib_conf,
+                confidence=_apply_confidence_ceiling(calib_conf),
                 unresolved_disagreements=[],
                 # No evidence means no evidence: never invent a placeholder claim.
                 key_evidence=[e.excerpt for e in all_evidence],
@@ -689,7 +938,9 @@ class CollaborationEngine:
             # instead of inventing a consensus — and never fail the whole task when
             # we still have genuine specialist analysis to hand back.
             synthesis_degraded = True
-            degradation_reasons.append(f"synthesizer unavailable: {syn_err}")
+            degradation_reasons.append(
+                f"synthesizer unavailable: {scrub_credentials(str(syn_err))}"
+            )
             syn_tokens, syn_models = 0, []
             logger.warning(
                 "Collaboration %s: synthesizer unavailable (%s) — returning raw specialist panel output",
@@ -727,7 +978,8 @@ class CollaborationEngine:
                 round_number=3,
                 agent=critic_agent,
                 messages=[ProviderMessage(role="user", content=rebuttal_prompt)],
-                complexity=complexity
+                complexity=complexity,
+                notes=degradation_reasons,
             )
             total_tokens += reb_tokens
             all_models_used.extend(reb_models)
@@ -791,7 +1043,7 @@ class CollaborationEngine:
                 task_id=task_id,
                 canonical_problem=question,
                 final_answer=final_answer,
-                confidence=round(min(adjudication_res.system_confidence, 0.45), 2) if synthesis_degraded else adjudication_res.system_confidence,
+                confidence=_apply_confidence_ceiling(adjudication_res.system_confidence),
                 unresolved_disagreements=adjudication_res.unresolved_disputes or ["Resolved via targeted debate."],
                 # Empty when no evidence exists: a placeholder sentence is not evidence.
                 key_evidence=[e.excerpt for e in adjudication_res.key_evidence],
@@ -839,7 +1091,7 @@ class CollaborationEngine:
             task_id=task_id,
             canonical_problem=question,
             final_answer=synthesis_text,
-            confidence=round(min(adjudication_res.system_confidence, 0.45), 2) if synthesis_degraded else adjudication_res.system_confidence,
+            confidence=_apply_confidence_ceiling(adjudication_res.system_confidence),
             unresolved_disagreements=adjudication_res.unresolved_disputes,
             # Empty when no evidence exists: a placeholder sentence is not evidence.
             key_evidence=[e.excerpt for e in adjudication_res.key_evidence],

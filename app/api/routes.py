@@ -3,19 +3,50 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agents.debate import AgentPanelUnavailable
 from app.core.orchestrator import OrchestrationRequest, orchestrator
 from app.core.security import require_inference_api_key
+from app.security.prompt_isolation import scrub_credentials_dict
+from app.utils.errors import internal_error, unavailable_detail
+from app.utils.logger import logger
 
 router = APIRouter()
+
+
+#: Canonical execution modes. ``auto`` lets the router classify the question;
+#: the other three pin the depth explicitly.
+VALID_MODES: tuple[str, ...] = ("auto", "fast", "review", "debate")
 
 
 class AskRequest(BaseModel):
     """Payload for submitting a question to Inference."""
     question: str = Field(description="The user or system inquiry to analyze and answer")
     mode: str = Field(default="auto", description="auto, fast, review, debate")
+
+    @field_validator("mode")
+    @classmethod
+    def _validate_mode(cls, value: str) -> str:
+        """Reject unknown modes instead of silently reclassifying them.
+
+        ``DebateOrchestrator.classify_mode`` falls through to keyword-based
+        classification for *any* unrecognised string, which means the mode is treated
+        as ``auto``. A caller who mistypes ``"reviews"`` therefore receives a 200 and a
+        plausible-looking answer produced by a different amount of work than they asked
+        for — the difference between ``fast`` and ``debate`` is one model call versus a
+        five-specialist panel plus synthesis, i.e. several times the latency and cost.
+        Silence is the wrong default when the caller's intent is unambiguous and the
+        consequence is a change in depth and spend, so this fails loudly and names the
+        accepted values. Case and surrounding whitespace stay tolerated.
+        """
+        normalized = value.strip().lower()
+        if normalized not in VALID_MODES:
+            raise ValueError(
+                f"Unknown mode {value!r}. Accepted values: {', '.join(VALID_MODES)}. "
+                "Use 'auto' to let the router classify the question."
+            )
+        return normalized
     max_agents: int = Field(default=5, ge=1, le=10)
     require_evidence: bool = Field(default=True)
     max_budget: float | None = Field(default=None, description="Max budget in USD for this task")
@@ -28,7 +59,12 @@ class AskResponse(BaseModel):
     task_id: str
     run_id: str
     answer: str
+    #: Execution mode that ran: ``fast``, ``review`` or ``debate``.
     mode_used: str
+    #: How the collaboration concluded (``consensus``, ``debate`` or ``fast``). Kept
+    #: separate from ``mode_used``: the outcome of the panel is not the mode the client
+    #: asked for, and reporting one as the other breaks callers that branch on the mode.
+    deliberation_outcome: str = ""
     provider: str
     models_used: list[str]
     agents_used: list[str]
@@ -102,6 +138,7 @@ async def ask_question(request: AskRequest) -> AskResponse:
             run_id=result.run_id,
             answer=result.answer,
             mode_used=result.mode_used,
+            deliberation_outcome=getattr(result, "deliberation_outcome", ""),
             provider=result.provider_used,
             models_used=result.models_used,
             agents_used=result.agents_used,
@@ -119,15 +156,17 @@ async def ask_question(request: AskRequest) -> AskResponse:
         # Every specialist (and every peer that tried to cover) went dark.
         # 503 Service Unavailable is the truthful status: the service could not
         # perform the requested inference, and we refuse to fabricate an answer.
+        # The per-specialist reasons are summarised to agent id + failure *kind* rather than
+        # the provider's own exception text, which can quote the credential it rejected
+        # (see app/utils/errors.py).
+        logger.error("Agent panel unavailable for task %s: %s", exc.task_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
+            detail=unavailable_detail(exc, failures=exc.failures, prefix="panel"),
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Task orchestration failed: {exc!s}"
-        )
+        detail, _ = internal_error(logger, exc, doing_what="task orchestration", prefix="ask")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
 
 
 @router.post("/debate", response_model=DebateResponse, status_code=status.HTTP_200_OK, dependencies=[Depends(require_inference_api_key)])
@@ -169,25 +208,30 @@ async def trigger_debate(request: DebateRequest) -> DebateResponse:
             failed_agents=result.failed_agents,
         )
     except AgentPanelUnavailable as exc:
+        logger.error("Agent panel unavailable for debate %s: %s", exc.task_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
+            detail=unavailable_detail(exc, failures=exc.failures, prefix="panel"),
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Debate orchestration failed: {exc!s}"
-        )
+        detail, _ = internal_error(logger, exc, doing_what="debate orchestration", prefix="debate")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
 
 
 @router.get("/tasks/{task_id}", dependencies=[Depends(require_inference_api_key)])
 async def get_task(task_id: str):
     """Retrieve details and state of a task by ID."""
     status_data = await orchestrator.get_task_status(task_id)
+    if status_data:
+        # The record's metadata carries whatever the failing component stored. Scrubbing on
+        # read means a writer that forgets cannot turn into a published credential.
+        status_data = scrub_credentials_dict(status_data)
     if not status_data:
+        # A bounded recent-task cache makes "never recorded" and "recorded, then dropped
+        # from the window" different facts; answer with the one that is true.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task '{task_id}' not found."
+            detail=orchestrator.recent_task_cache_miss_detail(task_id),
         )
     return status_data
 
@@ -246,11 +290,19 @@ async def trigger_experiment(request: ExperimentTriggerRequest):
                 detail=f"Unknown experiment_type: {request.experiment_type}"
             )
         return record.model_dump()
+    except HTTPException:
+        # A deliberate client error (an unsupported experiment_type is a 400) must reach
+        # the caller as that 4xx. Catching it with the blanket handler below reported it
+        # as "500 Experiment execution failed", telling the client the SERVER had broken
+        # when in fact the client had asked for something that does not exist — an
+        # unsupported experiment_type could not be distinguished from a real crash.
+        raise
     except Exception as exc:
+        logger.exception("Experiment %s failed", request.experiment_type)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Experiment execution failed: {exc!s}"
-        )
+            detail=f"Experiment execution failed: {type(exc).__name__}"
+        ) from exc
 
 
 @router.get("/experiments/{experiment_id}", dependencies=[Depends(require_inference_api_key)])

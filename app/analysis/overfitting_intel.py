@@ -52,6 +52,11 @@ class OverfittingIntelligenceEngine:
 
         return {
             "strategy_name": strategy_name,
+            # Honesty label: this is a summary-statistics proxy, not the Bailey et al. PBO, which
+            # needs combinatorially symmetric cross-validation over the full return series.
+            # The key name is kept for existing clients; the estimator field says what it is.
+            "estimator": "summary_statistics_proxy",
+            "pbo_is_cscv_measured": False,
             "deflated_sharpe_ratio": round(dsr_score, 2),
             "probability_of_backtest_overfitting_pbo": pbo_estimate,
             "min_backtest_length_days": int(min_btl_days),

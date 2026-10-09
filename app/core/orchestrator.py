@@ -17,6 +17,9 @@ from app.learning.performance import PerformanceTracker
 from app.learning.strategy_store import StrategyStore
 from app.memory.base import BaseMemory, TaskRecord
 from app.memory.sqlite import SQLiteMemory
+from app.monitoring import monitor
+from app.security.prompt_isolation import scrub_credentials
+from app.utils.bounded_store import BoundedStore, missing_entry_detail
 from app.utils.ids import generate_task_id
 from app.utils.logger import logger
 
@@ -38,7 +41,13 @@ class OrchestrationResult(BaseModel):
     run_id: str
     question: str
     answer: str
+    #: The execution mode that actually ran: one of ``fast``, ``review``, ``debate``.
+    #: This is the client-facing contract and must never carry a deliberation outcome.
     mode_used: str
+    #: How the collaboration concluded ("consensus", "debate", "fast"). Separate from
+    #: ``mode_used`` because agreeing/disagreeing is a *result*, not a mode: a caller
+    #: asking for a review must not be told it ran in "consensus" mode.
+    deliberation_outcome: str = ""
     provider_used: str = "multi_provider"
     agents_used: list[str]
     models_used: list[str]
@@ -56,6 +65,12 @@ class OrchestrationResult(BaseModel):
     degradation_reasons: list[str] = Field(default_factory=list)
     agent_coverage: dict[str, str] = Field(default_factory=dict)
     failed_agents: list[str] = Field(default_factory=list)
+
+
+#: How many recent task records are kept in the fast in-memory lookup window. Sized for a
+#: busy operator session, deliberately far smaller than the unbounded dict it replaces;
+#: older tasks are read back from the durable store (SQLite) instead.
+RECENT_TASK_CACHE = 1024
 
 
 class BaseOrchestrator(ABC):
@@ -88,7 +103,15 @@ class Orchestrator(BaseOrchestrator):
         self.strategy_store = StrategyStore(memory=self.memory)
         self.performance_tracker = PerformanceTracker(memory=self.memory)
         self._active_cancellations: dict[str, asyncio.Event] = {}
-        self._recent_tasks: dict[str, TaskRecord] = {}
+        # Bounded, not a plain dict: this is a *cache* of recent task records, and the
+        # durable copy lives in SQLite. Measured before the bound: 400 ``/ask`` requests
+        # left 400 entries and +10.9 MB RSS (~27.9 KB each) with no code path that ever
+        # removed one, so a long-lived server grew without limit. Eviction is safe:
+        # ``get_task_status`` falls back to ``memory.get_task``, and a miss is reported as
+        # expired-from-cache rather than "never existed" (``recent_task_cache_miss_detail``).
+        self._recent_tasks: BoundedStore[TaskRecord] = BoundedStore(
+            "orchestrator.recent_tasks", max_entries=RECENT_TASK_CACHE
+        )
 
         # Ensure all 10 specialist roles are registered
         register_all_specialists()
@@ -243,6 +266,9 @@ class Orchestrator(BaseOrchestrator):
                 cancellation_event=cancel_event
             )
             latency = time.perf_counter() - start_time
+            if len(participating_agents) >= 2 or mode_used in ("review", "debate"):
+                # Only multi-agent work is a deliberation; the fast lane is a single call.
+                monitor.record_deliberation(latency)
 
             if cancel_event.is_set():
                 task_record.status = "cancelled"
@@ -251,7 +277,15 @@ class Orchestrator(BaseOrchestrator):
                 self._active_cancellations.pop(task_id, None)
                 raise asyncio.CancelledError(f"Task {task_id} was cancelled during execution.")
 
-            actual_mode = mode_used if mode_used == "debate" else getattr(collab_result, "mode_used", mode_used)
+            # ``mode_used`` reports the mode that ran; the collaboration's own label
+            # ("consensus" when the panel agreed, "debate" when a rebuttal round was
+            # needed) is an *outcome*, so it travels separately. Previously the two were
+            # merged for every non-debate request, which meant a client that asked for
+            # ``review`` was answered with ``mode_used: "consensus"`` — an undocumented
+            # value, derived from whether the panel happened to agree, that a caller
+            # branching on ``mode_used`` would misread.
+            actual_mode = mode_used
+            deliberation_outcome = str(getattr(collab_result, "mode_used", "") or "")
             task_record.status = "completed"
             task_record.result = collab_result.final_answer
             task_record.confidence = collab_result.confidence
@@ -260,6 +294,7 @@ class Orchestrator(BaseOrchestrator):
             task_record.metadata["debate_id"] = collab_result.debate_id
             task_record.metadata["unresolved_disagreements"] = collab_result.unresolved_disagreements
             task_record.metadata["complexity"] = complexity.value
+            task_record.metadata["deliberation_outcome"] = deliberation_outcome
             task_record.metadata["models_used"] = collab_result.models_used
             # Persist honest degradation state alongside the result so the audit
             # trail can never claim a fully healthy run that was not.
@@ -286,6 +321,7 @@ class Orchestrator(BaseOrchestrator):
                 question=request.question,
                 answer=collab_result.final_answer,
                 mode_used=actual_mode,
+                deliberation_outcome=deliberation_outcome,
                 provider_used="multi_provider",
                 agents_used=collab_result.participating_agents,
                 models_used=collab_result.models_used if collab_result.models_used else [a.model_name for a in participating_agents],
@@ -307,11 +343,15 @@ class Orchestrator(BaseOrchestrator):
         except (asyncio.CancelledError, Exception) as exc:
             latency = time.perf_counter() - start_time
             is_cancel = isinstance(exc, asyncio.CancelledError) or (task_id in self._active_cancellations and self._active_cancellations[task_id].is_set())
-            logger.error("Task %s %s during execution: %s", task_id, "cancelled" if is_cancel else "failed", str(exc))
+            scrubbed = scrub_credentials(str(exc))
+            logger.error("Task %s %s during execution: %s", task_id, "cancelled" if is_cancel else "failed", scrubbed)
 
             task_record.status = "cancelled" if is_cancel else "failed"
             task_record.completed_at = datetime.now(timezone.utc)
-            task_record.metadata["error"] = str(exc)
+            # The task record is served back verbatim by GET /tasks/{id}. The raw text goes to the
+            # log above (scrubbed); the record keeps the failure kind and a pointer to the log.
+            task_record.metadata["error"] = f"{type(exc).__name__} (see server log for task {task_id})"
+
             self._recent_tasks[task_id] = task_record
             try:
                 await self.memory.save_task(task_record)
@@ -347,6 +387,27 @@ class Orchestrator(BaseOrchestrator):
             return self._recent_tasks[task_id].model_dump()
         task = await self.memory.get_task(task_id)
         return task.model_dump() if task else None
+
+    def describe_recent_task_cache(self) -> dict[str, Any]:
+        """Retention window of the in-memory task cache, for audit endpoints."""
+        return self._recent_tasks.describe()
+
+    def recent_task_cache_miss_detail(self, task_id: str) -> str:
+        """Explain a task miss: never recorded, or dropped from the cache window."""
+        return missing_entry_detail(self._recent_tasks, task_id, "task record")
+
+    async def record_task(self, task_record: TaskRecord) -> None:
+        """Register a task in the recent cache *and* the durable store.
+
+        Used by routes that drive the collaboration engine directly instead of going
+        through :meth:`process_task`. Without it, such a route hands the caller a
+        ``task_id`` that ``GET /tasks/{task_id}`` can never resolve: measured live, a
+        ``POST /v1/debate`` answered 200 with ``task_53017bc07162`` and the read-back
+        answered 404 with "Task 'task_53017bc07162' not found.", because only
+        ``process_task`` persisted anything.
+        """
+        self._recent_tasks[task_record.id] = task_record
+        await self.memory.save_task(task_record)
 
 
 # Global default orchestrator instance

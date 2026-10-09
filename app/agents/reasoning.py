@@ -1,4 +1,4 @@
-﻿"""First-Class Structured Reasoning Domain Models: Claims, Evidence, Contradictions, and Adjudication."""
+"""First-Class Structured Reasoning Domain Models: Claims, Evidence, Contradictions, and Adjudication."""
 
 from datetime import datetime, timezone
 from enum import Enum
@@ -6,6 +6,7 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.utils.confidence import UNVERIFIED_MODEL_CONFIDENCE
 from app.utils.ids import generate_id
 
 
@@ -31,7 +32,7 @@ class StructuredEvidence(BaseModel):
     source_locator: Optional[str] = Field(default=None, description="Section, line range, or metric path")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     excerpt: str = Field(description="Direct verbatim text span or extracted quantitative data")
-    reliability_score: float = Field(default=0.85, ge=0.0, le=1.0)
+    reliability_score: float = Field(default=UNVERIFIED_MODEL_CONFIDENCE, ge=0.0, le=1.0)
     relation: EvidenceRelation = EvidenceRelation.SUPPORTS
     agent_origin: str = Field(description="Agent ID that extracted this evidence")
     model_origin: str = Field(description="Model/Provider that generated this evidence")
@@ -43,7 +44,7 @@ class AtomicClaim(BaseModel):
     claim_id: str = Field(default_factory=lambda: generate_id("clm"))
     statement: str = Field(description="Atomic declarative factual or strategic proposition")
     category: str = Field(default="technical", description="technical, architectural, risk, performance, security")
-    confidence: float = Field(default=0.85, ge=0.0, le=1.0)
+    confidence: float = Field(default=UNVERIFIED_MODEL_CONFIDENCE, ge=0.0, le=1.0)
     agent_id: str
     model_id: str
     evidence_ids: List[str] = Field(default_factory=list)
@@ -71,7 +72,7 @@ class SpecialistAssessment(BaseModel):
     evidence: List[StructuredEvidence] = Field(default_factory=list)
     assumptions: List[str] = Field(default_factory=list)
     trade_offs: List[str] = Field(default_factory=list)
-    model_confidence: float = Field(default=0.85, ge=0.0, le=1.0, description="Self-reported model confidence")
+    model_confidence: float = Field(default=UNVERIFIED_MODEL_CONFIDENCE, ge=0.0, le=1.0, description="Self-reported model confidence (unverified prior when absent)")
     raw_model_outputs: dict[str, str] = Field(default_factory=dict, description="Provenance audit trail of candidate model outputs")
 
 
@@ -84,7 +85,9 @@ class AdjudicationResult(BaseModel):
     resolved_disputes: List[str] = Field(default_factory=list)
     unresolved_disputes: List[str] = Field(default_factory=list)
     reconciled_recommendation: str
-    system_confidence: float = Field(ge=0.0, le=1.0, description="Empirically computed calibrated system confidence")
+    #: Heuristic: a mean of model self-reports adjusted by fixed penalties and bonuses. It is NOT
+    #: empirically calibrated (no outcome data fits those constants); see calibration_factors.
+    system_confidence: float = Field(ge=0.0, le=1.0, description="Heuristic system confidence from self-reports (uncalibrated)")
     model_confidence_mean: float = Field(ge=0.0, le=1.0, description="Mean of self-reported agent confidences")
     calibration_factors: dict[str, Any] = Field(default_factory=dict)
     key_evidence: List[StructuredEvidence] = Field(default_factory=list)

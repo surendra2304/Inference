@@ -1,5 +1,6 @@
 """Cross-Asset Correlation Engine, Rolling Window Matrix, and Concentration Risk Warning."""
 
+import math
 from typing import Any
 
 
@@ -32,8 +33,40 @@ class CrossAssetCorrelationEngine:
     def analyze_portfolio_correlation(self, positions: dict[str, float]) -> dict[str, Any]:
         """Calculates portfolio correlation to BTC and evaluates concentration risk."""
         total_val = sum(positions.values())
+        # A caller that reaches the engine directly (not via the validated route) can hand
+        # over a non-finite value. Echoing it back made the response unencodable, because
+        # Starlette encodes JSON with allow_nan=False. Report the unusable input instead of
+        # propagating it into the arithmetic.
+        if not math.isfinite(total_val):
+            return {
+                "portfolio_value_usd": None,
+                "weighted_btc_correlation": None,
+                "concentration_risk_warning": False,
+                "diversification_recommendation": (
+                    "Portfolio total is not a finite number; no correlation assessment is "
+                    "possible. Check the supplied position values."
+                ),
+            }
         if total_val == 0:
-            return {"weighted_btc_correlation": 0.0, "concentration_warning": False}
+            # This branch previously returned {"weighted_btc_correlation",
+            # "concentration_warning"} — TWO keys, one of them misspelled relative to the
+            # full path — while the normal path below returns four keys including
+            # "concentration_risk_warning". Any consumer reading the documented keys
+            # crashed with KeyError on an empty or all-zero portfolio:
+            # POST /v1/market/portfolio-analysis {"positions": {}} returned HTTP 500
+            # (KeyError: 'concentration_risk_warning' at app/debate/market_debate.py:34)
+            # even though the published schema accepts that body. A function must not
+            # change its response shape based on input; the early return now yields the
+            # identical key set so a caller can rely on the contract unconditionally.
+            return {
+                "portfolio_value_usd": 0.0,
+                "weighted_btc_correlation": 0.0,
+                "concentration_risk_warning": False,
+                "diversification_recommendation": (
+                    "No positions supplied; concentration risk is undefined. "
+                    "Add positions to obtain a correlation assessment."
+                ),
+            }
 
         matrix = self.get_correlation_matrix()["matrix_24h"]
         weighted_corr = 0.0

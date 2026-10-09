@@ -30,7 +30,13 @@ class ConservativeRecommendationEngine:
         # 3. High-confidence optimization
         else:
             rec_action = proposed_action or "OPTIMIZE_PARAMETERS"
-            rationale = "High confidence statistical validation across multi-agent consensus."
+            # Built from the caller's numbers. The former fixed sentence claimed "multi-agent consensus",
+            # which this path never computes; the confidence is only what the caller supplied.
+            rationale = (
+                f"Caller-supplied confidence {confidence:.2f} clears the 0.80 threshold with profit factor "
+                f"{profit_factor:.2f} and drawdown {current_drawdown_pct:.2f}%. No multi-agent consensus "
+                "was computed for this recommendation."
+            )
             worst_case = "Regime change post-parameter shift."
 
         return {

@@ -7,6 +7,7 @@ from app.services.futuris_enhancement import (
     FuturisEnhanceResponse,
     futuris_enhancement_service,
 )
+from app.utils.bounded_store import missing_entry_detail
 
 futuris_router = APIRouter(prefix="/v1/futuris", tags=["Futuris Statistical Grounding"])
 
@@ -22,8 +23,10 @@ async def get_futuris_enhancement_record(request_id: str = Path(..., description
     """Retrieves full request and response record with provenance for statistical audit."""
     record = futuris_enhancement_service.get_provenance(request_id)
     if not record:
+        # Distinguishes "never recorded" from "recording expired out of the retention
+        # window"; the two are different statements (see app/utils/bounded_store.py).
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Futuris enhancement record for request_id '{request_id}' not found in provenance ledger."
+            detail=missing_entry_detail(futuris_enhancement_service.provenance_store, request_id, "forecast provenance record"),
         )
     return record

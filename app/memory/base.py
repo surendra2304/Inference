@@ -40,8 +40,11 @@ class RunRecord(BaseModel):
     provider: str
     model: str
     stage: str = Field(description="round_0_framing, round_1_analysis, round_2_critique, etc.")
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
+    #: ``None`` when the provider did not report usage — an unreported token count is not a
+    #: measured zero. Callers used to write ``0`` in that case, which made "no usage data"
+    #: and "used no tokens" the same row.
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
     latency_seconds: float = 0.0
     status: str = "completed"
     error: str | None = None

@@ -216,3 +216,114 @@ async def test_insufficient_data_path_discloses_missing_panel(service, monkeypat
     assert "no model output" in decision.debate_summary
     assert "no panel deliberation" in decision.debate_summary
     assert "unanimously" not in decision.debate_summary
+
+
+async def test_open_circuit_substitutes_a_healthy_provider_instead_of_giving_up(
+    service, monkeypatch
+):
+    """An open circuit must not mean "no answer" while a healthy provider sits idle.
+
+    [FACT] Before this, ``_invoke_agent`` returned deterministic fallback text the moment the
+    agent's preferred provider was unavailable, even with other providers configured, healthy
+    and unused — while ``/v1/admin/routing/status`` advertised routing weights that should have
+    made exactly this decision. The request is now re-routed by weight and the substitution is
+    recorded, including on the run record.
+    """
+    from app.routing.self_optimizer import self_optimizing_router
+
+    module = sys.modules["app.services.trading_consult_service"]
+    monkeypatch.setattr(module, "model_gateway", FakeGateway("success"))
+    monkeypatch.setattr(module.circuit_breaker, "is_available", lambda name: name != "groq")
+    monkeypatch.setattr(module, "provider_has_credentials", lambda name: name == "gemini")
+
+    await service.memory.initialize()
+    await service.consult(make_request())
+
+    async with service.memory.connect() as db:
+        async with db.execute("SELECT provider, status, error FROM runs ORDER BY created_at") as cursor:
+            rows = await cursor.fetchall()
+    providers = {row["provider"] for row in rows}
+    assert rows, "runs must be persisted"
+    assert "groq" not in providers, "the unavailable provider was used anyway"
+    assert "gemini" in providers, "the healthy substitution candidate was never tried"
+    assert all(
+        row["status"] == "completed" for row in rows if row["provider"] == "gemini"
+    )
+    # The substitution must be visible on the run record, so an operator can tell a substituted
+    # success from a first-choice one.
+    substituted = [row for row in rows if row["provider"] == "gemini"]
+    assert substituted and all(
+        (row["error"] is None or "routed to" in (row["error"] or "")) for row in substituted
+    )
+    assert self_optimizing_router.decisions, "the router must record that it decided this"
+
+
+async def test_no_substitution_when_nothing_else_is_available(service, monkeypatch):
+    """With every provider unavailable the honest outcome is still a degraded decision."""
+    module = sys.modules["app.services.trading_consult_service"]
+    monkeypatch.setattr(module, "model_gateway", FakeGateway("all_fail"))
+    monkeypatch.setattr(module.circuit_breaker, "is_available", lambda name: False)
+    monkeypatch.setattr(module, "provider_has_credentials", lambda name: False)
+
+    await service.memory.initialize()
+    decision = await service.consult(make_request())
+    assert decision.degraded is True
+    async with service.memory.connect() as db:
+        async with db.execute("SELECT status, error FROM runs ORDER BY created_at") as cursor:
+            rows = await cursor.fetchall()
+    assert rows
+    assert all(row["status"] == "failed" for row in rows)
+    assert all("no other configured provider" in (row["error"] or "") for row in rows)
+
+
+# ------------------------------------------------------------------------------------
+# The per-bot rate limit: configurable, and it tells the client when to come back.
+# ------------------------------------------------------------------------------------
+
+
+def test_rate_limit_is_read_from_settings_not_a_frozen_constant(monkeypatch):
+    """A hardcoded 20/hour could only be changed by editing the router.
+
+    Measured in the mixed soak: the endpoint answered 92 x 429 in a 60 s round (every
+    attempt, since the 12-shape workload revisits it at a fixed cadence) while the operator
+    had no way to tune it and the response carried no Retry-After.
+    """
+    import app.routers.trading as trading_router
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "TRADING_CONSULT_RATE_LIMIT_PER_HOUR", 7)
+    assert trading_router.rate_limit_max_requests() == 7
+
+
+def test_rate_limit_falls_back_safely_when_configuration_is_broken(monkeypatch):
+    import app.routers.trading as trading_router
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "TRADING_CONSULT_RATE_LIMIT_PER_HOUR", "not-a-number")
+    assert trading_router.rate_limit_max_requests() == trading_router.DEFAULT_RATE_LIMIT_MAX_REQUESTS
+
+
+def test_exceeding_the_limit_answers_429_with_retry_after(monkeypatch):
+    import time
+
+    import pytest as _pytest
+
+    import app.routers.trading as trading_router
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "TRADING_CONSULT_RATE_LIMIT_PER_HOUR", 2)
+    bot = f"retry-after-bot-{time.time()}"
+    trading_router._check_rate_limit(bot)
+    trading_router._check_rate_limit(bot)
+
+    with _pytest.raises(Exception) as caught:
+        trading_router._check_rate_limit(bot)
+
+    error = caught.value
+    assert getattr(error, "status_code", None) == 429
+    headers = getattr(error, "headers", {}) or {}
+    retry_after = int(headers.get("Retry-After"))
+    assert 1 <= retry_after <= 3601, f"Retry-After must be inside the window, got {retry_after}"
+    assert "TRADING_CONSULT_RATE_LIMIT_PER_HOUR" in error.detail, (
+        "the message must name the setting that changes this, so the operator is not stuck"
+    )

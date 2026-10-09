@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, Path, status
 
 from app.debate.enhanced_debate_protocol import enhanced_debate_engine
+from app.utils.bounded_store import missing_entry_detail
 
 debate_router = APIRouter(prefix="/v1", tags=["Debate Protocol & Explainability"])
 
@@ -12,9 +13,13 @@ async def get_intelligence_reasoning_trace(request_id: str = Path(..., descripti
     """Retrieves full 4-round reasoning chain trace, cross-examinations, assumptions, and evidence scores."""
     trace = enhanced_debate_engine.get_trace(request_id)
     if not trace:
+        # Evicted and never-recorded are different answers, and the retention window is
+        # reported so the caller can tell which one they are looking at.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Reasoning chain trace for request_id '{request_id}' not found."
+            detail=missing_entry_detail(
+                enhanced_debate_engine.reasoning_traces, request_id, "reasoning chain trace"
+            ),
         )
     return trace.model_dump()
 

@@ -178,14 +178,18 @@ async def test_degraded_results_are_not_cached_for_reuse(monkeypatch, auth):
                 completion_tokens=3,
             )
 
-    async def _unused(*a, **k):  # pragma: no cover - placeholder never called
-        return None
+    # The unified manager now routes through the shared ModelGateway (a single
+    # provider stack for every entry point: the self-hosted tier, health tracking,
+    # per-provider rate limiting and the fallback ladder all live there). Patch the
+    # gateway's execute on the CLASS — patching the ``model_gateway`` singleton instance
+    # leaves a shadowing attribute behind after teardown (see the note in
+    # tests/test_degradation_and_resource_bounds.py) and breaks unrelated tests.
+    from app.providers.gateway import ModelGateway
 
-    def _fake_get_provider(name, **kwargs):
-        # get_provider is synchronous: return a provider instance, not a coroutine.
-        return _FakeProvider()
+    async def _fake_execute(self, provider_name, request, capability="general", stage_name="general"):
+        return await _FakeProvider().generate(request)
 
-    monkeypatch.setattr(unified_manager_module, "get_provider", _fake_get_provider)
+    monkeypatch.setattr(ModelGateway, "execute", _fake_execute)
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "restored-key")
     monkeypatch.setattr(
         type(settings), "get_provider_keys", lambda self, provider_name: ["restored-key"]

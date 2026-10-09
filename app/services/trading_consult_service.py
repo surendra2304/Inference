@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from app.agents.base import Agent
 from app.agents.registry import agent_registry
+from app.analytics.cost_tracking import provider_cost_tracker
+from app.analytics.usage_analytics import usage_analytics
 from app.config_production import production_config
 from app.memory.base import (
     BaseMemory,
@@ -21,7 +23,9 @@ from app.memory.sqlite import SQLiteMemory
 from app.monitoring import monitor
 from app.optimization import circuit_breaker, concurrency_controller, telemetry_cache
 from app.providers.base import ProviderMessage, ProviderRequest
-from app.providers.gateway import model_gateway
+from app.providers.gateway import model_gateway, provider_has_credentials
+from app.routing.consumer_router import consumer_router
+from app.routing.self_optimizer import self_optimizing_router
 from app.schemas.trading_consult import (
     AIUniverseDecision,
     ParameterChange,
@@ -30,12 +34,18 @@ from app.schemas.trading_consult import (
     TradingConsultRequest,
 )
 from app.services.experiment_service import experiment_service
+from app.utils.confidence import DETERMINISTIC_RULE_CONFIDENCE
 from app.utils.ids import (
     generate_message_id,
     generate_run_id,
     generate_task_id,
 )
 from app.utils.logger import logger
+
+#: Declared $/1k-token rate used to turn measured token counts into a comparable cost signal.
+#: It is an estimate by construction (no provider in this deployment returns a price list to
+#: the adapter), so every record produced from it is flagged ``is_estimate``.
+DECLARED_TOKEN_COST_PER_1K_USD = 0.0005
 
 
 class SpecialistOutcome(NamedTuple):
@@ -161,31 +171,72 @@ class TradingConsultService:
         run_id = generate_run_id()
         msg_id = generate_message_id()
 
-        # Check circuit breaker
-        if not circuit_breaker.is_available(agent.model_provider):
-            breaker_error = f"Circuit breaker OPEN for provider '{agent.model_provider}'"
-            logger.warning("Circuit breaker OPEN for provider '%s'; skipping to deterministic fallback", agent.model_provider)
-            fallback_text = self._deterministic_fallback_for_agent(agent.id, prompt)
-            await self.memory.save_run(RunRecord(
-                id=run_id,
-                task_id=task_id,
-                agent_id=agent.id,
-                provider=agent.model_provider,
-                model=agent.model_name,
-                stage=stage_name,
-                status="failed",
-                error=breaker_error,
-            ))
-            await self.memory.save_message(MessageRecord(
-                id=msg_id,
-                run_id=run_id,
-                task_id=task_id,
-                role="assistant",
-                agent_id=agent.id,
-                content=fallback_text,
-                stage=stage_name,
-            ))
-            return SpecialistOutcome(agent.id, fallback_text, False, breaker_error)
+        # Provider selection. The agent's configured provider is preferred; when its circuit is
+        # open the request is re-routed to another provider that is *both* configured and
+        # available, chosen by the self-optimizing router's weights. Until this was wired, an
+        # open circuit meant an immediate deterministic fallback even with three healthy
+        # providers sitting idle — while /v1/admin/routing/status advertised the weights that
+        # should have decided the substitution.
+        provider_name = agent.model_provider
+        routing_note: str | None = None
+        routing_decision: dict[str, Any] = {}
+        if not circuit_breaker.is_available(provider_name):
+            # The self-hosted tier is a provider like any other for routing purposes: when it
+            # is enabled it is reachable and healthy even with no cloud keys configured, and in
+            # an air-gapped deployment it is the only substitution that can work at all.
+            candidate_names = ["local", "groq", "gemini", "openrouter", "nvidia", "mistral", "cohere", "huggingface"]
+            from app.core.config import settings as _settings
+
+            candidates = [
+                name
+                for name in candidate_names
+                if circuit_breaker.is_available(name)
+                and (name == "local" and _settings.LOCAL_ENABLED or provider_has_credentials(name))
+            ]
+            chosen, routing_decision = self_optimizing_router.choose_provider(
+                "trading_consult", candidates
+            )
+            if chosen:
+                routing_note = (
+                    f"circuit OPEN for preferred provider '{provider_name}'; routed to "
+                    f"'{chosen}' by {routing_decision.get('method')} selection "
+                    f"(candidates: {', '.join(candidates)})"
+                )
+                logger.warning("Trading consultation %s: %s", agent.id, routing_note)
+                provider_name = chosen
+                self_optimizing_router.optimization_logs.append({
+                    "timestamp": time.time(),
+                    "service": "trading_consult",
+                    "action": "PROVIDER_SUBSTITUTED",
+                    "rationale": routing_note,
+                })
+            else:
+                breaker_error = (
+                    f"Circuit breaker OPEN for provider '{provider_name}' and no other "
+                    f"configured provider is available"
+                )
+                logger.warning("Trading consultation %s: %s", agent.id, breaker_error)
+                fallback_text = self._deterministic_fallback_for_agent(agent.id, prompt)
+                await self.memory.save_run(RunRecord(
+                    id=run_id,
+                    task_id=task_id,
+                    agent_id=agent.id,
+                    provider=provider_name,
+                    model=agent.model_name,
+                    stage=stage_name,
+                    status="failed",
+                    error=breaker_error,
+                ))
+                await self.memory.save_message(MessageRecord(
+                    id=msg_id,
+                    run_id=run_id,
+                    task_id=task_id,
+                    role="assistant",
+                    agent_id=agent.id,
+                    content=fallback_text,
+                    stage=stage_name,
+                ))
+                return SpecialistOutcome(agent.id, fallback_text, False, breaker_error)
 
         req = ProviderRequest(
             messages=[ProviderMessage(role="user", content=prompt)],
@@ -200,7 +251,7 @@ class TradingConsultService:
         try:
             resp = await asyncio.wait_for(
                 model_gateway.execute(
-                    provider_name=agent.model_provider,
+                    provider_name=provider_name,
                     request=req,
                     capability="reasoning",
                     stage_name=stage_name
@@ -209,8 +260,8 @@ class TradingConsultService:
             )
 
             latency = time.perf_counter() - start
-            circuit_breaker.record_success(agent.model_provider)
-            monitor.record_provider_call(agent.model_provider, latency, success=True)
+            circuit_breaker.record_success(provider_name)
+            monitor.record_provider_call(provider_name, latency, success=True)
 
             model_answered = bool(resp and resp.content)
             if model_answered:
@@ -230,15 +281,54 @@ class TradingConsultService:
                 id=run_id,
                 task_id=task_id,
                 agent_id=agent.id,
-                provider=resp.provider if resp else agent.model_provider,
+                provider=resp.provider if resp else provider_name,
                 model=resp.model if resp else agent.model_name,
                 stage=stage_name,
                 latency_seconds=latency,
-                prompt_tokens=resp.prompt_tokens if (resp and resp.prompt_tokens is not None) else 0,
-                completion_tokens=resp.completion_tokens if (resp and resp.completion_tokens is not None) else 0,
+                prompt_tokens=resp.prompt_tokens if resp else None,
+                completion_tokens=resp.completion_tokens if resp else None,
                 status=run_status,
                 error=run_error,
             ))
+
+            # Real usage accounting: this is the one path in the service layer that actually
+            # calls a provider, so provider identity, token counts and latency are all
+            # measured here rather than inferred. The usage table used to receive only
+            # hardcoded ``provider="gemini"`` rows from services that never call a model.
+            usage_analytics.log_request(
+                consumer="trading_bot",
+                service="trading_consult",
+                provider=(resp.provider if resp else None) or provider_name,
+                tokens_in=resp.prompt_tokens if resp else None,
+                tokens_out=resp.completion_tokens if resp else None,
+                latency_ms=round(latency * 1000.0, 2),
+                success=model_answered,
+            )
+            # The consumer ledger gets the same measured numbers (its other callers have none
+            # to give, and report None rather than an invented constant).
+            consumer_router.record_usage(
+                "trading_bot",
+                tokens=resp.total_tokens if resp else None,
+                latency_sec=latency,
+            )
+            # Cost accounting with an explicit basis. The provider reported token usage, so
+            # the *quantities* are measured; the *rate* comes from this deployment's declared
+            # estimate, which is why the record is flagged as such rather than presented as a
+            # bill. Nothing else logs cost events, so before this the cost report and its
+            # provider leaderboard could never contain an observation.
+            if resp and resp.total_tokens:
+                cost_estimate = round(
+                    (resp.total_tokens / 1000.0) * DECLARED_TOKEN_COST_PER_1K_USD, 6
+                )
+                provider_cost_tracker.log_cost_event(
+                    provider=(resp.provider or provider_name),
+                    consumer="trading_bot",
+                    task_type="trading_consult",
+                    cost_usd=cost_estimate,
+                    is_success=model_answered,
+                    price_basis="declared_estimate",
+                    is_estimate=True,
+                )
 
             # Record message
             await self.memory.save_message(MessageRecord(
@@ -254,22 +344,24 @@ class TradingConsultService:
             return SpecialistOutcome(agent.id, content, model_answered, run_error)
         except Exception as exc:
             latency = time.perf_counter() - start
-            circuit_breaker.record_failure(agent.model_provider)
-            monitor.record_provider_call(agent.model_provider, latency, success=False)
+            circuit_breaker.record_failure(provider_name)
+            monitor.record_provider_call(provider_name, latency, success=False)
             logger.warning("Trading consultation invocation for %s (%s) fallback: %s", agent.id, stage_name, str(exc))
             fallback_text = self._deterministic_fallback_for_agent(agent.id, prompt)
 
-            # Record fallback run
+            # Record fallback run. ``routing_note`` travels with the error so an operator can
+            # tell "this provider failed" from "this provider failed after we already
+            # substituted it in".
             await self.memory.save_run(RunRecord(
                 id=run_id,
                 task_id=task_id,
                 agent_id=agent.id,
-                provider=agent.model_provider,
+                provider=provider_name,
                 model=agent.model_name,
                 stage=stage_name,
                 latency_seconds=latency,
                 status="failed",
-                error=str(exc),
+                error=f"{type(exc).__name__}" + (f" | {routing_note}" if routing_note else ""),
             ))
 
             # Record fallback message
@@ -445,7 +537,9 @@ class TradingConsultService:
                 decision_id=decision_id,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status="INSUFFICIENT_DATA",
-                confidence=0.95,
+                # The N < 20 rule is a deterministic count on measured telemetry, so its finding is
+                # certain. It is not a model judgement. Before this, the literal was 0.95.
+                confidence=DETERMINISTIC_RULE_CONFIDENCE,
                 parameter_changes=[],
                 risk_assessment=f"Sample size of {t.total_trades} trades is below the statistical significance threshold of 20 closed trades. Recommend continued paper/testnet execution to gather baseline distribution data.",
                 regime_analysis=f"Market regime observation active. Current win rate is {t.win_rate * 100:.1f}%, but confidence is uncalibrated due to low sample volume.",
@@ -483,7 +577,9 @@ class TradingConsultService:
                 decision_id=decision_id,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status="NO_CHANGE",
-                confidence=0.90,
+                # A heuristic 'healthy' judgement: reported at the panel's participation-based value,
+                # not a fixed 0.90.
+                confidence=panel_confidence,
                 parameter_changes=[],
                 risk_assessment=f"Healthy performance profile: Win rate {t.win_rate * 100:.1f}%, Profit Factor {t.profit_factor:.2f}, Max Drawdown {t.max_drawdown_pct:.2f}%. Bot is operating stably within safe statistical parameters.",
                 regime_analysis="Strategy is well-aligned with the prevailing market regime. Expectancy remains positive.",
@@ -680,13 +776,11 @@ class TradingConsultService:
 
     async def consult(self, req: TradingConsultRequest) -> AIUniverseDecision:
         """Executes multi-agent consultation wrapped with cache lookup and performance monitoring."""
-        start_time = time.perf_counter()
-
         # Check Cache
         cached_decision = telemetry_cache.get(req)
         if cached_decision:
-            latency = time.perf_counter() - start_time
-            monitor.record_request(latency, success=True)
+            # No monitor.record_request here: RequestMetricsMiddleware records every request
+            # once. Recording it again here double-counted consult traffic.
             return cached_decision
 
         decision = await concurrency_controller.run(self._consult_internal, req)
@@ -696,8 +790,8 @@ class TradingConsultService:
         if not decision.degraded:
             telemetry_cache.set(req, decision)
 
-        latency = time.perf_counter() - start_time
-        monitor.record_request(latency, success=True)
+        # No monitor.record_request here either: RequestMetricsMiddleware already recorded
+        # this request. The panel's own timings travel on the decision object.
         return decision
 
     async def _consult_internal(self, req: TradingConsultRequest) -> AIUniverseDecision:

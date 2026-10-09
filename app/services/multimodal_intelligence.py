@@ -16,8 +16,10 @@ from app.intelligence.temporal import (
     TimeSeriesPoint,
     temporal_reasoning_engine,
 )
+from app.utils.confidence import DEGRADED_CONFIDENCE
 
 ContentType = Literal["text", "code", "structured_data", "url", "image"]
+
 
 
 class AttachedContentItem(BaseModel):
@@ -118,25 +120,28 @@ class MultiModalIntelligenceService:
         if req.what_if_scenario:
             counterfactual_res = counterfactual_engine.evaluate_what_if(req.what_if_scenario)
 
-        # Point estimate with 95% CI
-        ci_lower = "+5.0%"
-        ci_upper = "+19.0%"
-        point_est_ci = f"Conversion expected +12.0% (95% CI: {ci_lower} to {ci_upper})"
+        # Before this, every request returned the decision OPTIMIZE_STRATEGY, the fixed estimate
+        # "+12.0% (95% CI +5.0% to +19.0%)" and confidence 0.88, whatever the inputs were. No
+        # step here estimates an effect, so none is reported. The measured parts (content
+        # summaries, temporal analysis, counterfactual) are still returned.
+        point_est_ci = "not_measured: no estimator ran on these inputs"
+        decision = "NO_DECISION"
+        confidence = DEGRADED_CONFIDENCE
 
         explanation = explanation_engine.generate_explanation(
-            decision="OPTIMIZE_STRATEGY",
+            decision=decision,
             goal=req.goal,
             key_evidence=[s["summary"] for s in content_summaries],
-            unresolved_disagreements=["Model uncertainty interval broadens under extreme market volatility."],
-            confidence=0.88,
+            unresolved_disagreements=["No effect estimate was produced; no decision is supported."],
+            confidence=confidence,
             audience=req.audience
         )
 
         return MultiModalIntelligenceResponse(
             request_id=req.request_id,
-            decision="OPTIMIZE_STRATEGY",
+            decision=decision,
             point_estimate_with_ci=point_est_ci,
-            confidence=0.88,
+            confidence=confidence,
             content_analysis_summaries=content_summaries,
             explanation=explanation,
             temporal_insights=temporal_res,

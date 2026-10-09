@@ -8,6 +8,7 @@ from app.providers.huggingface import HuggingFaceProvider
 from app.providers.litellm import LiteLLMTransport
 from app.providers.litellm_adapter import LiteLLMProvider
 from app.providers.llamacpp import LlamaCppTransport
+from app.providers.local import LocalProvider
 from app.providers.mistral import MistralProvider
 from app.providers.nvidia import NvidiaProvider
 from app.providers.openai_compatible import OpenAICompatibleTransport
@@ -24,6 +25,10 @@ _PROVIDER_MAP: dict[str, type[BaseLLMProvider]] = {
     "huggingface": HuggingFaceProvider,
     "nvidia": NvidiaProvider,
     "litellm": LiteLLMProvider,
+    # Self-hosted OpenAI-compatible endpoint (llama.cpp / vLLM / SGLang / Ollama).
+    # Registered so that "local inference" is reachable from ModelGateway instead of
+    # existing only as the unregistered transports in llamacpp.py / vllm.py / sglang.py.
+    "local": LocalProvider,
 }
 
 _PROVIDER_CACHE: dict[str, BaseLLMProvider] = {}
@@ -54,6 +59,7 @@ __all__ = [
     "LiteLLMProvider",
     "LiteLLMTransport",
     "LlamaCppTransport",
+    "LocalProvider",
     "MistralProvider",
     "NvidiaProvider",
     "OpenAICompatibleTransport",

@@ -34,33 +34,90 @@ class StressIntelligenceEngine:
         }
 
     def run_historical_stress_test(self, portfolio_equity: float, active_notional: float) -> dict[str, Any]:
-        """Simulates portfolio impact under classic historical market shock scenarios."""
-        scenarios = [
-            {
-                "scenario_name": "COVID March 2020 Liquidity Crunch (-35% Price Shock / 5x Spread)",
-                "estimated_drawdown_usd": round(active_notional * 0.35, 2),
-                "estimated_drawdown_pct": round((active_notional * 0.35 / portfolio_equity) * 100, 2) if portfolio_equity > 0 else 0.0,
-                "survival_probability": "HIGH" if (active_notional * 0.35 / portfolio_equity) < 0.20 else "MEDIUM"
-            },
-            {
-                "scenario_name": "FTX Insolvency Cascading Deleveraging (-22% Shock)",
-                "estimated_drawdown_usd": round(active_notional * 0.22, 2),
-                "estimated_drawdown_pct": round((active_notional * 0.22 / portfolio_equity) * 100, 2) if portfolio_equity > 0 else 0.0,
-                "survival_probability": "HIGH" if (active_notional * 0.22 / portfolio_equity) < 0.20 else "MEDIUM"
-            },
-            {
-                "scenario_name": "May 2021 Flash Liquidation (-15% Rapid Wick)",
-                "estimated_drawdown_usd": round(active_notional * 0.15, 2),
-                "estimated_drawdown_pct": round((active_notional * 0.15 / portfolio_equity) * 100, 2) if portfolio_equity > 0 else 0.0,
-                "survival_probability": "HIGH"
-            }
+        """Simulates portfolio impact under classic historical market shock scenarios.
+
+        Three defects were fixed here, all reachable from a request body the published
+        schema accepts (``{"portfolio_equity": 0, "active_notional": 0}``):
+
+        1. ``ZeroDivisionError``. Each scenario computed the loss ratio twice — once for
+           ``estimated_drawdown_pct`` guarded by ``if portfolio_equity > 0``, and again on
+           the very next line for ``survival_probability`` *without* the guard. The guard
+           proves the author knew equity could be zero; it was applied to only half of a
+           duplicated expression. The ratio is now computed once and reused, so the two
+           fields cannot disagree and there is only one division to guard.
+        2. ``survival_probability`` was derived only from the ratio, so a wiped-out
+           account was reported as ``HIGH``. With no equity, any notional is unbacked and
+           the honest answer is ``CRITICAL``.
+        3. ``stress_resilience_rating`` was the constant string ``"PASSING"`` on every
+           response regardless of the arithmetic: a portfolio that loses its entire
+           equity in the modelled shock was still rated PASSING. It is now derived from
+           the worst-case scenarios, so the summary cannot contradict its own detail.
+        """
+        equity = float(portfolio_equity)
+        notional = float(active_notional)
+
+        shocks = [
+            ("COVID March 2020 Liquidity Crunch (-35% Price Shock / 5x Spread)", 0.35),
+            ("FTX Insolvency Cascading Deleveraging (-22% Shock)", 0.22),
+            ("May 2021 Flash Liquidation (-15% Rapid Wick)", 0.15),
         ]
 
+        scenarios: list[dict[str, Any]] = []
+        worst_ratio = 0.0
+        for scenario_name, shock in shocks:
+            drawdown_usd = round(notional * shock, 2)
+            # One division, one guard: the ratio is the single source of truth for both
+            # the percentage and the survival verdict below.
+            if equity > 0:
+                loss_ratio = (notional * shock) / equity
+            else:
+                loss_ratio = float("inf") if notional > 0 else 0.0
+            worst_ratio = max(worst_ratio, loss_ratio)
+
+            if loss_ratio == float("inf"):
+                survival = "CRITICAL"
+            elif loss_ratio < 0.20:
+                survival = "HIGH"
+            elif loss_ratio < 0.50:
+                survival = "MEDIUM"
+            else:
+                survival = "LOW"
+
+            scenarios.append({
+                "scenario_name": scenario_name,
+                "estimated_drawdown_usd": drawdown_usd,
+                "estimated_drawdown_pct": (
+                    round(loss_ratio * 100, 2) if loss_ratio != float("inf") else None
+                ),
+                "exceeds_available_equity": drawdown_usd > equity,
+                "survival_probability": survival,
+            })
+
+        if equity <= 0 and notional > 0:
+            rating = "FAILING"
+            rationale = (
+                "No portfolio equity is available to absorb the modelled shocks, so every "
+                "scenario is unbacked. Any active notional is fully exposed."
+            )
+        elif worst_ratio < 0.20:
+            rating = "PASSING"
+            rationale = "Worst modelled loss stays below 20% of portfolio equity."
+        elif worst_ratio < 0.50:
+            rating = "MARGINAL"
+            rationale = "Worst modelled loss consumes between 20% and 50% of portfolio equity."
+        else:
+            rating = "FAILING"
+            rationale = "Worst modelled loss consumes 50% or more of portfolio equity."
+
         return {
-            "portfolio_equity": portfolio_equity,
-            "active_notional": active_notional,
+            "portfolio_equity": equity,
+            "active_notional": notional,
             "scenario_results": scenarios,
-            "stress_resilience_rating": "PASSING"
+            "worst_case_loss_pct_of_equity": (
+                round(worst_ratio * 100, 2) if worst_ratio != float("inf") else None
+            ),
+            "stress_resilience_rating": rating,
+            "rating_rationale": rationale,
         }
 
 

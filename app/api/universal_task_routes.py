@@ -10,6 +10,8 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
+from app.utils.confidence import DEGRADED_CONFIDENCE, UNVERIFIED_MODEL_CONFIDENCE
+from app.utils.errors import internal_error
 from app.utils.logger import logger
 
 task_router = APIRouter(tags=["FRIDAY Universe Universal Task Protocol"])
@@ -120,12 +122,12 @@ async def execute_task(
         )
     except Exception as e:
         lat = int((time.time() - t0) * 1000)
-        logger.error(f"[TASK_EXECUTE] Execution error: {e}")
+        detail, _reference = internal_error(logger, e, doing_what="task execution", prefix="task")
         return TaskResultModel(
             task_id=envelope.task_id,
             target_agent="inference",
             status="ERROR",
-            error=str(e),
+            error=detail,
             execution_time_ms=lat,
         )
 
@@ -155,17 +157,19 @@ async def astra_reason(request: AstraReasonRequest) -> AstraReasonResponse:
                     "No model provider produced output for this reasoning request; "
                     "ASTRA returns no synthesis instead of fabricating one."
                 ),
-                confidence=0.0,
+                confidence=DEGRADED_CONFIDENCE,
                 model_used=resp.model_used,
                 provider_used=resp.provider_used,
                 latency_ms=lat,
                 perspective="Central Reasoning Council (ASTRA) — degraded",
             )
 
+        # The synthesis is model text that nothing verified. Before this, every successful call
+        # reported a fixed confidence of 0.95. See app/utils/confidence.py.
         return AstraReasonResponse(
             task_id=f"astra_{uuid.uuid4().hex[:8]}",
             synthesis=resp.content,
-            confidence=0.95,
+            confidence=UNVERIFIED_MODEL_CONFIDENCE,
             model_used=resp.model_used,
             provider_used=resp.provider_used,
             latency_ms=lat,
@@ -177,7 +181,7 @@ async def astra_reason(request: AstraReasonRequest) -> AstraReasonResponse:
         return AstraReasonResponse(
             task_id=f"astra_err_{uuid.uuid4().hex[:8]}",
             synthesis=f"Reasoning failure: {e}",
-            confidence=0.0,
+            confidence=DEGRADED_CONFIDENCE,
             model_used="none",
             provider_used="none",
             latency_ms=lat,

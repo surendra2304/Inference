@@ -159,7 +159,8 @@ class TechnicalAnalysisEngine:
             patterns.append({
                 "pattern": "Double Bottom",
                 "bias": "BULLISH",
-                "confidence": 0.82,
+                "confidence": None,
+                "confidence_basis": "threshold rule match; no calibrated probability for this pattern",
                 "description": f"Double bottom established near ${l1:,.2f} support level."
             })
 
@@ -170,7 +171,8 @@ class TechnicalAnalysisEngine:
             patterns.append({
                 "pattern": "Bull Flag Consolidation",
                 "bias": "BULLISH",
-                "confidence": 0.78,
+                "confidence": None,
+                "confidence_basis": "threshold rule match; no calibrated probability for this pattern",
                 "description": "Tight consolidation within 2% range following impulsive leg up."
             })
 
@@ -178,7 +180,8 @@ class TechnicalAnalysisEngine:
             patterns.append({
                 "pattern": "Ascending Channel Channeling",
                 "bias": "NEUTRAL_BULLISH",
-                "confidence": 0.70,
+                "confidence": None,
+                "confidence_basis": "fallback when no pattern rule matched; no calibrated probability",
                 "description": "Price action oscillating within structured standard deviation bands."
             })
 

@@ -1,4 +1,4 @@
-﻿"""Adjudicator Engine for Evidence-Driven Reconciliation, Contradiction Detection, and Confidence Calibration."""
+"""Adjudicator Engine for Evidence-Driven Reconciliation, Contradiction Detection, and Confidence Calibration."""
 
 import re
 from typing import Any, List, Tuple
@@ -14,6 +14,7 @@ from app.agents.reasoning import (
     VerificationStatus,
 )
 from app.providers.base import ProviderResponse
+from app.utils.confidence import DEGRADED_CONFIDENCE, UNVERIFIED_MODEL_CONFIDENCE
 
 
 class Adjudicator:
@@ -42,7 +43,7 @@ class Adjudicator:
                     claim = AtomicClaim(
                         statement=clean_text,
                         category="technical",
-                        confidence=0.88,
+                        confidence=UNVERIFIED_MODEL_CONFIDENCE,
                         agent_id=agent.id,
                         model_id=model_id
                     )
@@ -55,7 +56,7 @@ class Adjudicator:
                             source=f"{agent.role} Analysis",
                             source_type="specialist_analysis",
                             excerpt=clean_text[:250],
-                            reliability_score=0.90,
+                            reliability_score=UNVERIFIED_MODEL_CONFIDENCE,
                             relation=EvidenceRelation.SUPPORTS,
                             agent_origin=agent.id,
                             model_origin=model_id,
@@ -69,7 +70,7 @@ class Adjudicator:
             claim = AtomicClaim(
                 statement=content.strip()[:300],
                 category="summary",
-                confidence=0.85,
+                confidence=UNVERIFIED_MODEL_CONFIDENCE,
                 agent_id=agent.id,
                 model_id=model_id
             )
@@ -129,14 +130,16 @@ class Adjudicator:
         complexity_str: str = "simple"
     ) -> Tuple[float, dict[str, Any]]:
         """
-        Calibrates true system confidence from empirical factors:
+        Heuristic system confidence from observed factors. It is NOT calibrated against outcomes;
+        the constants below are judgement weights, not fitted values:
         - Agreement rate
         - Contradiction penalty
         - Evidence grounding boost
         - Multi-model diversity
         """
         if not assessments:
-            return 0.50, {"reason": "No assessments available"}
+            # Nothing was assessed, so there is nothing to be confident in (was a fixed 0.50).
+            return DEGRADED_CONFIDENCE, {"reason": "No assessments available", "calibration_status": "not_applicable"}
 
         mean_model_conf = sum(a.model_confidence for a in assessments) / len(assessments)
 
@@ -157,7 +160,7 @@ class Adjudicator:
         raw_system_conf = mean_model_conf - conflict_penalty + evidence_bonus + complexity_factor
         calibrated = round(max(0.20, min(0.98, raw_system_conf)), 2)
 
-        calibration_factors = {
+        calibration_factors: dict[str, Any] = {
             "mean_model_confidence": round(mean_model_conf, 2),
             "contradiction_penalty": round(conflict_penalty, 2),
             "evidence_bonus": round(evidence_bonus, 2),
@@ -166,6 +169,11 @@ class Adjudicator:
             "calibrated_system_confidence": calibrated
         }
 
+        # Honest label: the penalties and bonuses above are fixed constants, not fitted to outcomes.
+        calibration_factors["calibration_status"] = (
+            "uncalibrated heuristic: mean of model self-reports with fixed penalty/bonus constants; "
+            "no outcome data supports these constants"
+        )
         return calibrated, calibration_factors
 
     @classmethod
@@ -180,7 +188,7 @@ class Adjudicator:
                 agent_id=agent.id,
                 agent_role=agent.role,
                 summary="[Specialist models produced no output]",
-                model_confidence=0.50
+                model_confidence=DEGRADED_CONFIDENCE  # specialist produced no output
             )
 
         if len(model_responses) == 1:
@@ -192,7 +200,7 @@ class Adjudicator:
                 summary=resp.content.strip(),
                 claims=claims,
                 evidence=evidence,
-                model_confidence=0.90,
+                model_confidence=UNVERIFIED_MODEL_CONFIDENCE,
                 raw_model_outputs={mid: resp.content}
             )
 
@@ -216,7 +224,7 @@ class Adjudicator:
             summary=normalized_summary,
             claims=all_claims,
             evidence=all_evidence,
-            model_confidence=0.92,
+            model_confidence=UNVERIFIED_MODEL_CONFIDENCE,
             raw_model_outputs=raw_outputs
         )
 
@@ -244,7 +252,7 @@ class Adjudicator:
             complexity_str=complexity
         )
 
-        mean_model_conf = sum(a.model_confidence for a in assessments) / len(assessments) if assessments else 0.85
+        mean_model_conf = sum(a.model_confidence for a in assessments) / len(assessments) if assessments else DEGRADED_CONFIDENCE
 
         agreements: List[str] = [
             f"{ass.agent_role}: {ass.claims[0].statement}" for ass in assessments if ass.claims

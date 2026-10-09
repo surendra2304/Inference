@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.utils.confidence import UNVERIFIED_MODEL_CONFIDENCE
+
 
 class AgentModelConfig(BaseModel):
     """Specification of a provider, model identifier, and capability assigned to an agent."""
@@ -24,7 +26,9 @@ class AgentResponse(BaseModel):
     code: str | None = Field(default=None, description="Concrete code snippets, schemas, or pseudocode if applicable")
     trade_offs: list[str] = Field(default_factory=list, description="Explicitly identified trade-offs or alternatives")
     assumptions: list[str] = Field(default_factory=list, description="Underlying assumptions made in the proposal")
-    confidence: float = Field(default=0.90, ge=0.0, le=1.0, description="Confidence score in the recommendation")
+    #: A model's self-report. When the model stated none, the unverified prior applies; the former
+    #: default of 0.90 was a fixed high confidence on every answer that omitted one.
+    confidence: float = Field(default=UNVERIFIED_MODEL_CONFIDENCE, ge=0.0, le=1.0, description="Confidence score in the recommendation (unverified unless a check ran)")
     dissent: str | None = Field(default=None, description="Identified counterpoints, risks, or dissent from other perspectives")
 
     @classmethod
@@ -55,7 +59,7 @@ class AgentResponse(BaseModel):
         return cls(
             summary=text[:1000].strip(),
             rationale=text.strip(),
-            confidence=0.85
+            confidence=UNVERIFIED_MODEL_CONFIDENCE,
         )
 
 

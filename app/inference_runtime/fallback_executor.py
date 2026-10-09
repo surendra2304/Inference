@@ -4,6 +4,8 @@ import asyncio
 import time
 from dataclasses import dataclass
 
+from app.utils.bounded_store import BoundedList
+
 from .contracts import CompletionRequest, ProviderEndpoint
 from .errors import ProviderUnavailable
 from .retry_policy import RetryPolicy
@@ -20,9 +22,14 @@ class AttemptRecord:
 
 
 class FallbackExecutor:
-    def __init__(self, policy: RetryPolicy | None = None):
+    def __init__(self, policy: RetryPolicy | None = None, max_history: int = 2000):
         self.policy = policy or RetryPolicy(3)
-        self.history: list[AttemptRecord] = []
+        # Bounded: one record is appended per provider attempt, and nothing in this service
+        # reads the list, so an unbounded list was pure accumulation on the failure path
+        # (the path a degraded provider drives hardest).
+        self.history: BoundedList[AttemptRecord] = BoundedList(
+            "inference_runtime.fallback_attempts", max_entries=max_history
+        )
 
     async def run(self, request: CompletionRequest, candidates: list[ProviderEndpoint], call):
         last = None

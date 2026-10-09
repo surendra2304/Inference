@@ -14,8 +14,17 @@ multi_market_router = APIRouter(prefix="/v1/market", tags=["Cross-Market Intelli
 
 class PortfolioAnalysisRequest(BaseModel):
     positions: dict[str, float] = Field(
-        default={"BTCUSDT": 15000.0, "ETHUSDT": 8000.0, "SOLUSDT": 3000.0},
-        description="Dictionary mapping asset symbol to USD notional value"
+        # min_length=1 makes the contract explicit: an empty portfolio is not an
+        # analysis request, and advertising that it is turned a client mistake into a
+        # server crash (HTTP 500) instead of a 422 the caller can act on. A mutable
+        # literal default is also replaced by a factory so the default can never be
+        # shared between models.
+        default_factory=lambda: {"BTCUSDT": 15000.0, "ETHUSDT": 8000.0, "SOLUSDT": 3000.0},
+        min_length=1,
+        description=(
+            "Dictionary mapping asset symbol to USD notional value. "
+            "Must contain at least one position."
+        ),
     )
 
 

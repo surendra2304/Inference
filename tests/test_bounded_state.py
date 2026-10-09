@@ -111,17 +111,24 @@ def test_dedup_cache_prefers_dropping_expired_entries():
     mgr = MultiTenantManager()
     mgr.max_dedup_entries = 10
 
-    # Ten long-lived entries plus ten already-expired ones.
+    # Ten long-lived entries plus ten already-expired ones. Entries are addressed
+    # through the manager's own key helper rather than a literal key format, so this
+    # test does not silently break when the key composition changes (it did: keys are
+    # now namespaced per endpoint to stop one route reading another's cached response).
     for i in range(10):
         mgr.store_deduplication(f"live-{i}", {"n": i})
     for i in range(10):
-        mgr.dedup_cache[f"stale-{i}"] = {"response": {"n": i}, "expires_at": time.time() - 1.0}
+        mgr.dedup_cache[mgr._dedup_key(f"stale-{i}", "default")] = {
+            "response": {"n": i},
+            "expires_at": time.time() - 1.0,
+        }
 
     mgr.store_deduplication("newcomer", {"n": "new"})
 
     assert len(mgr.dedup_cache) <= mgr.max_dedup_entries
-    assert "newcomer" in mgr.dedup_cache
-    assert not any(k.startswith("stale-") for k in mgr.dedup_cache), (
+    # Assert through the public lookup, not by inspecting the internal key format.
+    assert mgr.check_deduplication("newcomer") == {"n": "new"}
+    assert not any("stale-" in k for k in mgr.dedup_cache), (
         "expired entries should be reclaimed before live ones"
     )
 

@@ -22,6 +22,21 @@ from app.utils.logger import logger
 class OpenAICompatibleProvider(BaseLLMProvider):
     """Reusable adapter for providers adhering to the OpenAI chat completions REST format."""
 
+    #: Whether a bearer credential is mandatory for this provider. Cloud
+    #: providers must fail loudly when unconfigured, so this is True; a
+    #: self-hosted server authenticates by network boundary, not by token, so
+    #: ``LocalProvider`` overrides it to False and is reachable with no key at
+    #: all.
+    requires_api_key: bool = True
+
+    #: Seconds to pause inside ``generate`` after a 429/503 *before* raising.
+    #: The gateway already sleeps and quarantines the key on the next iteration,
+    #: so this adapter-level pause is a second, redundant backoff. Kept at 2.0 for
+    #: cloud providers to preserve existing behaviour (and to be polite to free
+    #: tiers), and set to 0.0 for local servers where a busy queue clears in
+    #: milliseconds and the delay is pure added latency.
+    transient_cooldown_seconds: float = 2.0
+
     def __init__(
         self,
         provider_name: str,
@@ -114,18 +129,30 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         return payload
 
     def _get_headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
+        headers = {"Content-Type": "application/json"}
+        active_key = self.api_key
+        if active_key:
+            headers["Authorization"] = f"Bearer {active_key}"
         headers.update(self.extra_headers)
         return headers
 
-    async def generate(self, request: ProviderRequest) -> ProviderResponse:
+    def _require_key_or_raise(self) -> str | None:
+        """Return the active key, or raise if this provider cannot operate keyless.
+
+        Cloud adapters raise :class:`ValueError` when unconfigured, which the
+        gateway normalises into ``TemporaryUnavailableError`` and quarantines the
+        (absent) key for. Keyless providers return ``None`` and continue.
+        """
         active_key = self.api_key
-        if not active_key:
+        if active_key is None and self.requires_api_key:
             raise ValueError(f"{self._provider_name.upper()}_API_KEY is not configured.")
+        return active_key
+
+    async def generate(self, request: ProviderRequest) -> ProviderResponse:
+        self._require_key_or_raise()
 
         url = f"{self.base_url}/chat/completions"
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {active_key}"}
-        headers.update(self.extra_headers)
+        headers = self._get_headers()
         payload = self._build_payload(request)
         model = payload["model"]
 
@@ -137,12 +164,14 @@ class OpenAICompatibleProvider(BaseLLMProvider):
 
             if response.status_code in (429, 503):
                 logger.warning(
-                    "%s transient error (%d) encountered on model %s; cooling down for 2.0s",
+                    "%s transient error (%d) encountered on model %s; cooling down for %.1fs",
                     self._provider_name,
                     response.status_code,
                     model,
+                    self.transient_cooldown_seconds,
                 )
-                await asyncio.sleep(2.0)
+                if self.transient_cooldown_seconds > 0:
+                    await asyncio.sleep(self.transient_cooldown_seconds)
                 if response.status_code == 429:
                     raise RuntimeError(f"{self._provider_name.capitalize()} rate limit exceeded (HTTP 429).")
                 else:
@@ -200,8 +229,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             ) from exc
 
     async def stream(self, request: ProviderRequest) -> AsyncIterator[str]:
-        if not self.api_key:
-            raise ValueError(f"{self._provider_name.upper()}_API_KEY is not configured.")
+        self._require_key_or_raise()
 
         url = f"{self.base_url}/chat/completions"
         headers = self._get_headers()

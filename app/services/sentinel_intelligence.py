@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.analytics.usage_analytics import usage_analytics
 from app.routing.consumer_router import consumer_router
+from app.utils.bounded_store import DEFAULT_MAX_ENTRIES, BoundedStore
 
 AnalysisType = Literal[
     "vulnerability_assessment",
@@ -73,14 +74,16 @@ class AttackPathNode(BaseModel):
     vector: str
     preconditions: str
     potential_impact: str
-    likelihood_score: float = Field(..., ge=0.0, le=1.0)
+    #: None: not estimated. The former fixed 0.85 / 0.72 were not derived from the findings.
+    likelihood_score: float | None = Field(default=None, ge=0.0, le=1.0)
     associated_finding_ids: list[str] = Field(default_factory=list)
 
 
 class AttackPathChain(BaseModel):
     chain_id: str
     title: str
-    overall_probability: float = Field(..., ge=0.0, le=1.0)
+    #: None: not estimated (the former fixed 0.78 was a constant).
+    overall_probability: float | None = Field(default=None, ge=0.0, le=1.0)
     criticality: SeverityLevel
     nodes: list[AttackPathNode] = Field(default_factory=list)
 
@@ -113,7 +116,8 @@ class SentinelAnalysisPayload(BaseModel):
     attack_paths: list[AttackPathChain] | None = None
     prioritized_remediation: list[RemediationItem] = Field(default_factory=list)
     threat_context: ThreatContextResult
-    confidence: float = Field(..., ge=0.0, le=1.0)
+    #: None: rule-based analysis with no calibration. The former 0.88-0.95 were per-type constants.
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     dissent: list[str] = Field(default_factory=list)
 
 
@@ -140,7 +144,14 @@ class SentinelIntelligenceService:
     }
 
     def __init__(self) -> None:
-        self.provenance_store: dict[str, dict[str, Any]] = {}
+        # Bounded: one entry per request used to accumulate without limit
+        # (measured: +9.03 MB/1k requests on nexus, +5.19 on sentinel, retained
+        # after gc). Entries are evicted LRU beyond the ceiling; the store
+        # records how many, so a lookup miss can say "evicted" instead of
+        # pretending the id never existed.
+        self.provenance_store = BoundedStore[dict[str, Any]](
+            "sentinel.provenance_store", max_entries=DEFAULT_MAX_ENTRIES
+        )
 
     def _compute_risk_score(self, findings: list[SecurityFinding], exposure: ExposureLevel) -> tuple[float, SeverityLevel]:
         if not findings:
@@ -185,9 +196,14 @@ class SentinelIntelligenceService:
 
         # Check deduplication cache
         from app.governance.tenant_manager import tenant_manager
-        cached = tenant_manager.check_deduplication(req.request_id)
-        if cached:
-            return SentinelAnalysisResponse(**cached)
+        # Typed lookup: a stored payload that does not match this response model is
+        # evicted and treated as a miss, so an inconsistent cache entry can never
+        # surface as HTTP 500 (it previously did — see app/governance/tenant_manager.py).
+        cached = tenant_manager.check_deduplication_model(
+            req.request_id, SentinelAnalysisResponse, namespace="sentinel_analyze"
+        )
+        if cached is not None:
+            return cached
 
         agents = self.ANALYSIS_AGENT_MAPPING.get(req.analysis_type, ["security_analyst", "critic"])
         risk_score, risk_tier = self._compute_risk_score(req.findings, req.target_context.exposure_level)
@@ -235,18 +251,20 @@ class SentinelIntelligenceService:
 
         # Attack path reasoning (Debate mode)
         attack_paths: list[AttackPathChain] | None = None
+        # No adversarial debate runs here, so no dissent is recorded. The previous text "Critic
+        # challenged reachability..." described a critique that never happened.
         dissent: list[str] = []
-        confidence = 0.90
+        # Rule-based analysis: no calibration exists for any of these, so no confidence is reported.
+        confidence: float | None = None
 
         if req.analysis_type == "attack_path_reasoning":
-            confidence = 0.88
-            # Adversarial multi-agent debate simulation
-            dissent.append("Critic challenged reachability of secondary lateral movement step under strict VPC segmentation.")
             attack_paths = [
                 AttackPathChain(
                     chain_id="PATH-001",
-                    title=f"External {req.target_context.exposure_level.replace('_', ' ').capitalize()} to {req.target_context.asset_type} Boundary Breach",
-                    overall_probability=0.78,
+                    # The chain is a fixed template, not derived from the findings; the title says so.
+                    title=(f"TEMPLATE External {req.target_context.exposure_level.replace('_', ' ').capitalize()} "
+                           f"to {req.target_context.asset_type} Boundary Breach (not derived from findings)"),
+                    overall_probability=None,
                     criticality=risk_tier,
                     nodes=[
                         AttackPathNode(
@@ -254,7 +272,7 @@ class SentinelIntelligenceService:
                             vector=f"Public Service Discovery ({req.target_context.exposure_level})",
                             preconditions="Exposed public ingress endpoint with vulnerable component.",
                             potential_impact="Initial perimeter foothold",
-                            likelihood_score=0.85,
+                            likelihood_score=None,
                             associated_finding_ids=[f.finding_id for f in req.findings[:1]]
                         ),
                         AttackPathNode(
@@ -262,20 +280,12 @@ class SentinelIntelligenceService:
                             vector="Component Vulnerability Exploitation",
                             preconditions="Unpatched component detected in asset stack.",
                             potential_impact="Execution within target service context",
-                            likelihood_score=0.72,
+                            likelihood_score=None,
                             associated_finding_ids=[f.finding_id for f in req.findings[1:2]] if len(req.findings) > 1 else [f.finding_id for f in req.findings[:1]]
                         )
                     ]
                 )
             ]
-        elif req.analysis_type == "vulnerability_assessment":
-            confidence = 0.94
-        elif req.analysis_type == "remediation_prioritization":
-            confidence = 0.92
-        elif req.analysis_type == "threat_intel_correlation":
-            confidence = 0.89
-        elif req.analysis_type == "risk_scoring":
-            confidence = 0.95
 
         summary = (
             f"Evaluated {len(req.findings)} finding(s) across {req.target_context.asset_type} ({req.target_context.exposure_level}). "
@@ -331,25 +341,34 @@ class SentinelIntelligenceService:
         }
 
         # Store in deduplication cache
-        tenant_manager.store_deduplication(req.request_id, response.model_dump())
+        tenant_manager.store_deduplication(
+            req.request_id, response.model_dump(), namespace="sentinel_analyze"
+        )
 
         # Track usage
-        consumer_router.record_usage("sentinel", tokens=550, latency_sec=latency_ms / 1000.0)
+        consumer_router.record_usage("sentinel", tokens=None, latency_sec=latency_ms / 1000.0)
+        # Deterministic engine path: provider identity and token counts are not measurable
+        # here and are recorded as such (they used to be hardcoded "gemini"/300/250).
         usage_analytics.log_request(
             consumer="sentinel",
             service=f"sentinel_{req.analysis_type}",
-            provider="gemini",
-            tokens_in=300,
-            tokens_out=250,
             latency_ms=latency_ms,
             success=True,
-            confidence=confidence
+            confidence=confidence,
         )
 
         return response
 
     def get_provenance(self, request_id: str) -> dict[str, Any] | None:
         return self.provenance_store.get(request_id)
+
+    def provenance_retention(self) -> dict[str, Any]:
+        """How much provenance this service still holds, and what it has dropped.
+
+        Served so that a 404 on an audit endpoint can be attributed: "never recorded"
+        and "recorded but evicted" are different statements about the same request id.
+        """
+        return self.provenance_store.describe()
 
 
 sentinel_intelligence_service = SentinelIntelligenceService()

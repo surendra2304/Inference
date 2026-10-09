@@ -1,4 +1,10 @@
-"""Counterfactual Reasoning Engine: What-If Scenario Analysis with Confidence Intervals."""
+"""Counterfactual Reasoning Engine: What-If Scenario Analysis with Confidence Intervals.
+
+No effect is estimated here. The previous version returned +12.0% for any variable whose name
+contained the letter "b" and -8.5% for every other, with a fixed 72% confidence and a 95% interval
+of plus or minus 7 points. Those were constants keyed on spelling, not estimates. An estimate needs
+observed outcomes for both arms; this engine has none, so it reports ``not_estimated``.
+"""
 
 from pydantic import BaseModel, Field
 
@@ -12,37 +18,37 @@ class CounterfactualScenario(BaseModel):
 
 class CounterfactualResult(BaseModel):
     scenario_name: str
-    estimated_outcome_delta_pct: float
-    confidence_interval_95: dict[str, float] = Field(description="Lower and upper bound of 95% CI")
-    counterfactual_confidence: float = 0.72  # Clearly wider & lower than factual analysis
+    #: None: no estimate was produced.
+    estimated_outcome_delta_pct: float | None
+    confidence_interval_95: dict[str, float] | None = Field(description="Lower and upper bound of 95% CI, or None")
+    counterfactual_confidence: float | None = None
+    estimate_status: str = "not_estimated"
     is_counterfactual: bool = True
     reasoning_basis: str
     caveats: list[str] = Field(default_factory=list)
 
 
 class CounterfactualReasoningEngine:
-    """Executes what-if scenario simulations based on historical StrategyBank outcome data."""
+    """Scenario framing for what-if questions; effect estimates are withheld until data supports them."""
 
     def evaluate_what_if(self, scenario: CounterfactualScenario) -> CounterfactualResult:
-        # Base simulation delta based on historical outcome data
-        delta_pct = 12.0 if "b" in scenario.counterfactual_variable.lower() else -8.5
-        ci_lower = round(delta_pct - 7.0, 1)
-        ci_upper = round(delta_pct + 7.0, 1)
-
         caveats = [
-            "Counterfactual estimates rely on historical outcome observational data; unobserved confounders may shift true outcome.",
-            "Confidence interval (95% CI) is intentionally wider than factual analysis to reflect synthetic variance.",
-            "Always labeled explicitly as counterfactual."
+            "No historical outcome data for the baseline or the counterfactual arm was available; no effect was estimated.",
+            "Any counterfactual figure must be labelled as counterfactual wherever it is shown.",
         ]
-
         return CounterfactualResult(
             scenario_name=scenario.scenario_name,
-            estimated_outcome_delta_pct=delta_pct,
-            confidence_interval_95={"ci_lower": ci_lower, "ci_upper": ci_upper},
-            counterfactual_confidence=0.72,
+            estimated_outcome_delta_pct=None,
+            confidence_interval_95=None,
+            counterfactual_confidence=None,
+            estimate_status="not_estimated: no observed outcomes for the baseline or counterfactual arm",
             is_counterfactual=True,
-            reasoning_basis=f"Simulated intervention '{scenario.proposed_intervention}' substituting '{scenario.baseline_variable}' with '{scenario.counterfactual_variable}'.",
-            caveats=caveats
+            reasoning_basis=(
+                f"Intervention '{scenario.proposed_intervention}' would substitute "
+                f"'{scenario.baseline_variable}' with '{scenario.counterfactual_variable}'; "
+                "an effect needs observed outcomes for both arms."
+            ),
+            caveats=caveats,
         )
 
 

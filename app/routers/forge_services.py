@@ -30,6 +30,8 @@ from app.services.test_generation import (
     TestGenerationResponse,
     test_generation_service,
 )
+from app.utils.errors import internal_error
+from app.utils.logger import logger
 
 forge_router = APIRouter(prefix="/v1/forge", tags=["FORGE Intelligence Services"])
 
@@ -48,7 +50,7 @@ async def plan_architecture_endpoint(req: ArchitecturePlanRequest):
 
 @forge_router.post("/review-code", response_model=CodeReviewResponse, status_code=status.HTTP_200_OK)
 async def review_code_endpoint(req: CodeReviewRequest):
-    """Multi-agent code review debate covering correctness, security vulnerabilities, and complexity."""
+    """Static checks on the full source plus a structured model review. A review that did not run is never reported as approval."""
     return await code_review_service.review_code(req)
 
 
@@ -74,7 +76,12 @@ async def stream_code_endpoint(req: CodeGenerationRequest):
                 yield f"data: {json.dumps({'chunk': chunk, 'done': False})}\n\n"
             yield f"data: {json.dumps({'chunk': '', 'done': True})}\n\n"
         except Exception as exc:
-            yield f"data: {json.dumps({'error': str(exc), 'done': True})}\n\n"
+            # The stream is already open, so the failure is reported in-band with a correlation
+            # id. Raw text ("GEMINI_API_KEY is not configured.") named configuration to the caller.
+            detail, _reference = internal_error(
+                logger, exc, doing_what="code streaming", prefix="stream",
+            )
+            yield f"data: {json.dumps({'error': detail, 'done': True})}\n\n"
 
     return StreamingResponse(
         _event_generator(),

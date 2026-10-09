@@ -12,7 +12,7 @@ from fastapi import APIRouter, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.performance_cache import perf_cache
+from app.performance_cache import as_answer_pair, perf_cache
 from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.gateway import model_gateway
 from app.providers.unified_manager import (
@@ -141,9 +141,10 @@ async def agent_assist_endpoint(req: AgentAssistRequest):
     # Check L1 cache first — if hit, we're done in <1ms
     cache_mode = f"agent_assist_{req.caller_agent}_{req.task_type}"
     if not req.no_cache:
-        cached_data = perf_cache.get_query(req.prompt, mode=cache_mode, caller_id=req.caller_agent)
-        if cached_data:
-            cached_answer, cached_meta = cached_data
+        cached_pair = as_answer_pair(perf_cache.get_query(
+            req.prompt, mode=cache_mode, caller_id=req.caller_agent, namespace="agent.assist"))
+        if cached_pair:
+            cached_answer, cached_meta = cached_pair
             elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
             _record_telemetry(req.caller_agent, elapsed_ms, is_cache_hit=True)
             logger.info("agent/assist L1 cache hit for %s/%s in %.2fms", req.caller_agent, req.task_type, elapsed_ms)
@@ -185,6 +186,7 @@ async def agent_assist_endpoint(req: AgentAssistRequest):
             value=(exec_res.content, {"provider": exec_res.provider_used, "model": exec_res.model_used, "tokens": exec_res.token_usage.get("total_tokens", 0)}),
             caller_id=req.caller_agent,
             ttl=AGENT_CACHE_TTL,
+            namespace="agent.assist",
         )
 
     _record_telemetry(req.caller_agent, elapsed_ms, is_cache_hit=False)

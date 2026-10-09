@@ -18,7 +18,9 @@ from app.agents.base import Agent, AgentModelConfig
 class AIUniverseDecision(BaseModel):
     """Structured decision output containing trading strategy recommendations."""
     recommendation: str = Field(description="Actionable parameter recommendation (e.g. 'Tighten Stop Loss to 0.4%')")
-    confidence: float = Field(default=0.85, ge=0.0, le=1.0, description="Confidence in this advice")
+    #: None: the rule that fired has no calibrated accuracy. The former default 0.85 and the fixed
+    #: 0.88 / 0.92 / 0.95 per rule were not measured.
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0, description="Confidence in this advice (None = not calibrated)")
     evidence: list[str] = Field(default_factory=list, description="Empirical metrics and calculations supporting advice")
     risk_assessment: str = Field(default="", description="Evaluation of current drawdown, risk, and downside exposure")
     suggested_parameters: dict[str, Any] = Field(default_factory=dict, description="Recommended key-value parameter changes")
@@ -61,7 +63,7 @@ class TradingAnalyst:
             suggested_params = {"stop_loss_pct": 0.004, "max_leverage": 5, "position_size_pct": 0.01}
             risk_assessment = "HIGH RISK: Recent consecutive drawdowns threaten capital preservation thresholds."
             alternatives.append("Temporarily pause new scalper entries until volatility regime normalizes.")
-            confidence = 0.92
+            confidence = None  # rule-based: no calibrated accuracy
 
         # Case 2: Sub-optimal Profit Factor (PF < 1.1) with low win rate -> Calibrate SL/TP Geometry
         elif profit_factor < 1.1 and win_rate < 45.0:
@@ -69,7 +71,7 @@ class TradingAnalyst:
             suggested_params = {"stop_loss_pct": 0.004, "take_profit_pct": 0.006}
             risk_assessment = "MODERATE RISK: Expectancy is dragged down by asymmetric friction and early exits."
             alternatives.append("Switch to trend-following filters on 15m timeframe to avoid chop stop-outs.")
-            confidence = 0.88
+            confidence = None  # rule-based: no calibrated accuracy
 
         # Case 3: High Win Rate (WR > 65%) and Healthy Profit Factor (PF > 1.5) -> Safe Scaling
         elif win_rate >= 60.0 and profit_factor >= 1.5:
@@ -77,7 +79,7 @@ class TradingAnalyst:
             suggested_params = {"stop_loss_pct": 0.005, "take_profit_pct": 0.003, "trailing_stop_activation": 0.002}
             risk_assessment = "LOW RISK: System exhibits statistically robust edge in current market regime."
             alternatives.append("Increase position size allocation by 0.5% on A+ setups.")
-            confidence = 0.95
+            confidence = None  # rule-based: no calibrated accuracy
 
         # Case 4: Balanced / Baseline
         else:
@@ -85,7 +87,7 @@ class TradingAnalyst:
             suggested_params = {"stop_loss_pct": 0.005, "take_profit_pct": 0.003}
             risk_assessment = "STABLE: Bot is operating within expected statistical boundaries."
             alternatives.append("Tighten cooldown window between consecutive signals on the same symbol.")
-            confidence = 0.85
+            confidence = None  # rule-based: no calibrated accuracy
 
         return AIUniverseDecision(
             recommendation=recommendation,

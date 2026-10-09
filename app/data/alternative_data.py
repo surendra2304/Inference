@@ -14,6 +14,19 @@ class AlternativeDataEngine:
         return {
             "asset": clean_asset,
             "timestamp": time.time(),
+            # Declared provenance. This engine is a static table: it ingests no feed, and it
+            # returns the same numbers for every asset (BTC and DOGE alike), so a reader must
+            # not treat these as observations about a market. Before this block the payload
+            # carried no provenance at all and fed the directional signal at
+            # GET /v1/predict/{asset} as if it were live data.
+            "evidence_class": "synthetic_fixture",
+            "inputs_simulated": True,
+            "asset_specific": False,
+            "generator": (
+                "static fixture table in app/data/alternative_data.py; no news, social, "
+                "on-chain or macro feed is configured in this process"
+            ),
+            "values_identical_across_assets": True,
             "news_intelligence": {
                 "sentiment_score": 0.42,
                 "urgency_level": "MODERATE",

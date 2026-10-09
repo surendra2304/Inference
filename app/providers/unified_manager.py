@@ -6,9 +6,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.agents.registry import agent_registry
-from app.performance_cache import perf_cache
-from app.providers import get_provider
+from app.performance_cache import as_answer_pair, perf_cache
 from app.providers.base import ProviderMessage, ProviderRequest, ProviderResponse
+from app.providers.gateway import model_gateway
+from app.utils.errors import provider_failure_reason
 from app.utils.logger import logger
 
 
@@ -47,6 +48,18 @@ class UnifiedExecutionResponse(BaseModel):
     # is empty and `error` carries the real reason no model could be reached.
     degraded: bool = False
     error: str | None = None
+    # Why the model stopped generating ("stop", "length", ...). Callers that present
+    # `content` as an answer need this: an answer cut off at the token ceiling is
+    # materially incomplete and must be priced as such rather than published as if it
+    # were finished.
+    finish_reason: str | None = None
+    # Set when the request was served by something other than the provider that was
+    # asked for (the self-hosted tier under LOCAL_PREFERRED, or any fallback rung).
+    served_by_provider: str | None = None
+    # True when that substitution happened *by policy* rather than as fault recovery:
+    # under LOCAL_PREFERRED the self-hosted tier is the intended primary, so serving
+    # from it is not a degradation and must not be priced like one.
+    served_by_policy: bool = False
 
 
 class UnifiedProviderManager:
@@ -74,9 +87,10 @@ class UnifiedProviderManager:
         # 1. High-Speed L1 Cache Check (< 0.05ms)
         cache_mode = f"unified_{req.provider}_{req.agent_role or 'general'}"
         if not req.no_cache:
-            cached_data = perf_cache.get_query(req.prompt, mode=cache_mode, caller_id=req.agent_role or "unified")
-            if cached_data:
-                cached_answer, cached_meta = cached_data
+            cached_pair = as_answer_pair(perf_cache.get_query(
+                req.prompt, mode=cache_mode, caller_id=req.agent_role or "unified", namespace="provider.unified"))
+            if cached_pair:
+                cached_answer, cached_meta = cached_pair
                 cached_latency = round((time.perf_counter() - start_time) * 1000.0, 3)
                 logger.info("Unified provider L1 cache hit for role '%s' in %.3fms", req.agent_role, cached_latency)
                 return UnifiedExecutionResponse(
@@ -128,6 +142,15 @@ class UnifiedProviderManager:
         elif target_provider == "groq" and "openai/gpt-oss" in (target_model or ""):
             extra_params["reasoning_effort"] = "low"
 
+        # Capability drives the gateway's fallback model selection; derive it from the
+        # agent that is speaking rather than defaulting everything to "general".
+        capability = "general"
+        if agent is not None:
+            try:
+                capability = agent.get_primary_model().capability or "general"
+            except Exception:  # noqa: BLE001 - capability is advisory
+                capability = "general"
+
         # Build provider request
         messages = [ProviderMessage(role="user", content=req.prompt)]
         if req.context:
@@ -146,17 +169,17 @@ class UnifiedProviderManager:
         # 2. Speculative Racing (Concurrent Execution across fastest providers)
         if req.speculative:
             try:
-                from app.providers.gateway import model_gateway
-
                 spec_resp = await model_gateway.execute_speculative(
                     ["groq", "gemini"], prov_req, stage_name="unified_speculative"
                 )
                 elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
-                spec_winner = (
-                    spec_resp.raw_response.get("speculative_race", {}).get("winner", "speculative")
-                    if spec_resp.raw_response
-                    else "speculative"
-                )
+                race = (spec_resp.raw_response or {}).get("speculative_race", {}) or {}
+                # ``winner`` is the raced candidate's LABEL; ``served_by`` is the provider
+                # that actually produced the content. Under local preference or a missing
+                # credential the raced label never runs, so reporting it as
+                # ``provider_used`` attributed the work to a vendor that was never
+                # called — and then wrote that fiction into the shared response cache.
+                spec_winner = race.get("served_by") or spec_resp.provider or "speculative"
                 if not req.no_cache:
                     perf_cache.set_query(
                         question=req.prompt,
@@ -170,7 +193,8 @@ class UnifiedProviderManager:
                             },
                         ),
                         caller_id=req.agent_role or "unified",
-                    )
+                    namespace="provider.unified",
+                )
                 return UnifiedExecutionResponse(
                     provider_used=spec_winner,
                     model_used=spec_resp.model or "speculative-model",
@@ -188,11 +212,40 @@ class UnifiedProviderManager:
             except Exception as spec_exc:
                 logger.warning("Speculative race in unified manager failed, falling back: %s", spec_exc)
 
-        # 3. Standard Direct Provider Execution
+        # 3. Standard Direct Provider Execution — routed through the ModelGateway.
+        #
+        # This used to call the provider adapter directly (``get_provider(...).generate``),
+        # which quietly opted this API out of every guarantee the gateway provides:
+        #
+        #   * LOCAL_PREFERRED / LOCAL_ENABLED were ignored, so a deployment configured
+        #     for self-hosted, no-egress operation could still send prompts to a cloud
+        #     vendor — the exact opposite of what that setting is documented to
+        #     guarantee. Measured: with the self-hosted tier running and healthy,
+        #     POST /v1/ask produced **zero** model calls and returned a refusal, while
+        #     POST /ask answered the same question from the local model in 0.01s.
+        #   * provider health tracking, per-provider rate limiting, the fallback ladder
+        #     and circuit-breaker behaviour did not apply to this route at all, so a
+        #     failing provider here neither learned from nor contributed to the shared
+        #     health state.
+        #
+        # Going through the gateway makes one provider stack govern every entry point.
         try:
-            prov_instance = get_provider(target_provider)
-            resp: ProviderResponse = await prov_instance.generate(prov_req)
+            resp: ProviderResponse = await model_gateway.execute(
+                provider_name=target_provider,
+                request=prov_req,
+                capability=capability,
+                stage_name="unified_direct",
+            )
             elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
+
+            # Report the provider that actually served the request, not the one that was
+            # asked for. Under LOCAL_PREFERRED (or any fallback) those differ, and
+            # naming the requested provider would be a false claim about where the
+            # prompt went.
+            actual_provider = target_provider
+            provenance = (resp.raw_response or {}).get("fallback_provenance") or {}
+            if provenance.get("actual_provider"):
+                actual_provider = str(provenance["actual_provider"])
 
             if not req.no_cache:
                 perf_cache.set_query(
@@ -201,16 +254,17 @@ class UnifiedProviderManager:
                     value=(
                         resp.content,
                         {
-                            "provider": target_provider,
+                            "provider": actual_provider,
                             "model": resp.model or (target_model or "default"),
                             "tokens": resp.total_tokens or 0,
                         },
                     ),
                     caller_id=req.agent_role or "unified",
-                )
+                namespace="provider.unified",
+            )
 
             return UnifiedExecutionResponse(
-                provider_used=target_provider,
+                provider_used=actual_provider,
                 model_used=resp.model or (target_model or "default"),
                 agent_role=req.agent_role or "general",
                 content=resp.content,
@@ -222,15 +276,21 @@ class UnifiedProviderManager:
                     "total_tokens": resp.total_tokens or 0,
                 },
                 status="success",
+                finish_reason=resp.finish_reason,
+                served_by_provider=actual_provider if actual_provider != target_provider else None,
+                served_by_policy=bool(
+                    provenance.get("fallback_reason") == "local_preferred"
+                ),
             )
         except Exception as exc:
             elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
             # NO SYNTHESIZED ANSWER. A provider failure is not a result: we return an
             # explicitly degraded response with empty content and no token counts so
             # callers cannot mistake "no model ran" for "the model answered".
-            logger.warning(
-                "Provider %s failed with no model output (degraded): %s", target_provider, exc
-            )
+            # The full text is logged (scrubbed) under a correlation id; the response carries
+            # only provider + failure kind, because ``error`` is copied into batch items, task
+            # results and code-generation responses that reach clients.
+            public_reason = provider_failure_reason(logger, target_provider, exc)
             return UnifiedExecutionResponse(
                 provider_used=target_provider,
                 model_used=target_model or "none",
@@ -241,7 +301,7 @@ class UnifiedProviderManager:
                 token_usage={},
                 status="degraded",
                 degraded=True,
-                error=f"{target_provider}: {type(exc).__name__}: {exc}",
+                error=public_reason,
             )
 
 

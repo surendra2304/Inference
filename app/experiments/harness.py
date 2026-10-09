@@ -10,8 +10,8 @@ from app.evaluation.benchmarks import GOLDEN_BENCHMARK_SUITE
 from app.evaluation.evaluator import Evaluator
 from app.memory.base import BaseMemory, ExperimentRecord
 from app.memory.sqlite import SQLiteMemory
-from app.providers import get_provider
 from app.providers.base import ProviderMessage, ProviderRequest
+from app.providers.gateway import model_gateway
 from app.utils.ids import generate_id
 
 
@@ -134,6 +134,15 @@ class BenchmarkHarness:
         score_diff = round(debate_eval.overall_score - fast_eval.overall_score, 3)
         winner = "debate" if score_diff > 0 else ("fast" if score_diff < 0 else "tie")
 
+        # What the score actually measures must travel with it. When the semantic judge did
+        # not run, ``overall_score`` is a composite of the deterministic latency/efficiency
+        # dimensions only — measured live, a run with no judge produced ``winner: "fast"``,
+        # ``score_difference: -0.15`` and ``score: 1.0`` vs ``0.85``, which reads as
+        # "single-agent beat debate on reasoning quality". It had not been compared on
+        # reasoning quality at all; the only difference measured was speed. The payload now
+        # says which dimensions produced the score and withholds the quality claim.
+        judge_ran = fast_eval.judge_ran and debate_eval.judge_ran
+        reason_quality_compared = judge_ran
         exp_record = ExperimentRecord(
             id=exp_id,
             hypothesis="Does multi-agent structured debate outperform single-agent baseline on reasoning quality?",
@@ -142,18 +151,32 @@ class BenchmarkHarness:
             result={
                 "winner": winner,
                 "score_difference": score_diff,
+                "verdict_basis": (
+                    "semantic judge + deterministic dimensions" if judge_ran
+                    else "deterministic dimensions only (latency/efficiency); the semantic "
+                         "judge did not run, so no comparison of reasoning quality was made"
+                ),
+                "quality_verdict_withheld": not reason_quality_compared,
+                # False means: do not read this comparison as evidence about answer quality.
+                "hypothesis_tested": reason_quality_compared,
                 "fast_baseline": {
                     "score": fast_eval.overall_score,
                     "confidence": fast_res.confidence,
                     "latency": fast_res.total_latency_seconds,
-                    "tokens": fast_res.total_tokens
+                    "tokens": fast_res.total_tokens,
+                    "judge_ran": fast_eval.judge_ran,
+                    "scored_dimensions": [s.criterion for s in fast_eval.scores],
+                    "judge_error": fast_eval.judge_error,
                 },
                 "multi_agent_debate": {
                     "score": debate_eval.overall_score,
                     "confidence": debate_res.confidence,
                     "latency": debate_res.total_latency_seconds,
                     "tokens": debate_res.total_tokens,
-                    "unresolved_disagreements": debate_res.unresolved_disagreements
+                    "unresolved_disagreements": debate_res.unresolved_disagreements,
+                    "judge_ran": debate_eval.judge_ran,
+                    "scored_dimensions": [s.criterion for s in debate_eval.scores],
+                    "judge_error": debate_eval.judge_error,
                 }
             }
         )
@@ -172,13 +195,17 @@ class BenchmarkHarness:
         matrix_results = []
         for p_name in providers:
             try:
-                prov = get_provider(p_name)
                 start_p = time.perf_counter()
                 req = ProviderRequest(
                     messages=[ProviderMessage(role="user", content=prompt)],
                     system_instruction="You are a specialist benchmark evaluation agent."
                 )
-                resp = await prov.generate(req)
+                # Via the gateway so the benchmark inherits per-provider rate limiting,
+                # key quarantine, the deadline budget and health recording; a direct
+                # provider call bypassed all four.
+                resp = await model_gateway.execute(
+                    p_name, req, capability="general", stage_name="provider_matrix",
+                )
                 lat = round(time.perf_counter() - start_p, 3)
 
                 eval_rep = await self.evaluator.evaluate_answer(
@@ -191,6 +218,8 @@ class BenchmarkHarness:
                     "provider": p_name,
                     "model": resp.model,
                     "score": eval_rep.overall_score,
+                    "judge_ran": eval_rep.judge_ran,
+                    "scored_dimensions": [s.criterion for s in eval_rep.scores],
                     "latency_seconds": lat,
                     "total_tokens": resp.total_tokens,
                     "status": "success"

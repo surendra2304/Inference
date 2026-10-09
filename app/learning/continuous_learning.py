@@ -1,4 +1,10 @@
-"""Continuous Learning Engine: Attribution of Advisory Recommendations and Model Tuning."""
+"""Continuous Learning Engine: Attribution of Advisory Recommendations and Model Tuning.
+
+Previously seeded with three invented outcomes (a "85.0" helpful rate when empty, fixed agent
+weights 1.25/1.30/0.90 that nothing measured, and a score per outcome label that was a guess).
+Now it starts empty; every rate is None until an outcome is recorded, and no agent weight is
+reported as learned unless a learning step produced it (none does yet).
+"""
 
 from typing import Any
 
@@ -6,14 +12,10 @@ from app.memory.long_term import long_term_memory
 
 
 class ContinuousLearningEngine:
-    """Evaluates whether AI advice helped or hurt, tracks model reliability, and refines debate agent weights."""
+    """Evaluates whether AI advice helped or hurt, from recorded outcomes only."""
 
     def __init__(self) -> None:
-        self.recommendation_outcomes: list[dict[str, Any]] = [
-            {"consultation_id": "c-001", "action_taken": "TIGHTEN_STOPS", "drawdown_reduction_pct": 2.4, "outcome": "HELPED", "score": 0.88},
-            {"consultation_id": "c-002", "action_taken": "REDUCE_RISK", "drawdown_reduction_pct": 4.1, "outcome": "HELPED", "score": 0.94},
-            {"consultation_id": "c-003", "action_taken": "NO_CHANGE", "drawdown_reduction_pct": 0.0, "outcome": "NEUTRAL", "score": 0.80}
-        ]
+        self.recommendation_outcomes: list[dict[str, Any]] = []
 
     def record_outcome(
         self,
@@ -23,33 +25,25 @@ class ContinuousLearningEngine:
         outcome: str
     ) -> None:
         """Records the post-execution outcome of an applied recommendation."""
-        score = 0.90 if outcome == "HELPED" else (0.40 if outcome == "HURT" else 0.75)
         self.recommendation_outcomes.append({
             "consultation_id": consultation_id,
             "action_taken": action,
             "drawdown_reduction_pct": drawdown_reduction_pct,
             "outcome": outcome,
-            "score": score
         })
 
     def get_learning_status(self) -> dict[str, Any]:
-        """Calculates system-wide learning progression and dynamic debate weights."""
+        """Learning progression computed from the recorded outcomes."""
         total = len(self.recommendation_outcomes)
         helped = sum(1 for r in self.recommendation_outcomes if r["outcome"] == "HELPED")
-        helpful_ratio = (helped / total * 100.0) if total > 0 else 85.0
-
+        helpful_rate = round(helped / total * 100.0, 1) if total else None
         return {
             "total_outcomes_evaluated": total,
-            "helpful_recommendation_rate_pct": round(helpful_ratio, 1),
-            "learned_agent_weights": {
-                "risk_analyst": 1.25,
-                "quant_analyst": 1.15,
-                "technical_analyst": 1.05,
-                "critic_agent": 1.30,
-                "sentiment_analyst": 0.90
-            },
+            "helpful_recommendation_rate_pct": helpful_rate,
+            "learned_agent_weights": None,
+            "learned_agent_weights_status": "not_learned: no learning step has run",
             "recent_semantic_insights": long_term_memory.semantic_memories,
-            "continuous_learning_status": "ONLINE_ACTIVE_ADAPTING"
+            "continuous_learning_status": "ACTIVE_WITH_OUTCOMES" if total else "NO_OUTCOMES_RECORDED",
         }
 
 

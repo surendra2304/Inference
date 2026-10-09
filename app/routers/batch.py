@@ -12,6 +12,8 @@ from app.services.code_generation import (
     CodeGenerationResponse,
     code_generation_service,
 )
+from app.utils.errors import internal_error
+from app.utils.logger import logger
 
 batch_router = APIRouter(prefix="/v1/forge", tags=["FORGE Batch Processing"])
 
@@ -38,7 +40,10 @@ async def batch_generate_code(req: BatchGenerateRequest):
         try:
             return await code_generation_service.generate_code(item)
         except Exception as exc:
-            return {"filename": item.filename, "error": str(exc)}
+            detail, _reference = internal_error(
+                logger, exc, doing_what="code generation", prefix="batch", extra=item.filename,
+            )
+            return {"filename": item.filename, "error": detail}
 
     outcomes = await asyncio.gather(*[_process_item(r) for r in req.requests])
 
