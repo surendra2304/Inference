@@ -18,6 +18,7 @@ from app.learning.strategy_store import StrategyStore
 from app.memory.base import BaseMemory, TaskRecord
 from app.memory.sqlite import SQLiteMemory
 from app.monitoring import monitor
+from app.security.prompt_isolation import scrub_credentials
 from app.utils.bounded_store import BoundedStore, missing_entry_detail
 from app.utils.ids import generate_task_id
 from app.utils.logger import logger
@@ -342,11 +343,15 @@ class Orchestrator(BaseOrchestrator):
         except (asyncio.CancelledError, Exception) as exc:
             latency = time.perf_counter() - start_time
             is_cancel = isinstance(exc, asyncio.CancelledError) or (task_id in self._active_cancellations and self._active_cancellations[task_id].is_set())
-            logger.error("Task %s %s during execution: %s", task_id, "cancelled" if is_cancel else "failed", str(exc))
+            scrubbed = scrub_credentials(str(exc))
+            logger.error("Task %s %s during execution: %s", task_id, "cancelled" if is_cancel else "failed", scrubbed)
 
             task_record.status = "cancelled" if is_cancel else "failed"
             task_record.completed_at = datetime.now(timezone.utc)
-            task_record.metadata["error"] = str(exc)
+            # The task record is served back verbatim by GET /tasks/{id}. The raw text goes to the
+            # log above (scrubbed); the record keeps the failure kind and a pointer to the log.
+            task_record.metadata["error"] = f"{type(exc).__name__} (see server log for task {task_id})"
+
             self._recent_tasks[task_id] = task_record
             try:
                 await self.memory.save_task(task_record)

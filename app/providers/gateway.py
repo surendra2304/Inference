@@ -311,10 +311,26 @@ class ModelGateway:
         # Raising here, before the rate limiter, keeps the shared per-provider queue
         # free for calls that can actually be answered.
         if not provider_has_credentials(prov_name):
-            raise ProviderUnconfiguredError(
+            unconfigured = ProviderUnconfiguredError(
                 f"Provider '{prov_name}' has no configured credential; skipping without an attempt.",
                 provider=prov_name,
                 model=request.model,
+            )
+            # Escalate to the fallback ladder instead of raising here. Raising at this point
+            # skipped the ladder entirely, and the ladder's terminal rung is the self-hosted
+            # tier: [FACT] measured with LOCAL_ENABLED=true, a healthy local server answering
+            # /v1/models, and no cloud keys, every /v1/ask came back DEGRADED with
+            # "no configured credential" while the local model sat idle. The ladder skips
+            # unconfigured candidates itself and ends with ``raise last_error``, so when nothing
+            # can answer the caller still receives this exact ProviderUnconfiguredError.
+            return await self._execute_dynamic_fallback(
+                failed_provider=prov_name,
+                request=request,
+                capability=capability,
+                stage_name=stage_name,
+                last_error=unconfigured,
+                deadline=deadline,
+                skip_local_tier=local_tier_attempted,
             )
 
         pool = self.key_pools.get(prov_name)
@@ -569,7 +585,18 @@ class ModelGateway:
                 raise last_error
             raise TimeoutError("Request deadline exceeded before fallback execution.")
 
-        if failed_provider != "openrouter":
+        # The OpenRouter rung needs credentials, like every other rung. It used to run without
+        # them ("some free routes permit unauthenticated calls"), which meant a live
+        # ``get_best_free_model`` discovery request per fallback. [FACT] once the ladder became
+        # reachable for unconfigured primaries (see the pre-flight in ``execute``), that
+        # discovery call to openrouter.ai added seconds to every request in an egress-blocked
+        # host: test_every_declared_operation_is_routed 0.6s -> 21.5s. The primary gate already
+        # refuses to attempt an unconfigured provider on exactly this reasoning.
+        openrouter_pool_for_gate = self.key_pools.get("openrouter")
+        openrouter_has_credentials = bool(
+            openrouter_pool_for_gate and openrouter_pool_for_gate.total_keys_count
+        ) or provider_has_credentials("openrouter")
+        if failed_provider != "openrouter" and openrouter_has_credentials:
             openrouter_key: str | None = None
             openrouter_pool = self.key_pools.get("openrouter")
             try:

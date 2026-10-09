@@ -10,6 +10,7 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
+from app.utils.errors import internal_error
 from app.utils.logger import logger
 
 task_router = APIRouter(tags=["FRIDAY Universe Universal Task Protocol"])
@@ -120,12 +121,12 @@ async def execute_task(
         )
     except Exception as e:
         lat = int((time.time() - t0) * 1000)
-        logger.error(f"[TASK_EXECUTE] Execution error: {e}")
+        detail, _reference = internal_error(logger, e, doing_what="task execution", prefix="task")
         return TaskResultModel(
             task_id=envelope.task_id,
             target_agent="inference",
             status="ERROR",
-            error=str(e),
+            error=detail,
             execution_time_ms=lat,
         )
 

@@ -8,7 +8,7 @@ stress it to dead ends, find and FIX every bug surfaced, write substantial new c
 upgrades capability, keep real-life regression tests, keep going until the queue is empty with
 evidence attached to every item.
 
-**Current step:** items 1-7 done; item 8 (#29 cross-endpoint dedup collision) is the next
+**Current step (operator-tour phase):** items 11-15 done; item 16 blocked on a real model; next is the queue in `notes/WORKQUEUE.md` (startup LOCAL_ENABLED warning, per-request WARNING collapse, 429 banner, harness.py leak). **Earlier step:** items 1-7 done; item 8 (#29 cross-endpoint dedup collision) is the next
 queue item; then the Q7 citation check and the final sweep. The tree is green at commit
 `e18844b` (**450 passed**, ruff clean, mypy clean, real-time drive **12/12**).
 
@@ -66,6 +66,41 @@ queue item; then the Q7 citation check and the final sweep. The tree is green at
       process-wide loop (`_DB_EXECUTOR`, `:128`, `loop`/`submit`/`run` at `:99-121`) and
       `tests/test_sqlite_loop_ownership.py` passes (6 tests) with no thread-exception warnings.
 - [ ] 10. Final sweep: full pytest + ruff + mypy + real-life harness green.
+
+## Operator-tour phase (real tasks, not green tests)
+
+Driven by `scripts/operator_tour.py` (10 real operator tasks through HTTP). Each item below was
+REPRODUCED by a tour or direct request, fixed at root cause, falsified against the old code, and
+verified live.
+
+- [x] 11. FORGE `generate-code` returned prose as `code` at confidence 0.92. Root cause: a
+  constant (`app/services/code_generation.py`, `0.92 if gen_path == "agent" else 0.55`) and the
+  syntax validator never being called. Also the fence extractor returned the prose when a fence
+  followed a sentence (measured: `'Here it is:'`). FIXED: `extract_code()`, validator-driven
+  confidence, `generation_path="invalid_output"` with empty code, not cached.
+  Test: `tests/test_forge_output_is_verified.py` (13 tests). Falsified: 13/13 fail on `HEAD`.
+- [x] 12. `GET /v1/admin/analytics/quality` served hard-coded figures (96.4, 99.2, WELL_CALIBRATED,
+  agent scores) as measurements. FIXED: `app/services/quality_assurance.py` reports only measured
+  counts; everything else is `null` with `status: not_measured`. Same test file.
+- [x] 13. FORGE `review-code` approved SQL injection at confidence 0.91 (verdict defaulted to
+  approve; model output never parsed; summary claimed a "panel consensus" with one provider call).
+  FIXED: `app/services/code_review.py` rewritten: AST analysis on the full source, JSON model
+  review that must validate, `approve` only with a parsed model review and no medium+ finding,
+  taint tracking through local variables. Test: `tests/test_forge_code_review_is_evidence_based.py`
+  (30 tests). Falsified against `HEAD`: 30 of 30 fail; with the fix, 30 of 30 pass. Shared parser: `app/utils/model_json.py`.
+- [x] 14. FORGE `debug` returned a fixed template as `root_cause`, a fixed `fix_strategy`,
+  confidence 0.89 with no model, and prose as `patch_code`. FIXED: `app/services/debugging.py`
+  requires validated JSON; otherwise `diagnosis_status` is `unparsed`/`unavailable`, confidence 0,
+  no patch. Patches are syntax-checked when the context is Python, else `not_checked`.
+  Test: `tests/test_forge_debug_is_evidence_based.py` (10 tests). Falsified: 10/10 fail on `HEAD`.
+- [x] 15. Operator tour body/check bugs (mine, not the agent's): wrong enums and required fields
+  (schema-derived now), and a leak check that counted the caller's own echoed text. FIXED in
+  `scripts/operator_tour.py`. Honest-limited passes are labelled, not hidden: this sandbox's rig
+  answers every request with canned prose, so code quality cannot be verified here (see the
+  evidence log).
+- [ ] 16. Real-model verification of code generation, review and debugging quality. BLOCKED in
+  this sandbox: the LLM provider hosts are unreachable from here (probed with curl: only GitHub is
+  reachable). The tour reports these checks as honest-limited, not passed.
 
 ## Memory-leak investigation, closed (second pass)
 

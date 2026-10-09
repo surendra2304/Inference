@@ -6,9 +6,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.agents.registry import agent_registry
-from app.performance_cache import perf_cache
+from app.performance_cache import as_answer_pair, perf_cache
 from app.providers.base import ProviderMessage, ProviderRequest, ProviderResponse
 from app.providers.gateway import model_gateway
+from app.utils.errors import provider_failure_reason
 from app.utils.logger import logger
 
 
@@ -86,9 +87,10 @@ class UnifiedProviderManager:
         # 1. High-Speed L1 Cache Check (< 0.05ms)
         cache_mode = f"unified_{req.provider}_{req.agent_role or 'general'}"
         if not req.no_cache:
-            cached_data = perf_cache.get_query(req.prompt, mode=cache_mode, caller_id=req.agent_role or "unified")
-            if cached_data:
-                cached_answer, cached_meta = cached_data
+            cached_pair = as_answer_pair(perf_cache.get_query(
+                req.prompt, mode=cache_mode, caller_id=req.agent_role or "unified", namespace="provider.unified"))
+            if cached_pair:
+                cached_answer, cached_meta = cached_pair
                 cached_latency = round((time.perf_counter() - start_time) * 1000.0, 3)
                 logger.info("Unified provider L1 cache hit for role '%s' in %.3fms", req.agent_role, cached_latency)
                 return UnifiedExecutionResponse(
@@ -191,7 +193,8 @@ class UnifiedProviderManager:
                             },
                         ),
                         caller_id=req.agent_role or "unified",
-                    )
+                    namespace="provider.unified",
+                )
                 return UnifiedExecutionResponse(
                     provider_used=spec_winner,
                     model_used=spec_resp.model or "speculative-model",
@@ -257,7 +260,8 @@ class UnifiedProviderManager:
                         },
                     ),
                     caller_id=req.agent_role or "unified",
-                )
+                namespace="provider.unified",
+            )
 
             return UnifiedExecutionResponse(
                 provider_used=actual_provider,
@@ -283,9 +287,10 @@ class UnifiedProviderManager:
             # NO SYNTHESIZED ANSWER. A provider failure is not a result: we return an
             # explicitly degraded response with empty content and no token counts so
             # callers cannot mistake "no model ran" for "the model answered".
-            logger.warning(
-                "Provider %s failed with no model output (degraded): %s", target_provider, exc
-            )
+            # The full text is logged (scrubbed) under a correlation id; the response carries
+            # only provider + failure kind, because ``error`` is copied into batch items, task
+            # results and code-generation responses that reach clients.
+            public_reason = provider_failure_reason(logger, target_provider, exc)
             return UnifiedExecutionResponse(
                 provider_used=target_provider,
                 model_used=target_model or "none",
@@ -296,7 +301,7 @@ class UnifiedProviderManager:
                 token_usage={},
                 status="degraded",
                 degraded=True,
-                error=f"{target_provider}: {type(exc).__name__}: {exc}",
+                error=public_reason,
             )
 
 

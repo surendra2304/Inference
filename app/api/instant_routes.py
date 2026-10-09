@@ -70,7 +70,7 @@ async def instant_ask(req: InstantRequest) -> InstantResponse:
 
     # 2. Check L1 Multi-Tier Cache (< 0.02ms)
     if not req.no_cache:
-        cached = perf_cache.get_query(req.prompt, mode="auto", caller_id=req.caller_id)
+        cached = perf_cache.get_query(req.prompt, mode="auto", caller_id=req.caller_id, namespace="instant.ask")
         if cached is not None:
             lat_ms = round((time.perf_counter() - start) * 1000.0, 3)
             ans = cached.get("answer", "") if isinstance(cached, dict) else str(cached)
@@ -113,6 +113,7 @@ async def instant_ask(req: InstantRequest) -> InstantResponse:
                 value={"answer": race_resp.content},
                 caller_id=req.caller_id,
                 ttl=180.0,
+                namespace="instant.ask",
             )
 
         return InstantResponse(

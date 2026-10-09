@@ -48,7 +48,7 @@ from app.security.prompt_isolation import (
     scrub_credentials_verified,
     wrap_untrusted_data,
 )
-from app.utils.errors import correlation_id, unavailable_detail
+from app.utils.errors import correlation_id, internal_error, unavailable_detail
 from app.utils.logger import logger
 from app.version import VERSION
 
@@ -303,16 +303,17 @@ async def ask_v1(
             # Every specialist went dark. This endpoint's contract carries ``status`` /
             # ``failure_state`` / ``confidence`` precisely so a client can be told the panel
             # produced nothing — in band, with no fabricated prose in ``answer``.
-            logger.warning("[V1_ASK] panel unavailable: %s", exc)
+            logger.warning("[V1_ASK] panel unavailable: %s", scrub_credentials(str(exc)))
             latency_ms = int((time.perf_counter() - start_time) * 1000)
+            # Agent ids and failure kinds only, computed once so the stored record and the
+            # response quote the same correlation id. The stored record is served back verbatim
+            # by ``GET /tasks/{id}``, so it must be safe at write time, not merely scrubbed later.
+            panel_failure = unavailable_detail(exc, failures=exc.failures, prefix="panel")
             await _record_task_outcome(
                 task_id, clean_prompt,
-                f"Panel unavailable: {scrub_credentials(str(exc))}", mode=request.mode,
+                f"Panel unavailable: {panel_failure}", mode=request.mode,
                 status_value="failed", confidence=0.0,
-                # Scrubbed at write time: this metadata is served back verbatim by
-                # ``GET /tasks/{id}`` (``orchestrator.get_task_status`` -> ``model_dump()``),
-                # so a raw exception stored here becomes a leak one request later.
-                metadata={"trace_id": trace_id, "error": scrub_credentials(str(exc))},
+                metadata={"trace_id": trace_id, "error": panel_failure},
             )
             return InferenceTaskResponse(
                 task_id=task_id,
@@ -338,7 +339,7 @@ async def ask_v1(
                 # provider's message, and a provider's 401 typically quotes the key it
                 # rejected; [FACT] the sibling DELIBERATION_FAILED path below was measured
                 # publishing "password=..." verbatim inside ``answer``.
-                failure_state=unavailable_detail(exc, failures=exc.failures, prefix="panel"),
+                failure_state=panel_failure,
                 status="DEGRADED",
                 mode_requested=mode_requested,
                 mode_used=None,
@@ -347,18 +348,15 @@ async def ask_v1(
         except Exception as exc:  # noqa: BLE001 - reported, never fabricated over
             reference = correlation_id("deliberation")
             logger.error(
-                "[V1_ASK] multi-agent deliberation failed [%s]: %s", reference, exc,
-                exc_info=True,
+                "[V1_ASK] multi-agent deliberation failed [%s]: %s", reference,
+                scrub_credentials(str(exc)), exc_info=True,
             )
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             await _record_task_outcome(
                 task_id, clean_prompt,
-                f"Deliberation failed: {scrub_credentials(str(exc))}", mode=request.mode,
+                f"Deliberation failed (correlation id {reference})", mode=request.mode,
                 status_value="failed", confidence=0.0,
-                # Scrubbed at write time: this metadata is served back verbatim by
-                # ``GET /tasks/{id}`` (``orchestrator.get_task_status`` -> ``model_dump()``),
-                # so a raw exception stored here becomes a leak one request later.
-                metadata={"trace_id": trace_id, "error": scrub_credentials(str(exc))},
+                metadata={"trace_id": trace_id, "error": f"deliberation failed (correlation id {reference})"},
             )
             return InferenceTaskResponse(
                 task_id=task_id, trace_id=trace_id,
@@ -561,12 +559,21 @@ async def ask_v1(
         )
 
     except Exception as exc:
-        logger.error(f"[V1_ASK] Execution failure: {exc}", exc_info=True)
+        # This is the catch-all for everything the fast path raises. It used to put
+        # ``f"...: {exc}"`` into ``answer`` and ``str(exc)`` into ``failure_state``, so a
+        # provider's message reached the caller verbatim (measured: a marked secret came back
+        # in both fields). The text is logged, scrubbed, under a correlation id instead.
+        detail, reference = internal_error(
+            logger, exc, doing_what="answer generation", prefix="ask",
+        )
         latency_ms = int((time.perf_counter() - start_time) * 1000)
         return InferenceTaskResponse(
             task_id=task_id,
             trace_id=trace_id,
-            answer=f"Deliberation encountered an issue: {exc}",
+            answer=(
+                "No answer was produced: the service hit an internal error. Quote correlation "
+                f"id {reference} when reporting this; the details are in the server log."
+            ),
             reasoning_summary="Provider invocation failed; fallback activated.",
             confidence=0.0,
             uncertainty=1.0,
@@ -580,7 +587,7 @@ async def ask_v1(
                 model="none",
                 latency_ms=latency_ms,
             ),
-            failure_state=str(exc),
+            failure_state=f"internal_error ({reference})",
             status="ERROR",
             mode_requested=request.mode,
             mode_used="fast",
@@ -790,7 +797,7 @@ async def debate_v1(
             mode="debate",
             status_value="failed",
             confidence=0.0,
-            metadata={"trace_id": trace_id, "error": scrub_credentials(str(exc))},
+            metadata={"trace_id": trace_id, "error": f"debate failed (correlation id {reference})"},
         )
         return InferenceTaskResponse(
             task_id=task_id,

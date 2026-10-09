@@ -1,5 +1,6 @@
 """Dedicated API routes and typed contracts for FRIDAY integration."""
 
+import hashlib
 import json
 import time
 import uuid
@@ -7,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.core.orchestrator import OrchestrationRequest, orchestrator
 from app.core.security import verify_friday_api_key
@@ -15,10 +16,35 @@ from app.performance_cache import perf_cache
 from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.gateway import model_gateway
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
-from app.utils.errors import internal_error
+from app.security.prompt_isolation import scrub_credentials
+from app.utils.errors import correlation_id, internal_error
 from app.utils.ids import generate_task_id
 from app.utils.logger import logger
 from app.version import VERSION
+
+FRIDAY_ASK_NS = "friday.ask"
+FRIDAY_DEBATE_NS = "friday.debate"
+
+
+def _context_scope(context: dict[str, Any] | None) -> dict[str, Any]:
+    """Cache scope for the caller's private context. The same question with a different context
+    is a different question; before this, answers were shared across contexts."""
+    if not context:
+        return {}
+    digest = hashlib.sha256(json.dumps(context, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return {"context": digest}
+
+
+def _as_friday_response(cached: Any) -> "FridayResponse | None":
+    """A cache hit is a FridayResponse dict or a miss. Any other shape is logged and treated as a
+    miss: a cache must never turn a valid request into a 500."""
+    if cached is None:
+        return None
+    try:
+        return FridayResponse.model_validate(cached)
+    except (ValidationError, TypeError, ValueError):
+        logger.warning("friday cache held a value of an unexpected shape; treating it as a miss")
+        return None
 
 friday_router = APIRouter(
     prefix="/v1/friday",
@@ -142,9 +168,11 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
 
     # 1. Check L1 In-Memory Response Cache (Sub-millisecond hit path)
     if not request.no_cache:
-        cached_data = perf_cache.get_query(request.question, mode="auto", caller_id=request.caller_id)
-        if cached_data is not None:
-            cached_resp = FridayResponse.model_validate(cached_data)
+        cached_data = perf_cache.get_query(
+            request.question, mode="auto", caller_id=request.caller_id,
+            extra=_context_scope(request.context_data), namespace=FRIDAY_ASK_NS)
+        cached_resp = _as_friday_response(cached_data)
+        if cached_resp is not None:
             cached_resp.latency_seconds = 0.0005
             cached_resp.provenance["cached"] = True
             cached_resp.provenance["cache_tier"] = "L1_IN_MEMORY"
@@ -222,6 +250,8 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
                     value=resp.model_dump(),
                     caller_id=request.caller_id,
                     ttl=600.0,
+                    extra=_context_scope(request.context_data),
+                    namespace=FRIDAY_ASK_NS,
                 )
             return resp
         except HTTPException:
@@ -273,7 +303,9 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
                 mode="auto",
                 value=resp.model_dump(),
                 caller_id=request.caller_id,
-                ttl=180.0
+                ttl=180.0,
+                extra=_context_scope(request.context_data),
+                namespace=FRIDAY_ASK_NS
             )
 
         return resp
@@ -294,9 +326,11 @@ async def friday_debate(request: FridayRequest) -> FridayResponse:
 
     # Check L1 In-Memory Response Cache
     if not request.no_cache:
-        cached_data = perf_cache.get_query(request.question, mode="debate", caller_id=request.caller_id)
-        if cached_data is not None:
-            cached_resp = FridayResponse.model_validate(cached_data)
+        cached_data = perf_cache.get_query(
+            request.question, mode="debate", caller_id=request.caller_id,
+            extra=_context_scope(request.context_data), namespace=FRIDAY_DEBATE_NS)
+        cached_resp = _as_friday_response(cached_data)
+        if cached_resp is not None:
             cached_resp.latency_seconds = 0.001
             cached_resp.provenance["cached"] = True
             cached_resp.provenance["cache_tier"] = "L1_IN_MEMORY"
@@ -343,7 +377,9 @@ async def friday_debate(request: FridayRequest) -> FridayResponse:
                 mode="debate",
                 value=resp.model_dump(),
                 caller_id=request.caller_id,
-                ttl=300.0
+                ttl=300.0,
+                extra=_context_scope(request.context_data),
+                namespace=FRIDAY_DEBATE_NS
             )
 
         return resp
@@ -366,12 +402,20 @@ async def friday_debate(request: FridayRequest) -> FridayResponse:
                 "All speculative race candidates failed",
             )
         )
-        logger.error("FRIDAY debate orchestration failed (%s): %s",
-                     "unavailable" if unavailable else "internal", message)
+        # The raw ``message`` names the attempted provider/model pairs and configuration
+        # variables. It is logged (scrubbed) under a correlation id and never returned: a 503
+        # that carries it tells the caller which credentials are missing.
+        reference = correlation_id("debate")
+        logger.error("FRIDAY debate orchestration failed [%s] (%s): %s",
+                     reference, "unavailable" if unavailable else "internal", scrub_credentials(message))
         if unavailable:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"FRIDAY debate degraded: no model provider produced output ({message}). No answer fabricated.",
+                detail=(
+                    "FRIDAY debate degraded: no model provider produced output. No answer was "
+                    f"fabricated. Quote correlation id {reference} when reporting this; the "
+                    "per-provider reasons are in the server log."
+                ),
             ) from exc
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -437,7 +481,9 @@ async def friday_stream(request: FridayRequest) -> StreamingResponse:
                     mode="auto",
                     value=cached_resp.model_dump(),
                     caller_id=request.caller_id,
-                    ttl=180.0
+                    ttl=180.0,
+                    extra=_context_scope(request.context_data),
+                    namespace=FRIDAY_ASK_NS
                 )
 
             yield f"data: {json.dumps({'done': True, 'task_id': task_id, 'total_chars': len(full_text)})}\n\n"

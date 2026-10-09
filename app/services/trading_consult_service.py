@@ -360,7 +360,7 @@ class TradingConsultService:
                 stage=stage_name,
                 latency_seconds=latency,
                 status="failed",
-                error=f"{exc}" + (f" | {routing_note}" if routing_note else ""),
+                error=f"{type(exc).__name__}" + (f" | {routing_note}" if routing_note else ""),
             ))
 
             # Record fallback message

@@ -107,6 +107,25 @@ def test_decisions_are_counted_so_idle_is_distinguishable_from_dead():
     assert status["last_decision"]["trading_consult"]["chosen"] in ("groq", "gemini")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_observed_provider_calls():
+    """The router's "observed health" evidence is the process-wide monitor, which every test
+    that drives a provider call writes into. This file's health tests assert on an *empty*
+    evidence base ("no observations must not move a weight"), so they must own that base:
+    clear it for the duration of each test and restore it afterwards. Measured before this
+    fixture: a successful call recorded by an unrelated test earlier in the suite made
+    ``adapt_weights_from_observed_health`` report ``ADAPTED_FROM_OBSERVED_HEALTH``."""
+    import copy
+
+    from app.monitoring import monitor
+
+    saved = copy.deepcopy(dict(monitor.provider_stats))
+    monitor.provider_stats.clear()
+    yield
+    monitor.provider_stats.clear()
+    monitor.provider_stats.update(saved)
+
+
 def test_health_adaptation_needs_measured_calls():
     """No observations must not move a weight, and must not be reported as an adaptation."""
     router = SelfOptimizingRouter()

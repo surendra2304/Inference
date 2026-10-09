@@ -104,3 +104,24 @@ def unavailable_detail(exc: BaseException, *, failures: list[str] | None = None,
         + "; ".join(trimmed[:12])
         + f" (correlation id {correlation_id(prefix)})"
     )
+
+
+def provider_failure_reason(logger: logging.Logger, provider: str, exc: BaseException) -> str:
+    """Short, publishable reason for one provider call that failed.
+
+    ``UnifiedExecutionResponse.error`` used to be ``f"{provider}: {type(exc).__name__}: {exc}"``.
+    That string is copied into batch items, task results and code-generation responses, so
+    whatever a provider library put in its exception message (a rejected key, a quoted
+    request, a configuration variable name) reached every client. [FACT] measured on
+    ``POST /v1/forge/batch-generate`` with no credentials configured: each item carried
+    ``groq: ProviderUnconfiguredError: Provider 'groq' has no configured credential; ...``.
+
+    The client keeps what it can act on, the provider and the failure kind, plus a correlation
+    id. The full scrubbed exception goes to the server log under the same id.
+    """
+    reference = correlation_id("provider")
+    logger.warning(
+        "provider %s call failed [%s]: %s: %s",
+        provider, reference, type(exc).__name__, scrub_credentials(f"{exc!s}"),
+    )
+    return f"{provider}: {type(exc).__name__} (correlation id {reference})"

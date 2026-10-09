@@ -92,10 +92,23 @@ class MultiLevelCache:
         return None
 
     @staticmethod
-    def hash_query(question: str, mode: str = "auto", caller_id: str = "default", extra: dict[str, Any] | None = None) -> str:
-        """Generates a deterministic SHA-256 fingerprint for a question payload."""
+    def hash_query(
+        question: str,
+        mode: str = "auto",
+        caller_id: str = "default",
+        extra: dict[str, Any] | None = None,
+        namespace: str = "",
+    ) -> str:
+        """Generates a deterministic SHA-256 fingerprint for a question payload.
+
+        ``namespace`` names the endpoint that produced the value and is part of every key, so one
+        producer's value is never read by another. Before this, the global and normalized keys
+        ignored mode and caller: friday read tuples written by the provider layer as if they were
+        FridayResponses (a 500 on a cache hit), and a caller could be served another caller's answer.
+        """
         normalized_q = " ".join(question.strip().lower().split())
         payload = {
+            "ns": namespace,
             "q": normalized_q,
             "m": mode.lower().strip(),
             "c": caller_id.strip(),
@@ -129,23 +142,34 @@ class MultiLevelCache:
 
         self._memory_cache[key] = (expires_at, value)
 
-    def get_query(self, question: str, mode: str = "auto", caller_id: str = "default", extra: dict[str, Any] | None = None) -> Any | None:
-        """Fast multi-tier lookup: exact key -> global key -> normalized key."""
+    def get_query(
+        self,
+        question: str,
+        mode: str = "auto",
+        caller_id: str = "default",
+        extra: dict[str, Any] | None = None,
+        *,
+        namespace: str,
+    ) -> Any | None:
+        """Multi-tier lookup, every tier inside ``namespace``: exact (mode, caller, extra), then the
+        same question for any mode and caller with the same ``extra``, then the punctuation-free
+        question. A value written under another namespace is never returned."""
+        _require_namespace(namespace)
         # 1. Exact key (specific mode and caller)
-        k = self.hash_query(question, mode=mode, caller_id=caller_id, extra=extra)
+        k = self.hash_query(question, mode=mode, caller_id=caller_id, extra=extra, namespace=namespace)
         res = self.get(k)
         if res is not None:
             return res
 
-        # 2. Global query key (cross-caller and cross-mode)
-        glob_k = self.hash_query(question, mode="*", caller_id="*")
+        # 2. Shared key within the namespace (any mode and caller, same extra)
+        glob_k = self.hash_query(question, mode="*", caller_id="*", extra=extra, namespace=namespace)
         glob_res = self.get(glob_k)
         if glob_res is not None:
             return glob_res
 
-        # 3. Normalized query key (punctuation & whitespace invariant)
+        # 3. Normalized shared key (punctuation & whitespace invariant), same namespace
         cq = self.clean_query(question)
-        norm_k = self.hash_query(cq, mode="*", caller_id="*")
+        norm_k = self.hash_query(cq, mode="*", caller_id="*", extra=extra, namespace=namespace)
         norm_res = self.get(norm_k)
         if norm_res is not None:
             return norm_res
@@ -159,21 +183,25 @@ class MultiLevelCache:
         value: Any,
         caller_id: str = "default",
         ttl: float | None = None,
-        extra: dict[str, Any] | None = None
+        extra: dict[str, Any] | None = None,
+        *,
+        namespace: str,
     ) -> None:
-        """Stores an orchestrated query result across exact, global, and normalized keys."""
+        """Stores a result under the exact key and the two shared keys, all in ``namespace``."""
+        _require_namespace(namespace)
         # 1. Exact key
-        k = self.hash_query(question, mode=mode, caller_id=caller_id, extra=extra)
+        k = self.hash_query(question, mode=mode, caller_id=caller_id, extra=extra, namespace=namespace)
         self.set(k, value, ttl=ttl)
 
-        # 2. Global wildcard key
-        glob_k = self.hash_query(question, mode="*", caller_id="*")
+        # 2. Shared key within the namespace
+        glob_k = self.hash_query(question, mode="*", caller_id="*", extra=extra, namespace=namespace)
         self.set(glob_k, value, ttl=ttl)
 
-        # 3. Normalized punctuation-stripped key
+        # 3. Normalized punctuation-stripped shared key
         cq = self.clean_query(question)
-        norm_k = self.hash_query(cq, mode="*", caller_id="*")
+        norm_k = self.hash_query(cq, mode="*", caller_id="*", extra=extra, namespace=namespace)
         self.set(norm_k, value, ttl=ttl)
+
 
     def get_stats(self) -> dict[str, Any]:
         """Returns cache telemetry."""
@@ -197,6 +225,22 @@ class MultiLevelCache:
         self._memory_cache.clear()
         self._hits = 0
         self._misses = 0
+
+
+def _require_namespace(namespace: str) -> None:
+    if not namespace or not namespace.strip():
+        raise ValueError("perf_cache keys must be namespaced by the producing endpoint")
+
+
+def as_answer_pair(value: Any) -> tuple[str, dict[str, Any]] | None:
+    """A cached answer must be ``(content: str, meta: dict)``. Anything else is a miss.
+
+    Readers used to unpack whatever was stored. A value from another producer (a dict, or a
+    FridayResponse dump) raised inside the request path; now a wrong shape is a miss.
+    """
+    if isinstance(value, (tuple, list)) and len(value) == 2 and isinstance(value[0], str) and isinstance(value[1], dict):
+        return value[0], value[1]
+    return None
 
 
 class AsyncWorkerPool:
