@@ -1377,7 +1377,7 @@ def test_fast_lane_evidence_reports_the_provider_that_served_it():
     assert "0.012" in joined, "the measured latency is the one fact worth reporting"
 
 
-def test_friday_debate_reports_a_provider_outage_as_unavailable():
+def test_friday_debate_reports_a_provider_outage_as_unavailable(auth):
     """An outage must be 503, matching the sibling endpoint, not 500.
 
     ``/v1/friday/ask`` answers "no model provider produced output" with 503; the debate
@@ -1392,6 +1392,7 @@ def test_friday_debate_reports_a_provider_outage_as_unavailable():
         response = client.post(
             "/v1/friday/debate",
             json={"question": "Is a provider outage an internal error?", "caller_id": "probe"},
+            headers=auth,
         )
     assert response.status_code != 500, (
         f"an unavailable provider pool is not an internal fault: {response.text[:200]}"

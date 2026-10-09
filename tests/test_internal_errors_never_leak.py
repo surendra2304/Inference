@@ -203,11 +203,14 @@ async def test_trading_consult_does_not_publish_an_internal_failure(client, monk
 # -- the scrubber itself: a provider echoes the key it rejected --------------------------
 
 
+# Synthetic Google-key shape, assembled at runtime so the source holds no key-like literal.
+_FAKE_GOOGLE_KEY = "AIza" + "S" * 35
+
 @pytest.mark.parametrize(
     "leaked",
     [
         "Invalid API key: sk-abcdefghijklmnop12345",
-        "401 from gemini: AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+        f"401 from gemini: {_FAKE_GOOGLE_KEY}",
         "groq rejected gsk_abcdefghijklmnopqrstuvwxyz01",
         "nvidia said nvapi-AbCdEfGhIjKlMnOpQrStUvWx",
         "openrouter: sk-or-v1-abcdefghijklmnopqrstuvwx",
@@ -219,7 +222,7 @@ def test_provider_key_literals_are_redacted(leaked):
     from app.security.prompt_isolation import scrub_credentials
 
     scrubbed = scrub_credentials(leaked)
-    for token in ("sk-abcdefghijklmnop12345", "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+    for token in ("sk-abcdefghijklmnop12345", _FAKE_GOOGLE_KEY,
                   "gsk_abcdefghijklmnopqrstuvwxyz01", "nvapi-AbCdEfGhIjKlMnOpQrStUvWx",
                   "sk-or-v1-abcdefghijklmnopqrstuvwx", "abcdefghijklmnopqrstuv"):
         assert token not in scrubbed, f"{token!r} survived scrubbing of {leaked!r}"
