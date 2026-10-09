@@ -1,36 +1,37 @@
-"""Meta-Intelligence Layer: Self-Assessment, Agent Contribution Scoring, and Failure Pattern Analysis."""
+"""Meta-Intelligence Layer: Self-Assessment, Agent Contribution Scoring, and Failure Pattern Analysis.
+
+Previously every field was a constant (quality 94.8, high-confidence accuracy 86.4%, agent
+contribution scores 96.2/92.5/90.1/81.4, a 0.7x weekend multiplier "applied"). No calibration
+or contribution measurement exists in this process, so each field is now reported as not
+measured, with the reason, rather than as a plausible number.
+"""
 
 from typing import Any
 
+NOT_MEASURED_REASON = (
+    "No calibration or agent-contribution measurement is recorded in this process; the previous "
+    "constants were not computed from any run."
+)
+
 
 class MetaIntelligenceEngine:
-    """Evaluates the platform's internal intelligence quality, calibration accuracy, and failure modes."""
+    """Reports platform self-assessment only where a measurement exists (currently none)."""
 
     def generate_meta_intelligence_report(self) -> dict[str, Any]:
-        """Provides a self-reflective meta-assessment of all Inference intelligence components."""
+        """Self-assessment of the intelligence components, with unmeasured fields left as None."""
         return {
-            "meta_intelligence_quality_score": 94.8,  # 0 to 100
+            "status": "not_measured",
+            "reason": NOT_MEASURED_REASON,
+            "meta_intelligence_quality_score": None,
             "self_calibration_analysis": {
-                "high_confidence_accuracy_pct": 86.4,   # when confidence >= 0.80
-                "moderate_confidence_accuracy_pct": 72.1, # when confidence 0.65 - 0.79
-                "calibration_reliability": "HIGHLY_CALIBRATED"
+                "status": "not_measured",
+                "high_confidence_accuracy_pct": None,
+                "moderate_confidence_accuracy_pct": None,
+                "calibration_reliability": None,
             },
-            "agent_performance_ranking": [
-                {"agent": "Critic", "contribution_score": 96.2, "value_add": "Prevents overfitted allocations on live capital"},
-                {"agent": "Trading Analyst", "contribution_score": 92.5, "value_add": "Consistent risk-adjusted sizing bounds"},
-                {"agent": "Quantitative Modeler", "contribution_score": 90.1, "value_add": "Multi-horizon sequence forecasting"},
-                {"agent": "Sentiment Analyst", "contribution_score": 81.4, "value_add": "Early event detection (attenuated in chop)"}
-            ],
-            "identified_failure_patterns": [
-                {
-                    "pattern": "Low-liquidity weekend false breakouts",
-                    "countermeasure": "Applied automatic sizing attenuation multiplier of 0.7x during weekend trading windows."
-                }
-            ],
-            "meta_recommendations": [
-                "Maintain high weight on Critic agent veto authority in live capital mode.",
-                "Reinforce trend-following strategies during expanding macro regime."
-            ]
+            "agent_performance_ranking": [],
+            "identified_failure_patterns": [],
+            "meta_recommendations": [],
         }
 
 

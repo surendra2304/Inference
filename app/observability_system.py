@@ -32,10 +32,13 @@ class ObservabilityCollector:
             "error_rate_pct": round(err_rate, 2),
             "service_sla_status": "PASSING" if err_rate < 1.0 else "WARNING",
             "active_alerts_count": len(self.active_alerts),
+            # Business metrics were fixed constants (98.4, 76.5, 0.84) with no measurement behind
+            # them. They are reported as not measured until a measurement feeds them.
             "business_metrics": {
-                "recommendation_quality_score": 98.4,
-                "prediction_direction_accuracy_pct": 76.5,
-                "average_debate_consensus_confidence": 0.84
+                "status": "not_measured",
+                "recommendation_quality_score": None,
+                "prediction_direction_accuracy_pct": None,
+                "average_debate_consensus_confidence": None,
             }
         }
 

@@ -28,7 +28,9 @@ class EcosystemIntelligenceHub:
         return {
             "timestamp": time.time(),
             "overall_ecosystem_intelligence_score": meta_data["meta_intelligence_quality_score"],
-            "ecosystem_status": "OPTIMAL_AUTONOMOUS_OPERATION",
+            # "OPTIMAL_AUTONOMOUS_OPERATION" was a constant; with no measured quality score the
+            # honest status is that it is not measured.
+            "ecosystem_status": "NOT_MEASURED" if meta_data["meta_intelligence_quality_score"] is None else "MEASURED",
             "proactive_early_warnings": proactive_early_warnings or ["No critical ecosystem anomalies detected."],
             "market_regime": regime_data,
             "continuous_learning_summary": learning_data,

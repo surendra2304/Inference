@@ -1,4 +1,10 @@
-"""Long-Term Episodic, Semantic, and Procedural Memory Architecture."""
+"""Long-Term Episodic, Semantic, and Procedural Memory Architecture.
+
+The previous version was seeded with an invented episode (``EP-2026-08-20``, effectiveness 0.92),
+a semantic claim that "84% of historical episodes" showed a whipsaw signature, and a procedural
+rule with a "historical_success_rate" of 0.88. No episode was recorded and no history was
+measured, so the stores start empty and hold only what ``record_episodic_event`` is given.
+"""
 
 import time
 from typing import Any
@@ -7,30 +13,12 @@ from app.utils.logger import logger
 
 
 class LongTermMemoryArchitecture:
-    """Manages episodic (past market crises), semantic (learned patterns), and procedural (advisory lessons) memories."""
+    """Episodic (past consultations), semantic (learned patterns), procedural (advisory lessons) memory."""
 
     def __init__(self) -> None:
-        self.episodic_memories: list[dict[str, Any]] = [
-            {
-                "event_id": "EP-2026-08-20",
-                "scenario": "Volatility Squeeze Breakout",
-                "market_conditions": {"atr_pct": 0.035, "regime": "EXPANDING_VOLATILITY"},
-                "ai_advisory_action": "REDUCE_POSITION_SIZING_AND_TIGHTEN_STOPS",
-                "outcome_pnl_delta": "+12.4% drawdown reduction",
-                "effectiveness_score": 0.92
-            }
-        ]
-        self.semantic_memories: dict[str, Any] = {
-            "regime_correlations": "During rapid BTC dominance expansion (>+2% in 48h), altcoin momentum strategies suffer elevated false breakout rates.",
-            "whipsaw_signatures": "Bollinger Bandwidth compression below 2.0% preceded explosive 5%+ volatility expansions in 84% of historical episodes."
-        }
-        self.procedural_memories: list[dict[str, Any]] = [
-            {
-                "procedure": "Live Capital Consultation Protocol",
-                "rule": "Always prefer NO_CHANGE over minor parameter adjustments when confidence is below 0.75.",
-                "historical_success_rate": 0.88
-            }
-        ]
+        self.episodic_memories: list[dict[str, Any]] = []
+        self.semantic_memories: dict[str, Any] = {}
+        self.procedural_memories: list[dict[str, Any]] = []
 
     def record_episodic_event(
         self,
@@ -38,26 +26,30 @@ class LongTermMemoryArchitecture:
         conditions: dict[str, Any],
         action: str,
         outcome: str,
-        effectiveness: float
+        effectiveness: float | None,
     ) -> None:
-        """Stores an episodic consultation memory."""
+        """Stores an episodic consultation memory. ``effectiveness`` is None unless measured."""
         mem = {
             "event_id": f"EP-{int(time.time())}",
             "scenario": scenario,
             "market_conditions": conditions,
             "ai_advisory_action": action,
             "outcome_pnl_delta": outcome,
-            "effectiveness_score": effectiveness
+            "effectiveness_score": effectiveness,
         }
         self.episodic_memories.append(mem)
         logger.info("Recorded new episodic memory: %s", scenario)
 
     def retrieve_relevant_learnings(self, current_regime: str) -> list[dict[str, Any]]:
-        """Surfaces matching past consultation learnings."""
+        """Past consultations matching the current regime; nothing is returned when none match.
+
+        The previous fallback returned the first three episodes whatever their regime, which
+        presented unrelated history as relevant learning.
+        """
         return [
             m for m in self.episodic_memories
             if m["market_conditions"].get("regime") == current_regime or current_regime in m["scenario"]
-        ] or self.episodic_memories[:3]
+        ]
 
 
 long_term_memory = LongTermMemoryArchitecture()

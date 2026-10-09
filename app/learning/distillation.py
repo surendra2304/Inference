@@ -12,7 +12,8 @@ class DistilledKnowledgeRule(BaseModel):
     task_type: str
     condition_trigger: str
     prescribed_strategy: str
-    empirical_confidence: float
+    #: None when no measurement was supplied.
+    empirical_confidence: float | None
     created_at: float = Field(default_factory=time.time)
 
 
@@ -20,34 +21,12 @@ class KnowledgeDistillationEngine:
     """Extracts empirical rules from multi-consumer outcomes and injects them into future debates."""
 
     def __init__(self) -> None:
-        self.rules: list[DistilledKnowledgeRule] = [
-            DistilledKnowledgeRule(
-                rule_id="RULE-001",
-                consumer="nexus",
-                task_type="lead_qualification",
-                condition_trigger="intent_score > 0.70 AND company_size > 100",
-                prescribed_strategy="Prioritize behavioral telemetry over firmographic data; recommend immediate SDR routing; confidence typically 0.85+.",
-                empirical_confidence=0.92
-            ),
-            DistilledKnowledgeRule(
-                rule_id="RULE-002",
-                consumer="forge",
-                task_type="code_generation",
-                condition_trigger="file_type == 'python' AND complexity == 'high'",
-                prescribed_strategy="Apply AST self-check with modular typing; route to Gemini for syntax integrity.",
-                empirical_confidence=0.95
-            ),
-            DistilledKnowledgeRule(
-                rule_id="RULE-003",
-                consumer="trading_bot",
-                task_type="trading_consult",
-                condition_trigger="market_regime == 'high_volatility'",
-                prescribed_strategy="Reduce max position leverage by 50% and widen stop boundaries.",
-                empirical_confidence=0.89
-            )
-        ]
+        # Previously seeded with RULE-001..003, each carrying an "empirical_confidence" of
+        # 0.89-0.95 that no outcome data produced. Rules now enter only through distill_new_rule,
+        # and each carries the confidence its caller measured (None when unmeasured).
+        self.rules: list[DistilledKnowledgeRule] = []
 
-    def distill_new_rule(self, consumer: str, task_type: str, condition: str, strategy: str, confidence: float) -> DistilledKnowledgeRule:
+    def distill_new_rule(self, consumer: str, task_type: str, condition: str, strategy: str, confidence: float | None) -> DistilledKnowledgeRule:
         rule = DistilledKnowledgeRule(
             rule_id=f"RULE-{len(self.rules)+1:03d}",
             consumer=consumer,

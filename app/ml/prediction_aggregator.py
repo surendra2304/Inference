@@ -33,17 +33,27 @@ class PredictionAggregationEngine:
 
         # Signal components
         lstm_signal = 1.0 if dl_pred["horizons"]["24h"]["predicted_direction"] == "BULLISH" else -1.0
-        news_signal = 1.0 if alt_data["news_intelligence"]["sentiment_score"] > 0.2 else (-1.0 if alt_data["news_intelligence"]["sentiment_score"] < -0.2 else 0.0)
-        onchain_signal = 1.0 if alt_data["onchain_intelligence"]["exchange_netflow_24h_usd"] < 0 else -1.0
 
-        # Weighted composite score: 40% DL, 30% On-Chain, 30% News/Social
+        # The news and on-chain legs come from the alternative-data table, which is a static
+        # fixture (evidence_class "synthetic_fixture"). A fixture cannot move a directional call,
+        # so those legs are excluded (weight 0) while they are synthetic. Before this they carried
+        # 60% of the composite, so the "direction" was set by invented sentiment and netflow.
+        alt_is_synthetic = alt_data.get("evidence_class") == "synthetic_fixture"
+        if alt_is_synthetic:
+            news_signal = 0.0
+            onchain_signal = 0.0
+        else:
+            news_signal = 1.0 if alt_data["news_intelligence"]["sentiment_score"] > 0.2 else (-1.0 if alt_data["news_intelligence"]["sentiment_score"] < -0.2 else 0.0)
+            onchain_signal = 1.0 if alt_data["onchain_intelligence"]["exchange_netflow_24h_usd"] < 0 else -1.0
+
+        # Weighted composite score: 40% DL, 30% On-Chain, 30% News/Social (measured legs only)
         composite_score = (0.40 * lstm_signal) + (0.30 * onchain_signal) + (0.30 * news_signal)
 
         direction = "BULLISH" if composite_score >= 0.25 else ("BEARISH" if composite_score <= -0.25 else "NEUTRAL")
-        # No floor. The previous expression was ``max(0.60, 0.70 + |composite| * 0.25)``, so
-        # even three contradicting signals (composite 0.0) were reported at 0.60 confidence —
-        # the weakest possible evidence carried the strongest-looking number.
-        raw_confidence = round(min(0.95, 0.5 + abs(composite_score) * 0.45), 2)
+        # No confidence is reported from the composite. The former mapping
+        # ``min(0.95, 0.5 + |composite| * 0.45)`` was an invented formula; nothing calibrates it
+        # against realised outcomes, so it is withheld in every case.
+        raw_confidence = None
 
         # Which legs of the composite came from a fixture rather than an observation. The
         # alternative-data engine is a static table (app/data/alternative_data.py), so its
@@ -60,17 +70,16 @@ class PredictionAggregationEngine:
             synthetic_legs.insert(0, "price_series (no current_price supplied)")
             synthetic_legs.insert(1, "return_series (no recent_returns supplied)")
 
+        confidence: float | None = raw_confidence
         if inputs_simulated:
-            confidence: float | None = None
             confidence_basis = (
                 "withheld: the price and return inputs were simulated by the caller "
                 "(inputs_simulated=true), so no measurement of this signal's reliability exists"
             )
         else:
-            confidence = raw_confidence
             confidence_basis = (
-                f"derived from the composite of three signals (|score|={abs(composite_score):.2f}); "
-                "not calibrated against realised outcomes"
+                "withheld: no calibration against realised outcomes exists for this composite "
+                f"(direction score {composite_score:+.2f}; measured legs only)"
             )
 
         key_drivers = []
