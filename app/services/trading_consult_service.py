@@ -34,6 +34,7 @@ from app.schemas.trading_consult import (
     TradingConsultRequest,
 )
 from app.services.experiment_service import experiment_service
+from app.utils.confidence import DETERMINISTIC_RULE_CONFIDENCE
 from app.utils.ids import (
     generate_message_id,
     generate_run_id,
@@ -536,7 +537,9 @@ class TradingConsultService:
                 decision_id=decision_id,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status="INSUFFICIENT_DATA",
-                confidence=0.95,
+                # The N < 20 rule is a deterministic count on measured telemetry, so its finding is
+                # certain. It is not a model judgement. Before this, the literal was 0.95.
+                confidence=DETERMINISTIC_RULE_CONFIDENCE,
                 parameter_changes=[],
                 risk_assessment=f"Sample size of {t.total_trades} trades is below the statistical significance threshold of 20 closed trades. Recommend continued paper/testnet execution to gather baseline distribution data.",
                 regime_analysis=f"Market regime observation active. Current win rate is {t.win_rate * 100:.1f}%, but confidence is uncalibrated due to low sample volume.",
@@ -574,7 +577,9 @@ class TradingConsultService:
                 decision_id=decision_id,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status="NO_CHANGE",
-                confidence=0.90,
+                # A heuristic 'healthy' judgement: reported at the panel's participation-based value,
+                # not a fixed 0.90.
+                confidence=panel_confidence,
                 parameter_changes=[],
                 risk_assessment=f"Healthy performance profile: Win rate {t.win_rate * 100:.1f}%, Profit Factor {t.profit_factor:.2f}, Max Drawdown {t.max_drawdown_pct:.2f}%. Bot is operating stably within safe statistical parameters.",
                 regime_analysis="Strategy is well-aligned with the prevailing market regime. Expectancy remains positive.",

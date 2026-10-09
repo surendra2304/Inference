@@ -12,17 +12,39 @@ class RegimeRobustnessEngine:
         regime_metrics: dict[str, dict[str, float]]
     ) -> dict[str, Any]:
         """Calculates multi-regime consistency, worst-regime performance, and whipsaw transition score."""
-        # Default representative metrics if missing
+        # No measured regime data means no score. Before this, four hard-coded regime results
+        # (bull win rate 0.68 ... crisis PF 1.15) were substituted when the caller sent none, so
+        # every request without data received the same "robustness" verdict.
         if not regime_metrics:
-            regime_metrics = {
-                "bull_trending": {"win_rate": 0.68, "profit_factor": 2.1, "max_drawdown_pct": 3.5},
-                "bear_trending": {"win_rate": 0.54, "profit_factor": 1.4, "max_drawdown_pct": 5.8},
-                "sideways_chop": {"win_rate": 0.42, "profit_factor": 0.95, "max_drawdown_pct": 7.2},
-                "high_volatility_crisis": {"win_rate": 0.48, "profit_factor": 1.15, "max_drawdown_pct": 8.5}
+            return {
+                "strategy_name": strategy_name,
+                "status": "not_measured",
+                "robustness_score": None,
+                "worst_regime_profit_factor": None,
+                "worst_regime_max_drawdown_pct": None,
+                "regime_dependency_classification": None,
+                "regime_breakdown": {},
+                "whipsaw_transition_survival": None,
+                "advisory_notes": "No per-regime metrics were supplied; no robustness score is reported.",
             }
 
-        pfs = [m.get("profit_factor", 1.0) for m in regime_metrics.values()]
-        dds = [m.get("max_drawdown_pct", 5.0) for m in regime_metrics.values()]
+        # A regime entry without its own profit factor or drawdown is not measured either.
+        missing = sorted(
+            name for name, m in regime_metrics.items()
+            if "profit_factor" not in m or "max_drawdown_pct" not in m
+        )
+        if missing:
+            return {
+                "strategy_name": strategy_name,
+                "status": "insufficient_inputs",
+                "robustness_score": None,
+                "missing_fields_for_regimes": missing,
+                "regime_breakdown": regime_metrics,
+                "advisory_notes": "Each regime needs profit_factor and max_drawdown_pct; no score is reported.",
+            }
+
+        pfs = [m["profit_factor"] for m in regime_metrics.values()]
+        dds = [m["max_drawdown_pct"] for m in regime_metrics.values()]
 
         worst_pf = min(pfs)
         worst_dd = max(dds)
@@ -37,6 +59,7 @@ class RegimeRobustnessEngine:
 
         return {
             "strategy_name": strategy_name,
+            "status": "measured",
             "robustness_score": robustness_score,
             "worst_regime_profit_factor": worst_pf,
             "worst_regime_max_drawdown_pct": worst_dd,

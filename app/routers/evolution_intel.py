@@ -15,14 +15,12 @@ evolution_router = APIRouter(prefix="/v1/evolution", tags=["Strategy Evolution I
 
 class StrategyEvaluationRequest(BaseModel):
     strategy_name: str = Field(default="Evolved_ADX_EMA_v4", description="Name of candidate strategy")
+    # No default metrics. Before this, a request without backtest_metrics was evaluated on
+    # invented numbers (Sharpe 1.95, PF 1.72, drawdown 5.8%, 140 trades) and got a verdict.
+    # An empty or incomplete summary now returns NOT_EVALUATED (strategy_evaluation.py).
     backtest_metrics: dict[str, Any] = Field(
-        default={
-            "sharpe_ratio": 1.95,
-            "profit_factor": 1.72,
-            "max_drawdown_pct": 5.8,
-            "total_trades": 140
-        },
-        description="Backtest performance summary"
+        default_factory=dict,
+        description="Backtest summary: sharpe_ratio, profit_factor, max_drawdown_pct, total_trades"
     )
     regime_metrics: dict[str, Any] | None = Field(
         default=None,
@@ -32,10 +30,12 @@ class StrategyEvaluationRequest(BaseModel):
 
 class OverfittingCheckRequest(BaseModel):
     strategy_name: str = Field(default="Evolved_ADX_EMA_v4")
-    backtest_sharpe: float = Field(default=2.1)
-    backtest_profit_factor: float = Field(default=1.85)
-    total_trades: int = Field(default=120)
-    num_trials_tested: int = Field(default=50)
+    # Required. These were defaults (2.1, 1.85, 120, 50), so an omitted field produced a
+    # PBO / DSR verdict on numbers the caller never supplied.
+    backtest_sharpe: float = Field(...)
+    backtest_profit_factor: float = Field(...)
+    total_trades: int = Field(...)
+    num_trials_tested: int = Field(..., description="How many strategy variants were tried (multiple-testing count)")
 
 
 class RegimeTestRequest(BaseModel):

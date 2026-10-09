@@ -23,10 +23,20 @@ class StrategyEvaluationDebateEngine:
         regime_metrics: dict[str, Any]
     ) -> dict[str, Any]:
         """Conducts structured 5-panel evaluation debate on strategy candidate."""
-        sharpe = backtest_metrics.get("sharpe_ratio", 1.8)
-        pf = backtest_metrics.get("profit_factor", 1.6)
-        max_dd = backtest_metrics.get("max_drawdown_pct", 6.5)
-        trades = backtest_metrics.get("total_trades", 120)
+        # Without the four backtest fields there is nothing to evaluate. Before this, absent
+        # fields were silently replaced (Sharpe 1.8, PF 1.6, drawdown 6.5%, 120 trades).
+        required = ("sharpe_ratio", "profit_factor", "max_drawdown_pct", "total_trades")
+        missing = [k for k in required if backtest_metrics.get(k) is None]
+        if missing:
+            return self._not_evaluated(
+                strategy_name,
+                reason="Backtest summary is missing required fields; no verdict is issued.",
+                missing_backtest_fields=missing,
+            )
+        sharpe = float(backtest_metrics["sharpe_ratio"])
+        pf = float(backtest_metrics["profit_factor"])
+        max_dd = float(backtest_metrics["max_drawdown_pct"])
+        trades = int(backtest_metrics["total_trades"])
 
         # Run analytics
         overfit_res = overfitting_engine.evaluate_strategy_overfitting(
@@ -45,6 +55,13 @@ class StrategyEvaluationDebateEngine:
         risk_score = round(max(10.0, 100.0 - (max_dd * 7.0)), 1)
         overfit_score = round(max(10.0, (1.0 - overfit_res["probability_of_backtest_overfitting_pbo"]) * 100.0), 1)
         regime_score = regime_res["robustness_score"]
+        if regime_score is None:
+            return self._not_evaluated(
+                strategy_name,
+                reason="No per-regime metrics were supplied; the regime evaluator has no score.",
+                overfitting_analysis=overfit_res,
+                regime_robustness=regime_res,
+            )
         contrarian_score = round(max(15.0, (quant_score + risk_score) / 2.0 - 25.0), 1)
 
         evaluator_evaluations = [
@@ -97,12 +114,27 @@ class StrategyEvaluationDebateEngine:
 
         return {
             "strategy_name": strategy_name,
+            "status": "evaluated",
             "composite_evaluation_score": composite_score,
             "final_verdict": final_verdict,
             "approval_status": approval_status,
             "evaluator_panel": evaluator_evaluations,
             "overfitting_analysis": overfit_res,
             "regime_robustness": regime_res
+        }
+
+    @staticmethod
+    def _not_evaluated(strategy_name: str, reason: str, **extra: Any) -> dict[str, Any]:
+        """A candidate with unmeasured inputs gets no score and no verdict, only the reason."""
+        return {
+            "strategy_name": strategy_name,
+            "status": "not_evaluated",
+            "composite_evaluation_score": None,
+            "final_verdict": "NOT_EVALUATED",
+            "approval_status": "NOT_EVALUATED",
+            "evaluator_panel": [],
+            "reason": reason,
+            **extra,
         }
 
 

@@ -20,7 +20,9 @@ class SentimentAnalysisEngine:
     def analyze_news(self, news_items: list[dict[str, Any]]) -> dict[str, Any]:
         """Calculates time-decayed, credibility-weighted sentiment scores across news feeds."""
         if not news_items:
-            return {"overall_score": 0.0, "classification": "NEUTRAL", "item_count": 0}
+            # No items means no measurement. A 0.0 "NEUTRAL" here was a fabricated reading that the
+            # trajectory model then used as a sentiment input.
+            return {"overall_score": None, "classification": "NO_DATA", "item_count": 0}
 
         now = time.time()
         weighted_scores = []

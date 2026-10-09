@@ -129,7 +129,8 @@ class Adjudicator:
         complexity_str: str = "simple"
     ) -> Tuple[float, dict[str, Any]]:
         """
-        Calibrates true system confidence from empirical factors:
+        Heuristic system confidence from observed factors. It is NOT calibrated against outcomes;
+        the constants below are judgement weights, not fitted values:
         - Agreement rate
         - Contradiction penalty
         - Evidence grounding boost

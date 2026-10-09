@@ -10,6 +10,7 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
+from app.utils.confidence import UNVERIFIED_MODEL_CONFIDENCE
 from app.utils.errors import internal_error
 from app.utils.logger import logger
 
@@ -163,10 +164,12 @@ async def astra_reason(request: AstraReasonRequest) -> AstraReasonResponse:
                 perspective="Central Reasoning Council (ASTRA) — degraded",
             )
 
+        # The synthesis is model text that nothing verified. Before this, every successful call
+        # reported a fixed confidence of 0.95. See app/utils/confidence.py.
         return AstraReasonResponse(
             task_id=f"astra_{uuid.uuid4().hex[:8]}",
             synthesis=resp.content,
-            confidence=0.95,
+            confidence=UNVERIFIED_MODEL_CONFIDENCE,
             model_used=resp.model_used,
             provider_used=resp.provider_used,
             latency_ms=lat,

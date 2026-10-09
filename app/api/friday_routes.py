@@ -17,6 +17,7 @@ from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.gateway import model_gateway
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
 from app.security.prompt_isolation import scrub_credentials
+from app.utils.confidence import CURATED_ENTRY_CONFIDENCE, UNVERIFIED_MODEL_CONFIDENCE
 from app.utils.errors import correlation_id, internal_error
 from app.utils.ids import generate_task_id
 from app.utils.logger import logger
@@ -149,7 +150,7 @@ async def friday_ask(request: FridayRequest) -> FridayResponse:
                 run_id="instant_grounding",
                 answer=grounded_ans,
                 mode_used="instant_grounding",
-                confidence=0.99,
+                confidence=CURATED_ENTRY_CONFIDENCE,
                 unresolved_disagreements=[],
                 key_evidence=["Ecosystem core topology verification"],
                 agents_used=["system_architect"],
@@ -467,7 +468,7 @@ async def friday_stream(request: FridayRequest) -> StreamingResponse:
                     run_id=f"stream_{task_id}",
                     answer=full_text,
                     mode_used="stream",
-                    confidence=0.95,
+                    confidence=UNVERIFIED_MODEL_CONFIDENCE,
                     unresolved_disagreements=[],
                     key_evidence=[],
                     agents_used=[specialist_id],

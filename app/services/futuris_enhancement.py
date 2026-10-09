@@ -10,6 +10,7 @@ Features:
   - Injects relevant Futuris statistical forecasts into Trading Bot, Sentinel, Nexus, and FORGE recommendations.
 """
 
+import json
 import time
 from typing import Any
 
@@ -24,7 +25,7 @@ class StatisticalForecastInput(BaseModel):
     metric_name: str | None = "target_metric"
     point_estimate: float
     confidence_interval: list[float] = Field(..., min_length=2, max_length=2, description="[lower_bound, upper_bound]")
-    probability: float | None = Field(default=0.80, ge=0.0, le=1.0)
+    probability: float | None = Field(default=None, ge=0.0, le=1.0)
     model_used: str = Field(description="e.g. ARIMA, Prophet, GARCH, MonteCarlo")
 
 
@@ -46,9 +47,9 @@ class EnhancedAssessmentPayload(BaseModel):
 class FuturisEnhanceResponse(BaseModel):
     request_id: str
     enhanced_assessment: EnhancedAssessmentPayload
-    confidence_adjustment: float = Field(
-        ...,
-        description="Factor to adjust statistical CI (+0.10 widens interval due to high qualitative risk, -0.05 narrows)"
+    confidence_adjustment: float | None = Field(
+        default=None,
+        description="Not measured by this service; always null. Kept for response-shape compatibility.",
     )
     dissent: list[str] = Field(default_factory=list)
     grounded_forecast_summary: str
@@ -59,29 +60,9 @@ class StatisticalGroundingEngine:
     """Provides statistical grounding context to other consumers (Trading, Sentinel, FORGE, Nexus)."""
 
     def __init__(self) -> None:
-        self.cached_forecasts: dict[str, StatisticalForecastInput] = {
-            "volatility_btc": StatisticalForecastInput(
-                metric_name="volatility_btc",
-                point_estimate=0.045,
-                confidence_interval=[0.032, 0.058],
-                probability=0.88,
-                model_used="GARCH(1,1)"
-            ),
-            "threat_escalation_public_ip": StatisticalForecastInput(
-                metric_name="threat_escalation_public_ip",
-                point_estimate=0.74,
-                confidence_interval=[0.65, 0.85],
-                probability=0.91,
-                model_used="BayesianSurvivalHazard"
-            ),
-            "capacity_lead_volume": StatisticalForecastInput(
-                metric_name="capacity_lead_volume",
-                point_estimate=1250.0,
-                confidence_interval=[1100.0, 1420.0],
-                probability=0.85,
-                model_used="ProphetMultiplicative"
-            )
-        }
+        # No measured forecasts exist in this service. Before this, three hard-coded series
+        # (for example volatility_btc 0.045 with an 88% probability) were served as grounding.
+        self.cached_forecasts: dict[str, StatisticalForecastInput] = {}
 
     def get_grounding_context(self, metric_key: str) -> dict[str, Any] | None:
         """Retrieves active statistical forecast grounding for a specific consumer metric."""
@@ -112,6 +93,52 @@ class FuturisEnhancementService:
         )
         self.grounding_engine = StatisticalGroundingEngine()
 
+    async def _qualitative_review(self, req: FuturisEnhanceRequest) -> dict[str, Any]:
+        """Optional qualitative review by a model. Returns status ``parsed`` only when the model
+        answered and its answer is a JSON object with the expected lists; otherwise the review is
+        reported as ``not_performed`` or ``unparsed`` with the reason, and no risks are invented."""
+        from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
+        from app.utils.model_json import extract_json_object
+
+        forecast = req.statistical_forecast
+        prompt = (
+            "You review a statistical forecast. Use ONLY the numbers and context given here; do not "
+            "invent events or facts. Return a single JSON object with the keys key_risks, "
+            "contextual_drivers, uncertainty_factors, qualitative_adjustments, dissent. Each is a list "
+            "of short strings.\n"
+            f"Model: {forecast.model_used}\n"
+            f"Point estimate: {forecast.point_estimate}\n"
+            f"Interval: {forecast.confidence_interval}\n"
+            f"Probability: {forecast.probability}\n"
+            f"Context: {json.dumps(req.target_context, default=str)[:1500]}\n"
+            f"Factors: {json.dumps(req.contextual_factors, default=str)[:1500]}\n"
+            f"Question: {req.question}"
+        )
+        try:
+            resp = await unified_provider_manager.execute(
+                UnifiedExecutionRequest(
+                    provider="auto",
+                    agent_role="data_analyst",
+                    prompt=prompt,
+                    max_tokens=800,
+                    temperature=0.2,
+                )
+            )
+        except Exception:  # noqa: BLE001 - a failed review is reported, never fabricated
+            return {"status": "not_performed", "reason": "qualitative model call failed"}
+        if resp.degraded or not resp.content:
+            return {"status": "not_performed", "reason": "no model produced output"}
+
+        parsed = extract_json_object(resp.content)
+        keys = ("key_risks", "contextual_drivers", "uncertainty_factors", "qualitative_adjustments", "dissent")
+        if not isinstance(parsed, dict) or not all(isinstance(parsed.get(k), list) for k in keys):
+            return {"status": "unparsed", "reason": "model answer was not the expected JSON object"}
+
+        def clean(name: str) -> list[str]:
+            return [str(x)[:300] for x in parsed[name] if isinstance(x, (str, int, float))][:10]
+
+        return {"status": "parsed", **{k: clean(k) for k in keys}}
+
     async def enhance_forecast(self, req: FuturisEnhanceRequest) -> FuturisEnhanceResponse:
         start_time = time.perf_counter()
 
@@ -129,54 +156,45 @@ class FuturisEnhancementService:
         forecast = req.statistical_forecast
         context = req.target_context
         factors = req.contextual_factors
+        lo, hi = forecast.confidence_interval[0], forecast.confidence_interval[1]
+        ci_width = hi - lo
 
-        # Panel Reasoning: Data Analyst, Strategist, Critic
-        agents = ["data_analyst", "strategist", "critic"]
-        ci_width = forecast.confidence_interval[1] - forecast.confidence_interval[0]
+        # Everything in this block is either measured from the caller's own numbers or is
+        # echoed from the caller. Before this, the risks and drivers were fixed sentences (one
+        # asserted a "macro policy announcement"), the dissent was a fixed note, the response
+        # claimed three agents had been consulted, and confidence_adjustment was a constant 0.08.
+        width_note = f"{ci_width:.4g}"
+        if forecast.point_estimate:
+            width_note += f" ({abs(ci_width / forecast.point_estimate) * 100:.1f}% of the point estimate {forecast.point_estimate:.4g})"
+        key_risks: list[str] = [f"Interval width reported for {forecast.model_used}: {width_note}."]
+        key_risks += [f"Caller-supplied factor: {str(f)[:200]}" for f in factors[:10]]
 
-        # Key risks & drivers identification
-        key_risks = [
-            f"Regime shift vulnerability: {forecast.model_used} model may underfit non-linear tail events.",
-            "Macro policy announcement scheduled within forecast horizon could disrupt baseline trend."
+        contextual_drivers: list[str] = [f"Caller context {k}: {str(v)[:200]}" for k, v in list(context.items())[:10]]
+
+        uncertainty_factors: list[str] = [
+            f"Interval [{lo:.4g}, {hi:.4g}] is taken as supplied; its assumptions were not checked by this service.",
         ]
-        if factors:
-            key_risks.append(f"Unmodelled external catalyst: {factors[0]}.")
+        if forecast.probability is None:
+            uncertainty_factors.append("No probability was supplied, so none is reported.")
 
-        contextual_drivers = [
-            "Strong structural adoption trend providing baseline support above lower CI.",
-            "Historical seasonal uplift aligned with current projection trajectory."
-        ]
-        if context:
-            contextual_drivers.append(f"Target context alignment: {str(context)[:120]}.")
-
-        uncertainty_factors = [
-            f"Confidence band spread of +/- {round(ci_width / 2.0, 2)} reflects elevated input variance.",
-            "Model parameters assume stationary variance under historical regime."
-        ]
-
-        qualitative_adjustments = [
-            "Qualitative recommendation: Widen forecast target bands by +8% to account for external volatility.",
-            "Apply conservative risk bounds if downstream execution depends on upper percentile bounds."
-        ]
-
-        # Critic adversarial dissent
-        dissent = [
-            "Critic Note: Historical sample window may over-represent low-volatility conditions, risking optimistic point estimates."
-        ]
-
-        confidence_adj = 0.08  # Widen CI by 8% due to qualitative tail risks
-
-        summary = (
-            f"Futuris {forecast.model_used} forecast ({forecast.point_estimate} "
-            f"[{forecast.confidence_interval[0]} - {forecast.confidence_interval[1]}]) "
-            f"qualitatively grounded with 3 key drivers and +{int(confidence_adj*100)}% risk band widening."
-        )
+        review = await self._qualitative_review(req)
+        if review["status"] == "parsed":
+            key_risks += review["key_risks"]
+            contextual_drivers += review["contextual_drivers"]
+            uncertainty_factors += review["uncertainty_factors"]
+            qualitative_adjustments: list[str] = review["qualitative_adjustments"]
+            dissent: list[str] = review["dissent"]
+            agents = ["qualitative_model_review"]
+        else:
+            qualitative_adjustments = []
+            dissent = []
+            agents = []
 
         enhanced_assessment = EnhancedAssessmentPayload(
             key_risks=key_risks,
             contextual_drivers=contextual_drivers,
             uncertainty_factors=uncertainty_factors,
-            qualitative_adjustments=qualitative_adjustments
+            qualitative_adjustments=qualitative_adjustments,
         )
 
         latency_ms = (time.perf_counter() - start_time) * 1000.0
@@ -184,18 +202,25 @@ class FuturisEnhancementService:
         provenance = {
             "request_id": req.request_id,
             "agents_consulted": agents,
+            "qualitative_review_status": review["status"],
+            "qualitative_review_reason": review.get("reason"),
             "model_evaluated": forecast.model_used,
             "latency_ms": round(latency_ms, 2),
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
+
+        summary = (
+            f"Forecast {forecast.model_used}: point {forecast.point_estimate:.4g}, "
+            f"interval [{lo:.4g}, {hi:.4g}]. Qualitative review: {review['status']}."
+        )
 
         response = FuturisEnhanceResponse(
             request_id=req.request_id,
             enhanced_assessment=enhanced_assessment,
-            confidence_adjustment=confidence_adj,
+            confidence_adjustment=None,
             dissent=dissent,
             grounded_forecast_summary=summary,
-            provenance=provenance
+            provenance=provenance,
         )
 
         # Store in provenance ledger

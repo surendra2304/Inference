@@ -9,6 +9,7 @@ from app.providers.unified_manager import (
     UnifiedExecutionRequest,
     unified_provider_manager,
 )
+from app.utils.confidence import DEGRADED_CONFIDENCE, UNVERIFIED_MODEL_CONFIDENCE
 
 
 class ArchitecturePlanRequest(BaseModel):
@@ -63,11 +64,22 @@ class ArchitecturePlanningService:
         manifest = self._generate_default_manifest(req.project_type)
         tech_stack = self._determine_tech_stack(req.project_type, req.preferences)
 
+        # The spec is unverified model text and the manifest is a fixed template for the project
+        # type, not derived from the spec. A degraded call reports no spec. Before this, every
+        # call returned confidence 0.94 (see app/utils/confidence.py).
+        if exec_res.degraded or not exec_res.content:
+            return ArchitecturePlanResponse(
+                architecture_spec="",
+                file_manifest=manifest,
+                tech_stack=tech_stack,
+                confidence=DEGRADED_CONFIDENCE,
+                latency_ms=elapsed_ms,
+            )
         return ArchitecturePlanResponse(
             architecture_spec=exec_res.content,
             file_manifest=manifest,
             tech_stack=tech_stack,
-            confidence=0.94,
+            confidence=UNVERIFIED_MODEL_CONFIDENCE,
             latency_ms=elapsed_ms
         )
 
