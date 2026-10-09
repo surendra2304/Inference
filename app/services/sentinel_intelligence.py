@@ -74,14 +74,16 @@ class AttackPathNode(BaseModel):
     vector: str
     preconditions: str
     potential_impact: str
-    likelihood_score: float = Field(..., ge=0.0, le=1.0)
+    #: None: not estimated. The former fixed 0.85 / 0.72 were not derived from the findings.
+    likelihood_score: float | None = Field(default=None, ge=0.0, le=1.0)
     associated_finding_ids: list[str] = Field(default_factory=list)
 
 
 class AttackPathChain(BaseModel):
     chain_id: str
     title: str
-    overall_probability: float = Field(..., ge=0.0, le=1.0)
+    #: None: not estimated (the former fixed 0.78 was a constant).
+    overall_probability: float | None = Field(default=None, ge=0.0, le=1.0)
     criticality: SeverityLevel
     nodes: list[AttackPathNode] = Field(default_factory=list)
 
@@ -114,7 +116,8 @@ class SentinelAnalysisPayload(BaseModel):
     attack_paths: list[AttackPathChain] | None = None
     prioritized_remediation: list[RemediationItem] = Field(default_factory=list)
     threat_context: ThreatContextResult
-    confidence: float = Field(..., ge=0.0, le=1.0)
+    #: None: rule-based analysis with no calibration. The former 0.88-0.95 were per-type constants.
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     dissent: list[str] = Field(default_factory=list)
 
 
@@ -248,18 +251,20 @@ class SentinelIntelligenceService:
 
         # Attack path reasoning (Debate mode)
         attack_paths: list[AttackPathChain] | None = None
+        # No adversarial debate runs here, so no dissent is recorded. The previous text "Critic
+        # challenged reachability..." described a critique that never happened.
         dissent: list[str] = []
-        confidence = 0.90
+        # Rule-based analysis: no calibration exists for any of these, so no confidence is reported.
+        confidence: float | None = None
 
         if req.analysis_type == "attack_path_reasoning":
-            confidence = 0.88
-            # Adversarial multi-agent debate simulation
-            dissent.append("Critic challenged reachability of secondary lateral movement step under strict VPC segmentation.")
             attack_paths = [
                 AttackPathChain(
                     chain_id="PATH-001",
-                    title=f"External {req.target_context.exposure_level.replace('_', ' ').capitalize()} to {req.target_context.asset_type} Boundary Breach",
-                    overall_probability=0.78,
+                    # The chain is a fixed template, not derived from the findings; the title says so.
+                    title=(f"TEMPLATE External {req.target_context.exposure_level.replace('_', ' ').capitalize()} "
+                           f"to {req.target_context.asset_type} Boundary Breach (not derived from findings)"),
+                    overall_probability=None,
                     criticality=risk_tier,
                     nodes=[
                         AttackPathNode(
@@ -267,7 +272,7 @@ class SentinelIntelligenceService:
                             vector=f"Public Service Discovery ({req.target_context.exposure_level})",
                             preconditions="Exposed public ingress endpoint with vulnerable component.",
                             potential_impact="Initial perimeter foothold",
-                            likelihood_score=0.85,
+                            likelihood_score=None,
                             associated_finding_ids=[f.finding_id for f in req.findings[:1]]
                         ),
                         AttackPathNode(
@@ -275,20 +280,12 @@ class SentinelIntelligenceService:
                             vector="Component Vulnerability Exploitation",
                             preconditions="Unpatched component detected in asset stack.",
                             potential_impact="Execution within target service context",
-                            likelihood_score=0.72,
+                            likelihood_score=None,
                             associated_finding_ids=[f.finding_id for f in req.findings[1:2]] if len(req.findings) > 1 else [f.finding_id for f in req.findings[:1]]
                         )
                     ]
                 )
             ]
-        elif req.analysis_type == "vulnerability_assessment":
-            confidence = 0.94
-        elif req.analysis_type == "remediation_prioritization":
-            confidence = 0.92
-        elif req.analysis_type == "threat_intel_correlation":
-            confidence = 0.89
-        elif req.analysis_type == "risk_scoring":
-            confidence = 0.95
 
         summary = (
             f"Evaluated {len(req.findings)} finding(s) across {req.target_context.asset_type} ({req.target_context.exposure_level}). "

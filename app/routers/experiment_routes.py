@@ -15,7 +15,8 @@ class DistillRuleRequest(BaseModel):
     task_type: str
     condition_trigger: str
     prescribed_strategy: str
-    empirical_confidence: float = 0.90
+    #: The caller's measured confidence. None when the caller measured none (was a default 0.90).
+    empirical_confidence: float | None = None
 
 
 @experiment_router.get("", status_code=status.HTTP_200_OK)

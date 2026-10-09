@@ -9,6 +9,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from app.utils.confidence import UNVERIFIED_MODEL_CONFIDENCE
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,10 +63,11 @@ class MemoraClient:
             "event_type": event_type, "tags": tags or [], "metadata": metadata or {},
         })
 
-    def record_fact(self, agent_name: str, fact_text: str, category: str = "general", importance: float = 0.8, entities=None):
+    def record_fact(self, agent_name: str, fact_text: str, category: str = "general", importance: float = 0.8, entities=None, confidence: float = UNVERIFIED_MODEL_CONFIDENCE):
+        """Stores a fact. ``confidence`` defaults to the unverified prior (was a fixed 1.0)."""
         return self._request(agent_name, "/v1/memories", method="POST", payload={
             "content_text": fact_text, "memory_type": "semantic", "source": f"agent:{agent_name.lower()}",
-            "confidence": 1.0, "importance": importance,
+            "confidence": confidence, "importance": importance,
             "provenance": {"category": category, "entities": entities or [agent_name.lower(), category]},
         })
 

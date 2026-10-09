@@ -31,9 +31,10 @@ from app.providers.unified_manager import (
     unified_provider_manager,
 )
 from app.services.quality_assurance import quality_assurance_service
+from app.utils.confidence import DEGRADED_CONFIDENCE, UNVERIFIED_MODEL_CONFIDENCE
 from app.utils.model_json import extract_json_object
 
-DIAGNOSED_CONFIDENCE = 0.6
+DIAGNOSED_CONFIDENCE = UNVERIFIED_MODEL_CONFIDENCE  # a model diagnosis that no check verified
 PROMPT_TRACEBACK_CHARS = 1500
 PROMPT_CONTEXT_CHARS = 2000
 
@@ -106,7 +107,7 @@ class DebuggingIntelligenceService:
                 ),
                 fix_strategy="None: no model diagnosis was obtained, so no fix is proposed.",
                 patch_code=None,
-                confidence=0.0,
+                confidence=DEGRADED_CONFIDENCE,
                 latency_ms=elapsed_ms,
                 diagnosis_status=status,
                 patch_check="not_provided",

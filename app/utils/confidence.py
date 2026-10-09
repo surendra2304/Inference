@@ -17,3 +17,6 @@ DETERMINISTIC_RULE_CONFIDENCE: float = 1.0
 # a computed estimate. This is a fixed editorial prior for that provenance, named so that it is
 # never mistaken for a measurement.
 CURATED_ENTRY_CONFIDENCE: float = 0.99
+# Output that passed a real parser (for example, code that parsed as the requested language). The
+# named check is the parser, and the prior is fixed: it is not a calibrated accuracy.
+PARSER_VERIFIED_CONFIDENCE: float = 0.92

@@ -23,6 +23,7 @@ from app.schemas.trading_consult import (
 )
 from app.services.experiment_service import experiment_service
 from app.services.trading_consult_service import trading_consult_service
+from app.utils.confidence import DEGRADED_CONFIDENCE
 from app.utils.errors import internal_error
 from app.utils.logger import logger
 
@@ -249,7 +250,7 @@ async def consult_trading_bot(request: Request) -> AIUniverseDecision:
             decision_id=str(uuid4()),
             timestamp=datetime.now(timezone.utc).isoformat(),
             status="NO_CHANGE",
-            confidence=0.50,
+            confidence=DEGRADED_CONFIDENCE,  # no decision was reached
             parameter_changes=[],
             risk_assessment="Server-side consultation timeout (180s) reached during multi-agent deliberation. Existing parameters maintained safely.",
             regime_analysis="Analysis incomplete due to deliberation timeout.",

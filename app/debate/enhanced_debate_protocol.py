@@ -12,7 +12,8 @@ class EvidenceScore(BaseModel):
     evidence_id: str
     claim: str
     trust_label: str
-    relevance_score: float = 0.90
+    #: None: no relevance measure is computed for evidence. (Was a default of 0.90.)
+    relevance_score: float | None = None
     reliability_weight: float = 0.90  # 0.3 for untrusted_user_input, 1.0 for system_fact
     is_contradictory: bool = False
     flag_notes: str | None = None
@@ -21,7 +22,8 @@ class EvidenceScore(BaseModel):
 class StatedAssumption(BaseModel):
     agent: str
     hypothesis: str
-    confidence: float
+    #: None: an assumption is not measured. The former fixed 0.5 / 0.3 were stated as confidence.
+    confidence: float | None
     validation_status: Literal["PENDING", "VALIDATED", "INVALIDATED"] = "PENDING"
 
 
@@ -113,7 +115,7 @@ class EnhancedDebateEngine:
                     evidence_id=str(supplied_id) if supplied_id else f"EVD-{idx+1:03d}",
                     claim=claim,
                     trust_label=label,
-                    relevance_score=0.92,
+                    relevance_score=None,
                     reliability_weight=rel_weight,
                     is_contradictory=is_contra,
                     flag_notes="Contradictory signal flagged for debate cross-examination" if is_contra else None
@@ -318,7 +320,7 @@ class EnhancedDebateEngine:
                         "Items marked untrusted or inferred are assumed to be incomplete "
                         "rather than false; the weighting reflects uncertainty, not dishonesty."
                     ),
-                    confidence=0.5,
+                    confidence=None,  # an assumption carries no measured confidence
                 ),
             ]
         else:
@@ -326,7 +328,7 @@ class EnhancedDebateEngine:
                 StatedAssumption(
                     agent=agents[0],
                     hypothesis="The goal statement is a complete description of the problem.",
-                    confidence=0.3,
+                    confidence=None,
                 )
             ]
 

@@ -22,7 +22,18 @@ from pydantic import BaseModel, Field
 from app.analytics.usage_analytics import usage_analytics
 from app.routing.consumer_router import consumer_router
 from app.utils.bounded_store import DEFAULT_MAX_ENTRIES, BoundedStore
+from app.utils.confidence import (
+    DEGRADED_CONFIDENCE,
+    DETERMINISTIC_RULE_CONFIDENCE,
+    UNVERIFIED_MODEL_CONFIDENCE,
+)
 from app.utils.logger import logger
+
+
+def _credibility(evidence: Any) -> float:
+    """Credibility of one evidence item; an unrated item counts as 0.0 (unverified)."""
+    value = getattr(evidence, "credibility_score", None)
+    return float(value) if value is not None else 0.0
 
 IntelXRole = Literal[
     "planner",
@@ -49,7 +60,9 @@ class ExtractedClaimSpan(BaseModel):
     claim: str
     verbatim_span: str
     document_source: str
-    credibility_score: float = Field(default=0.85, ge=0.0, le=1.0)
+    #: None when the source was not rated. The former default of 0.85 credited every unrated source
+    #: with a credibility nobody measured. An unrated source is treated as unverified (0.0).
+    credibility_score: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class IntelXResearchContext(BaseModel):
@@ -76,7 +89,8 @@ class IntelXResearchResponse(BaseModel):
     request_id: str
     role: IntelXRole
     response: dict[str, Any] = Field(description="Role-appropriate structured output")
-    confidence: float = Field(..., ge=0.0, le=1.0)
+    #: None for rule-based roles (no calibration); a model-backed answer carries the unverified state.
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     key_evidence_used: list[str] = Field(default_factory=list, description="Verbatim spans and evidence items used")
     dissent: list[str] = Field(default_factory=list, description="Dissent from verifier or critic debate passes")
     source_independence_flags: list[str] = Field(default_factory=list)
@@ -126,7 +140,7 @@ class IntelXIntelligenceService:
                 spans_seen[cleaned_span] = e.document_source
 
         # Average credibility
-        avg_cred = sum(e.credibility_score for e in evidence) / len(evidence)
+        avg_cred = sum(_credibility(e) for e in evidence) / len(evidence)
         key_spans = [f"[{e.document_source}] \"{e.verbatim_span}\"" for e in evidence[:4]]
 
         return round(avg_cred, 2), syndication_flags, key_spans
@@ -151,7 +165,7 @@ class IntelXIntelligenceService:
 
         dissent: list[str] = []
         role_output: dict[str, Any] = {}
-        confidence = credibility_factor
+        confidence: float | None = credibility_factor
 
         # Role-specific execution logic
         if req.role == "planner":
@@ -176,7 +190,7 @@ class IntelXIntelligenceService:
                     "min_independent_corroborations": 2,
                 },
             }
-            confidence = 0.94
+            confidence = None  # planner: a template plan, no calibration
 
         elif req.role == "extractor":
             extracted = [
@@ -193,11 +207,12 @@ class IntelXIntelligenceService:
                 "claims": extracted,
                 "extraction_mode": "STRICT_VERBATIM_NO_PARAPHRASE"
             }
-            confidence = 0.96
+            # Verbatim copy of the evidence spans: deterministic by construction.
+            confidence = DETERMINISTIC_RULE_CONFIDENCE
 
         elif req.role == "verifier":
             # Fact Checker + Critic debate
-            has_low_cred = any(e.credibility_score < 0.70 for e in evidence_pool)
+            has_low_cred = any(_credibility(e) < 0.70 for e in evidence_pool)
             if syndication_flags or has_low_cred:
                 dissent.append("Critic flagged potential syndication bias / low credibility in secondary source documents.")
                 confidence = round(min(0.85, credibility_factor * 0.90), 2)
@@ -208,7 +223,7 @@ class IntelXIntelligenceService:
                 {
                     "claim": e.claim,
                     "verbatim_span_reference": e.verbatim_span,
-                    "fact_checker_verdict": "VERIFIED_SUPPORTED" if e.credibility_score >= 0.70 else "UNVERIFIED_EVIDENCE_DEFICIT",
+                    "fact_checker_verdict": "VERIFIED_SUPPORTED" if _credibility(e) >= 0.70 else "UNVERIFIED_EVIDENCE_DEFICIT",
                     "critic_caveat": "Dependent on single reporting origin." if syndication_flags else "Supported by primary evidence."
                 }
                 for e in evidence_pool
@@ -259,13 +274,13 @@ class IntelXIntelligenceService:
                 "gaps": gaps,
                 "data_points_analyzed": len(evidence_pool),
             }
-            confidence = 0.91
+            confidence = None  # timeline/themes: rule-based summary, no calibration
 
         elif req.role == "critic":
             overconfident = []
             missing = []
             for e in evidence_pool:
-                if e.credibility_score < 0.60:
+                if _credibility(e) < 0.60:
                     overconfident.append({
                         "claim_id": e.claim_id or "c-eval",
                         "reason": f"Single low-credibility source ({e.document_source})",
@@ -281,7 +296,7 @@ class IntelXIntelligenceService:
                 "severity": "MEDIUM" if (overconfident or missing) else "LOW",
                 "summary": f"Evaluated {len(evidence_pool)} evidence claims for '{req.context.question}'. Analysis grounded in verified evidence.",
             }
-            confidence = 0.88
+            confidence = None  # critic: rule-based checks, no calibration
 
         elif req.role == "synthesizer":
             answer_text = None
@@ -326,11 +341,14 @@ class IntelXIntelligenceService:
                     elif "Let's craft" in raw_ans:
                         raw_ans = raw_ans.split("Let's craft")[-1].strip()
                     answer_text = raw_ans
-                    confidence = max(confidence, orch_res.confidence or 0.95)
+                    # The answer came from a model and no check verified it: the unverified state.
+                    # The former ``max(confidence, orch_res.confidence or 0.95)`` substituted 0.95.
+                    confidence = UNVERIFIED_MODEL_CONFIDENCE
             except Exception as ex:
                 logger.warning(f"Orchestrator synthesis exception: {ex}")
 
             if not answer_text:
+                confidence = DEGRADED_CONFIDENCE
                 if evidence_pool:
                     answer_text = f"Empirical findings regarding '{req.context.question}': {evidence_pool[0].claim}."
                 else:
@@ -339,7 +357,7 @@ class IntelXIntelligenceService:
             role_output = {
                 "research_synthesis_report": answer_text,
                 "cited_spans": key_evidence_used,
-                "coherence_score": 0.95,
+                "coherence_score": None,  # not computed by any check
                 "executive_answer": answer_text,
             }
 

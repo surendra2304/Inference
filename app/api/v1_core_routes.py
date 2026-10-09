@@ -48,6 +48,7 @@ from app.security.prompt_isolation import (
     scrub_credentials_verified,
     wrap_untrusted_data,
 )
+from app.utils.confidence import DEGRADED_CONFIDENCE, UNVERIFIED_MODEL_CONFIDENCE
 from app.utils.errors import correlation_id, internal_error, unavailable_detail
 from app.utils.logger import logger
 from app.version import VERSION
@@ -149,7 +150,7 @@ async def v1_capabilities() -> dict[str, Any]:
 #: deliberation engine reports for a panel (a two-specialist review lands at ~0.83, a
 #: five-specialist debate at ~0.80): the shallowest path must not claim the most
 #: certainty.
-_SINGLE_CALL_BASE_CONFIDENCE = 0.65
+_SINGLE_CALL_BASE_CONFIDENCE = UNVERIFIED_MODEL_CONFIDENCE
 #: Ceiling applied when the provider stopped at its token limit; a truncated answer is
 #: materially incomplete. Kept equal to the deliberation engine's own truncation
 #: ceiling so the two stacks cannot disagree about what truncation means.
@@ -252,8 +253,8 @@ async def ask_v1(
                 "In accordance with strict evidence policy, Inference refuses to hallucinate unsubstantiated results."
             ),
             reasoning_summary="Deliberation halted due to missing critical data or telemetry.",
-            confidence=0.30,
-            uncertainty=0.70,
+            confidence=DEGRADED_CONFIDENCE,
+            uncertainty=1.0,
             evidence=[],
             agents_used=["fact_checker", "synthesizer"],
             recommendations=[f"Provide missing data: {item}" for item in missing_items],
@@ -312,7 +313,7 @@ async def ask_v1(
             await _record_task_outcome(
                 task_id, clean_prompt,
                 f"Panel unavailable: {panel_failure}", mode=request.mode,
-                status_value="failed", confidence=0.0,
+                status_value="failed", confidence=DEGRADED_CONFIDENCE,
                 metadata={"trace_id": trace_id, "error": panel_failure},
             )
             return InferenceTaskResponse(
@@ -323,7 +324,7 @@ async def ask_v1(
                     "Every configured provider and peer agent was unavailable for this request."
                 ),
                 reasoning_summary="Deliberation could not start: the specialist panel was unavailable.",
-                confidence=0.0,
+                confidence=DEGRADED_CONFIDENCE,
                 uncertainty=1.0,
                 evidence=[],
                 agents_used=[],
@@ -355,7 +356,7 @@ async def ask_v1(
             await _record_task_outcome(
                 task_id, clean_prompt,
                 f"Deliberation failed (correlation id {reference})", mode=request.mode,
-                status_value="failed", confidence=0.0,
+                status_value="failed", confidence=DEGRADED_CONFIDENCE,
                 metadata={"trace_id": trace_id, "error": f"deliberation failed (correlation id {reference})"},
             )
             return InferenceTaskResponse(
@@ -365,7 +366,7 @@ async def ask_v1(
                     "produce a result. No answer is fabricated in its place."
                 ),
                 reasoning_summary="Multi-agent deliberation failed before synthesis.",
-                confidence=0.0, uncertainty=1.0, evidence=[],
+                confidence=DEGRADED_CONFIDENCE, uncertainty=1.0, evidence=[],
                 agents_used=[],
                 recommendations=["Retry, or ask with mode='fast' for a single-model answer."],
                 proposed_actions=[], authorization_required=False,
@@ -469,7 +470,7 @@ async def ask_v1(
                     f"Deliberation halted: all model calls failed ({resp.error}). "
                     "Per STRICT_EMPIRICAL policy, low confidence is returned instead of a guess."
                 ),
-                confidence=0.0,
+                confidence=DEGRADED_CONFIDENCE,
                 uncertainty=1.0,
                 evidence=[],
                 agents_used=["astra_council"],
@@ -575,7 +576,7 @@ async def ask_v1(
                 f"id {reference} when reporting this; the details are in the server log."
             ),
             reasoning_summary="Provider invocation failed; fallback activated.",
-            confidence=0.0,
+            confidence=DEGRADED_CONFIDENCE,
             uncertainty=1.0,
             evidence=[],
             agents_used=["astra_council"],
@@ -661,7 +662,7 @@ async def debate_v1(
             "Debate halted: insufficient core evidence.",
             mode="debate",
             status_value="completed",
-            confidence=0.25,
+            confidence=DEGRADED_CONFIDENCE,
             metadata={
                 "failure_state": "INSUFFICIENT_DATA",
                 "missing_data": missing_items,
@@ -677,8 +678,8 @@ async def debate_v1(
                 f"Missing items: {', '.join(missing_items)}."
             ),
             reasoning_summary="Fact_checker and Data_analyst flagged missing required evidence.",
-            confidence=0.25,
-            uncertainty=0.75,
+            confidence=DEGRADED_CONFIDENCE,
+            uncertainty=1.0,
             evidence=[],
             agents_used=["proposer", "critic", "fact_checker", "synthesizer"],
             recommendations=[f"Supply required evidence: {item}" for item in missing_items],
@@ -796,7 +797,7 @@ async def debate_v1(
             f"Debate deliberation encountered an error (correlation id {reference})",
             mode="debate",
             status_value="failed",
-            confidence=0.0,
+            confidence=DEGRADED_CONFIDENCE,
             metadata={"trace_id": trace_id, "error": f"debate failed (correlation id {reference})"},
         )
         return InferenceTaskResponse(
@@ -808,7 +809,7 @@ async def debate_v1(
                 "the server log."
             ),
             reasoning_summary="Multi-agent debate interrupted by provider or system error.",
-            confidence=0.0,
+            confidence=DEGRADED_CONFIDENCE,
             uncertainty=1.0,
             evidence=[],
             agents_used=required_role_ids,

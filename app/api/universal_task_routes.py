@@ -10,7 +10,7 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
-from app.utils.confidence import UNVERIFIED_MODEL_CONFIDENCE
+from app.utils.confidence import DEGRADED_CONFIDENCE, UNVERIFIED_MODEL_CONFIDENCE
 from app.utils.errors import internal_error
 from app.utils.logger import logger
 
@@ -157,7 +157,7 @@ async def astra_reason(request: AstraReasonRequest) -> AstraReasonResponse:
                     "No model provider produced output for this reasoning request; "
                     "ASTRA returns no synthesis instead of fabricating one."
                 ),
-                confidence=0.0,
+                confidence=DEGRADED_CONFIDENCE,
                 model_used=resp.model_used,
                 provider_used=resp.provider_used,
                 latency_ms=lat,
@@ -181,7 +181,7 @@ async def astra_reason(request: AstraReasonRequest) -> AstraReasonResponse:
         return AstraReasonResponse(
             task_id=f"astra_err_{uuid.uuid4().hex[:8]}",
             synthesis=f"Reasoning failure: {e}",
-            confidence=0.0,
+            confidence=DEGRADED_CONFIDENCE,
             model_used="none",
             provider_used="none",
             latency_ms=lat,

@@ -15,6 +15,11 @@ from app.providers.unified_manager import (
     unified_provider_manager,
 )
 from app.services.quality_assurance import quality_assurance_service
+from app.utils.confidence import (
+    DEGRADED_CONFIDENCE,
+    PARSER_VERIFIED_CONFIDENCE,
+    UNVERIFIED_MODEL_CONFIDENCE,
+)
 from app.utils.logger import logger
 
 _FENCED_BLOCK = re.compile(r"```[ \t]*[A-Za-z0-9_+.-]*[ \t]*\n(.*?)```", re.S)
@@ -112,7 +117,7 @@ class CodeGenerationService:
             # zero tokens rather than labelling an empty result as agent output.
             response = CodeGenerationResponse(
                 code="",
-                confidence=0.0,
+                confidence=DEGRADED_CONFIDENCE,
                 generation_path="degraded",
                 token_usage=0,
                 latency_ms=elapsed_ms,
@@ -138,7 +143,7 @@ class CodeGenerationService:
             )
             return CodeGenerationResponse(
                 code="",
-                confidence=0.0,
+                confidence=DEGRADED_CONFIDENCE,
                 generation_path="invalid_output",
                 token_usage=exec_res.token_usage.get("total_tokens", 0),
                 latency_ms=elapsed_ms,
@@ -150,9 +155,9 @@ class CodeGenerationService:
         # could not be verified at all. Neither is a calibrated accuracy: the quality report says
         # calibration is not measured, and these constants do not claim otherwise.
         if verdict.verified:
-            confidence = 0.92 if gen_path == "agent" else 0.55
+            confidence = PARSER_VERIFIED_CONFIDENCE if gen_path == "agent" else UNVERIFIED_MODEL_CONFIDENCE
         else:
-            confidence = 0.55
+            confidence = UNVERIFIED_MODEL_CONFIDENCE
 
         response = CodeGenerationResponse(
             code=code_text,
