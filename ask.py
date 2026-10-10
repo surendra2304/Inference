@@ -1,6 +1,12 @@
 import os
 import sys
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import requests
 
 # Ensure UTF-8 output encoding for Windows PowerShell console
