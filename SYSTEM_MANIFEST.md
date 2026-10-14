@@ -11,13 +11,13 @@
 
 | Attribute | Repository configuration |
 | :--- | :--- |
-| **Configured Service URL** | [https://inference-h7bn.onrender.com](https://inference-h7bn.onrender.com) (current deployment state not verified here) |
+| **Configured Service URL** | [https://friday-universe.duckdns.org/inference](https://friday-universe.duckdns.org/inference) (current deployment state not verified here) |
 | **Configured Health Route** | `/health` (response is not proof of provider availability) |
 | **API key variable (keep value in secret environment)** | `INFERENCE_API_KEY` (set a unique secret outside source control) |
 | **Authentication Header** | `X-INFERENCE-API-KEY: <configured key>` or `Authorization: Bearer <configured key>` |
 | **Configured database topology (runtime unverified)** | In-memory consultation cache plus Memora integration; current remote durability/connectivity is not verified here |
 | **Database Namespace** | `memora://inference/private` (configured intent; access not verified here) |
-| **Hosting** | Render is configured in the repository; current deployment revision is not verified here |
+| **Hosting** | Oracle Cloud Always Free (friday_mesh) |
 
 ---
 
@@ -43,39 +43,39 @@ These variable names and URLs are configuration references, not proof of live co
 # ============================================================================== #
 
 # 1. ⚡ Inference AI Multi-Model Gateway (runtime-configured providers)
-INFERENCE_URL=https://inference-h7bn.onrender.com
+INFERENCE_URL=https://friday-universe.duckdns.org/inference
 INFERENCE_API_KEY=<configure locally; do not commit>
 
 # 2. 🧠 Memora cloud memory service (active backend/capacity not verified)
-MEMORA_URL=https://memora-cavc.onrender.com
+MEMORA_URL=https://friday-universe.duckdns.org/memora
 MEMORA_API_KEY=<configure locally; do not commit>
 
 # 3. 📈 Stratex paper/testnet strategy service (live-money orders blocked in source)
-STRATEX_URL=https://stratex-8wj1.onrender.com
+STRATEX_URL=https://friday-universe.duckdns.org/stratex
 STRATEX_API_KEY=<configure locally; do not commit>
 
 # 4. 🧠 IntelX research service (active corpus backend unverified)
-INTELX_URL=https://intelx-mygl.onrender.com
+INTELX_URL=https://friday-universe.duckdns.org/intelx
 INTELX_API_KEY=<configure locally; do not commit>
 
 # 5. 🔮 Futuris Calibrated Predictive Forecasting Engine
-FUTURIS_URL=https://futuris-th6f.onrender.com
+FUTURIS_URL=https://friday-universe.duckdns.org/futuris
 FUTURIS_API_KEY=<configure locally; do not commit>
 
 # 6. 🌐 Cortex Autonomous Web Operations & Intelligence
-CORTEX_URL=https://cortex-0m7c.onrender.com
+CORTEX_URL=https://friday-universe.duckdns.org/cortex
 CORTEX_API_KEY=<configure locally; do not commit>
 
 # 7. 🛠️ Forge Local Software Engineering Engine
-FORGE_URL=https://forge-e9kl.onrender.com
+FORGE_URL=https://friday-universe.duckdns.org/forge
 FORGE_API_KEY=<configure locally; do not commit>
 
 # 8. 🛡️ Sentinel Local Cybersecurity & Threat Defense Shield
-SENTINEL_URL=https://sentinel-a861.onrender.com
+SENTINEL_URL=https://friday-universe.duckdns.org/sentinel
 SENTINEL_API_KEY=<configure locally; do not commit>
 
 # 9. 🤖 FRIDAY Central Desktop Operating System
-FRIDAY_URL=https://friday-zw59.onrender.com
+FRIDAY_URL=https://friday-universe.duckdns.org/friday
 FRIDAY_API_KEY=<configure locally; do not commit>
 ```
 
@@ -85,7 +85,7 @@ FRIDAY_API_KEY=<configure locally; do not commit>
 
 When opening this repository:
 * **Identity:** You are working inside **Inference** (d:\FRIDAY Universe\Inference).
-* **Configured Service URL:** https://inference-h7bn.onrender.com; confirm current deployment status in Render.
+* **Configured Service URL:** https://friday-universe.duckdns.org/inference; deployed on Oracle Cloud Always Free mesh.
 * **Authentication:** Incoming requests require the configured `INFERENCE_API_KEY`; use a unique strong secret per service.
 * **Verification:** Distinguish source tests, local integrations, mocked results, and live service evidence.
 * **Secrets:** Never commit live credentials or copy placeholder examples into service environments.

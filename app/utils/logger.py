@@ -31,7 +31,7 @@ def setup_logger(
         handler.setLevel(level)
 
         formatter = logging.Formatter(
-            fmt="%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s",
+            fmt="[%(asctime)s] [%(levelname)s] [inference]: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S"
         )
         handler.setFormatter(formatter)

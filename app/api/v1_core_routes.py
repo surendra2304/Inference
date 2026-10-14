@@ -18,12 +18,15 @@ Strict Guarantees:
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from app.agents.base import Agent
 from app.agents.debate import AgentPanelUnavailable, debate_engine
@@ -32,6 +35,8 @@ from app.core.astra_profile import astra_profile
 from app.core.dag import TaskComplexity
 from app.core.orchestrator import orchestrator
 from app.memory.base import TaskRecord
+from app.providers.base import ProviderMessage, ProviderRequest
+from app.providers.gateway import model_gateway
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
 from app.schemas.v1_models import (
     DebateRequest,
@@ -824,6 +829,125 @@ async def debate_v1(
             failure_state=f"DEBATE_FAILED (correlation id {reference})",
             status="ERROR",
         )
+
+
+class ChatMessage(BaseModel):
+    role: str = "user"
+    content: str = ""
+
+
+class ChatCompletionRequest(BaseModel):
+    model: str = "auto"
+    messages: list[ChatMessage] = Field(default_factory=list)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=1024, ge=1, le=128000)
+    stream: bool = False
+
+
+@v1_router.get("/models", status_code=status.HTTP_200_OK)
+async def list_models() -> dict[str, Any]:
+    """OpenAI-compatible models catalog listing available gateway models."""
+    configured_models = [
+        {"id": "gemini-3.8-flash", "object": "model", "owned_by": "google", "permission": []},
+        {"id": "gemini-2.5-flash", "object": "model", "owned_by": "google", "permission": []},
+        {"id": "openai/gpt-oss-120b", "object": "model", "owned_by": "groq", "permission": []},
+        {"id": "llama-3.3-70b-versatile", "object": "model", "owned_by": "groq", "permission": []},
+        {"id": "llama-3.1-8b-instant", "object": "model", "owned_by": "groq", "permission": []},
+        {"id": "cerebras/llama-3.3-70b", "object": "model", "owned_by": "cerebras", "permission": []},
+        {"id": "nvidia/nemotron-3-super-120b-a12b", "object": "model", "owned_by": "nvidia", "permission": []},
+        {"id": "liquid/lfm-2.5-2.6b:free", "object": "model", "owned_by": "openrouter", "permission": []},
+        {"id": "auto", "object": "model", "owned_by": "inference", "permission": []},
+    ]
+    return {"object": "list", "data": configured_models}
+
+
+@v1_router.post("/chat/completions")
+async def chat_completions(req: ChatCompletionRequest):
+    """OpenAI-compatible chat completions gateway with streaming and multi-provider fallback."""
+    prompt_parts = []
+    system_instruction = "You are Inference, the centralized LLM gateway and deliberation engine for the FRIDAY Universe."
+    for msg in req.messages:
+        if msg.role == "system":
+            system_instruction = msg.content
+        else:
+            prompt_parts.append(f"{msg.role}: {msg.content}")
+
+    prompt = "\n".join(prompt_parts) if prompt_parts else "Hello"
+    tokens = max(1, min(int(req.max_tokens or 1024), 128000))
+
+    if req.stream:
+        prov_req = ProviderRequest(
+            messages=[ProviderMessage(role=m.role, content=m.content) for m in req.messages],
+            system_instruction=system_instruction,
+            model=req.model if req.model != "auto" else "openai/gpt-oss-120b",
+            temperature=req.temperature,
+            max_tokens=tokens,
+        )
+        provider = "gemini" if "gemini" in req.model.lower() else "groq"
+
+        async def _stream_generator():
+            cmpl_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+            created = int(time.time())
+            try:
+                async for chunk in model_gateway.stream(provider=provider, request=prov_req, stage_name="chat_stream"):
+                    payload = {
+                        "id": cmpl_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": req.model,
+                        "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
+            except Exception:
+                pass
+            end_payload = {
+                "id": cmpl_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": req.model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+            yield f"data: {json.dumps(end_payload)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(_stream_generator(), media_type="text/event-stream")
+
+    exec_tokens = max(50, min(tokens, 8192))
+    exec_temp = max(0.0, min(float(req.temperature if req.temperature is not None else 0.7), 2.0))
+    exec_req = UnifiedExecutionRequest(
+        provider="auto" if req.model == "auto" else ("gemini" if "gemini" in req.model.lower() else "groq"),
+        agent_role="system_architect",
+        prompt=f"{system_instruction}\n\n{prompt}",
+        temperature=exec_temp,
+        max_tokens=exec_tokens,
+        fast_lane=True,
+    )
+    res = await unified_provider_manager.execute(exec_req)
+    created = int(time.time())
+    cmpl_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    usage = res.token_usage or {}
+    return {
+        "id": cmpl_id,
+        "object": "chat.completion",
+        "created": created,
+        "model": res.model_used or req.model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": res.content,
+                },
+                "finish_reason": res.finish_reason or "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": usage.get("prompt_tokens", 0),
+            "completion_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+        },
+    }
+
 
 
 

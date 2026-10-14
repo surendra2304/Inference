@@ -20,13 +20,14 @@ class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
     PORT: int = 8000
     CORS_ALLOWED_ORIGINS: list[str] = Field(default_factory=lambda: [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
+        "https://friday-universe.duckdns.org",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        "https://inference-h7bn.onrender.com",
+        "http://localhost:8004",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ])
-    INFERENCE_URL: str = Field(default="https://inference-h7bn.onrender.com", description="Canonical live deployment URL for Inference")
+    INFERENCE_URL: str = Field(default="https://friday-universe.duckdns.org/inference", description="Canonical live deployment URL for Inference")
 
     # Security & Auth Configuration
     INSECURE_DEV_AUTH: bool = Field(default=False, description="Explicitly enable unauthenticated development mode (NEVER for production)")
@@ -63,6 +64,9 @@ class Settings(BaseSettings):
 
     GROQ_API_KEY: str | None = Field(default=None)
     GROQ_API_KEYS: str | None = Field(default=None)
+
+    CEREBRAS_API_KEY: str | None = Field(default=None)
+    CEREBRAS_API_KEYS: str | None = Field(default=None)
 
     MISTRAL_API_KEY: str | None = Field(default=None)
     MISTRAL_API_KEYS: str | None = Field(default=None)

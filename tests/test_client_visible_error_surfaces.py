@@ -97,9 +97,15 @@ async def test_stream_code_error_event_does_not_name_configuration(client):
     assert CORRELATION.search(error_events[-1]["error"])
 
 
-async def test_batch_items_do_not_publish_provider_error_text(client):
+async def test_batch_items_do_not_publish_provider_error_text(client, monkeypatch):
     """Measured before the fix: per-item ``error`` was ``groq: Provider ... has no configured credential``.
     The batch envelope itself must still be honest about the failure count."""
+    from app.providers.gateway import model_gateway
+
+    async def fail_unconfigured(*args, **kwargs):
+        raise RuntimeError("Provider 'groq' has no configured credential; skipping without an attempt.")
+
+    monkeypatch.setattr(model_gateway, "execute", fail_unconfigured)
     async with client as c:
         response = await c.post(
             "/v1/forge/batch-generate",

@@ -153,6 +153,8 @@ async def test_debate_does_not_publish_an_internal_failure(client, monkeypatch):
         raise Boom(SECRET_TEXT)
 
     monkeypatch.setattr(orchestrator_module.orchestrator, "process_task", explode)
+    import app.api.v1_core_routes as v1_core
+    monkeypatch.setattr(v1_core.debate_engine, "run_collaboration", explode)
     response = await client.post("/v1/debate", json={"question": "does this leak?",
                                                      "mode": "debate"})
 

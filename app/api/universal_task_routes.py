@@ -40,6 +40,7 @@ class TaskResultModel(BaseModel):
     summary: str = ""
     error: str | None = None
     execution_time_ms: int = 0
+    receipt: dict[str, Any] | None = None
 
 
 class AstraReasonRequest(BaseModel):

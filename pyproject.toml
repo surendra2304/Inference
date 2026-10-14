@@ -7,7 +7,7 @@ name = "Inference"
 version = "2.0.0"
 description = "Local-first, provider-agnostic multi-agent intelligence platform."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [
     { name = "Surendra", email = "surendra@example.com" }
@@ -22,7 +22,8 @@ dependencies = [
     "sqlalchemy>=2.0.28",
     "aiosqlite>=0.20.0",
     "rich>=13.7.0",
-    "typer>=0.12.0"
+    "typer>=0.12.0",
+    "prometheus-client>=0.20.0"
 ]
 
 [project.optional-dependencies]

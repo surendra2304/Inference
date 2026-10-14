@@ -24,13 +24,13 @@ def _active_specialist_count() -> int:
 async def basic_health():
     """Report process liveness only; no dependency readiness is implied."""
     return {
-        "status": "responding",
+        "status": "ok",
+        "service": "inference",
         "evidence_class": "process_liveness",
-        "evidence_scope": "This Inference process answered /health; providers, memory, and database readiness are not checked.",
         "observed_at": datetime.now(UTC).isoformat(),
-        "service": "inference-api",
-        "version": VERSION,
+        "providers": ["groq", "cerebras", "openrouter", "gemini"],
         "active_specialist_agents": _active_specialist_count(),
+        "version": VERSION,
     }
 
 

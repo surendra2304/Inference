@@ -1,10 +1,15 @@
 # Environments and Secrets
 .env
+.env.production
 .env.*
 !.env.example
 .venv/
 venv/
 env/
+
+# Logs
+*.log
+
 
 # Python & Cache
 __pycache__/

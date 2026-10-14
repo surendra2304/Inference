@@ -21,7 +21,7 @@ services:
   api:
     build: .
     ports:
-      - "8000:8000"
+      - "8004:8000"
     environment:
       APP_ENV: production
       PORT: "8000"

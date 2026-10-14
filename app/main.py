@@ -1,4 +1,6 @@
 import asyncio
+import json
+import signal
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -7,7 +9,8 @@ from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
 from app.agents.software_specialists import register_software_specialists
 from app.api.agent_routes import agent_router
@@ -23,6 +26,8 @@ from app.core.security import require_inference_api_key
 from app.health import health_router
 from app.middleware.rate_limiter import EnhancedRateLimiterMiddleware
 from app.middleware.request_metrics import RequestMetricsMiddleware
+from app.providers.base import ProviderMessage, ProviderRequest
+from app.providers.gateway import model_gateway
 from app.providers.http_client import http_client_pool
 from app.routers.admin_analytics import analytics_router
 from app.routers.batch import batch_router
@@ -100,18 +105,32 @@ async def lifespan(app: FastAPI):
             interval_seconds=float(getattr(production_config, "MEMORY_TRIM_WATCHDOG_SECONDS", 30.0))
         )
     )
+    loop = asyncio.get_running_loop()
+
+    def _on_signal(sig_name: str) -> None:
+        logger.info("Received %s signal, initiating clean shutdown sequence...", sig_name)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, lambda s=sig: _on_signal(s.name))
+        except (NotImplementedError, RuntimeError, AttributeError):
+            pass
+
     yield
-    watchdog.cancel()
+
+    logger.info("Initiating graceful shutdown of %s within 5s...", production_config.APP_NAME)
     try:
-        await watchdog
-    except asyncio.CancelledError:
-        pass
-    # Cleanly close pooled HTTP connections
-    try:
-        await http_client_pool.close()
-    except Exception:
-        pass
-    logger.info("Shutting down %s", production_config.APP_NAME)
+        async with asyncio.timeout(5.0):
+            watchdog.cancel()
+            try:
+                await watchdog
+            except asyncio.CancelledError:
+                pass
+            # Cleanly close pooled HTTP connections and streaming clients
+            await http_client_pool.close()
+    except Exception as exc:
+        logger.warning("Shutdown cleanup encountered notice: %s", exc)
+    logger.info("Shutdown of %s complete", production_config.APP_NAME)
 
 
 # Multi-consumer dynamic rate limiter with burst allowance and retry-after headers
@@ -144,8 +163,14 @@ app.add_middleware(ProductionSecurityMiddleware)
 # GZip response compression middleware for production efficiency
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
-# CORS middleware with explicit allowlist from configuration
-cors_origins = settings.CORS_ALLOWED_ORIGINS if settings.CORS_ALLOWED_ORIGINS else ["http://localhost:3000", "http://127.0.0.1:3000"]
+cors_origins = settings.CORS_ALLOWED_ORIGINS if settings.CORS_ALLOWED_ORIGINS else [
+    "https://friday-universe.duckdns.org",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:8004",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -268,3 +293,40 @@ async def root(request: Request):
         "env": production_config.APP_ENV,
         "description": "Provider-agnostic multi-agent intelligence platform"
     }
+
+
+class DirectStreamRequest(BaseModel):
+    prompt: str = ""
+    question: str = ""
+    model: str = "auto"
+    max_tokens: int = Field(default=1024, ge=1, le=128000)
+
+
+@app.post("/stream", dependencies=[Depends(require_inference_api_key)])
+async def top_level_stream(req: DirectStreamRequest):
+    """Direct SSE token streaming gateway endpoint."""
+    text = req.prompt or req.question or "Hello"
+    tokens = max(1, min(int(req.max_tokens or 1024), 128000))
+    prov_req = ProviderRequest(
+        messages=[ProviderMessage(role="user", content=text)],
+        system_instruction="You are Inference, the centralized LLM gateway for the FRIDAY Universe.",
+        model="openai/gpt-oss-120b",
+        temperature=0.3,
+        max_tokens=tokens,
+    )
+
+    async def _token_generator():
+        try:
+            async for chunk in model_gateway.stream(provider="groq", request=prov_req, stage_name="top_level_stream"):
+                yield f"data: {json.dumps({'token': chunk, 'done': False})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'error': str(exc), 'done': True})}\n\n"
+            return
+        yield f"data: {json.dumps({'done': True})}\n\n"
+
+    return StreamingResponse(
+        _token_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
