@@ -1,6 +1,8 @@
 """Application configuration settings for Inference."""
 
-from pydantic import Field
+from typing import Any
+
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,9 +26,50 @@ class Settings(BaseSettings):
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "http://localhost:8004",
+        "http://127.0.0.1:8004",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ])
+
+    @field_validator("CORS_ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, v: Any) -> list[str]:
+        required = [
+            "https://friday-universe.duckdns.org",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://localhost:8004",
+            "http://127.0.0.1:8004",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]
+        origins = list(required)
+        if isinstance(v, str):
+            v_str = v.strip()
+            if v_str.startswith("[") and v_str.endswith("]"):
+                try:
+                    import json
+
+                    parsed = json.loads(v_str)
+                    if isinstance(parsed, list):
+                        for item in parsed:
+                            cleaned = str(item).strip().strip("'\"")
+                            if cleaned and cleaned not in origins:
+                                origins.append(cleaned)
+                        return origins
+                except Exception:
+                    pass
+            for part in v.split(","):
+                cleaned = part.strip().strip("'\"")
+                if cleaned and cleaned not in origins:
+                    origins.append(cleaned)
+        elif isinstance(v, (list, tuple, set)):
+            for item in v:
+                cleaned = str(item).strip().strip("'\"")
+                if cleaned and cleaned not in origins:
+                    origins.append(cleaned)
+        return origins
+
     INFERENCE_URL: str = Field(default="https://friday-universe.duckdns.org/inference", description="Canonical live deployment URL for Inference")
 
     # Security & Auth Configuration
@@ -316,6 +359,25 @@ class Settings(BaseSettings):
                         keys.append(cleaned)
 
         return keys
+
+    def validate_environment(self) -> dict[str, Any]:
+        """Validate startup configuration and return runtime provider readiness summary."""
+        configured_providers = []
+        for prov in ("gemini", "groq", "cerebras", "openrouter", "mistral", "nvidia", "cohere", "huggingface"):
+            if self.get_provider_keys(prov):
+                configured_providers.append(prov)
+        if self.LOCAL_ENABLED:
+            configured_providers.append("local")
+
+        return {
+            "app_env": self.APP_ENV,
+            "configured_providers": configured_providers,
+            "local_enabled": self.LOCAL_ENABLED,
+            "insecure_dev_auth": self.INSECURE_DEV_AUTH,
+            "port": self.PORT,
+            "host": self.HOST,
+        }
+
 
 
 settings = Settings()

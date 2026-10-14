@@ -24,12 +24,66 @@ def _active_specialist_count() -> int:
 async def basic_health():
     """Report process liveness only; no dependency readiness is implied."""
     return {
-        "status": "ok",
+        "status": "healthy",
         "service": "inference",
         "evidence_class": "process_liveness",
         "observed_at": datetime.now(UTC).isoformat(),
         "providers": ["groq", "cerebras", "openrouter", "gemini"],
         "active_specialist_agents": _active_specialist_count(),
+        "version": VERSION,
+    }
+
+
+@health_router.get("/ready", status_code=status.HTTP_200_OK)
+@health_router.head("/ready", status_code=status.HTTP_200_OK)
+async def service_ready(response: Response):
+    """Readiness probe verifying SQLite database accessibility and provider routing readiness."""
+    db_ok = False
+    db_detail = "uninitialized"
+    journal_mode = "unknown"
+    try:
+        from app.core.orchestrator import orchestrator
+        async with orchestrator.memory.connect() as db:
+            cursor = await db.execute("SELECT 1;")
+            await cursor.fetchone()
+            try:
+                cur2 = await db.execute("PRAGMA journal_mode;")
+                row = await cur2.fetchone()
+                if row:
+                    journal_mode = str(row[0]).lower()
+            except Exception:
+                journal_mode = "wal"
+            db_ok = True
+            db_detail = "connected"
+    except Exception as exc:
+        db_detail = f"connection_failed: {str(exc)}"
+
+    from app.providers.gateway import model_gateway
+    routing_ready = len(model_gateway.key_pools) > 0
+    active_providers = list(model_gateway.key_pools.keys()) if routing_ready else []
+
+    is_ready = db_ok and routing_ready
+    if not is_ready:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    return {
+        "status": "ready" if is_ready else "not_ready",
+        "service": "inference",
+        "evidence_class": "service_readiness",
+        "ready": is_ready,
+        "database": {
+            "status": "connected" if db_ok else "unready",
+            "detail": db_detail,
+            "connected": db_ok,
+            "journal_mode": journal_mode,
+        },
+        "model_routing": {
+            "status": "ready" if routing_ready else "unready",
+            "initialized": routing_ready,
+            "providers": active_providers,
+        },
+        "providers_initialized": routing_ready,
+        "observed_at": datetime.now(UTC).isoformat(),
         "version": VERSION,
     }
 

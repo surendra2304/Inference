@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import signal
 import uuid
 from contextlib import asynccontextmanager
@@ -11,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.agents.software_specialists import register_software_specialists
 from app.api.agent_routes import agent_router
@@ -72,6 +74,12 @@ async def lifespan(app: FastAPI):
         production_config.APP_ENV,
         production_config.HOST,
         production_config.PORT
+    )
+    env_info = settings.validate_environment()
+    logger.info(
+        "Startup environment validated: env=%s, active_providers=%s",
+        env_info["app_env"],
+        ", ".join(env_info["configured_providers"]) or "none (degraded)",
     )
     # Register software engineering specialists for FORGE
     register_software_specialists()
@@ -168,6 +176,7 @@ cors_origins = settings.CORS_ALLOWED_ORIGINS if settings.CORS_ALLOWED_ORIGINS el
     "http://localhost:8000",
     "http://127.0.0.1:8000",
     "http://localhost:8004",
+    "http://127.0.0.1:8004",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
@@ -180,19 +189,61 @@ app.add_middleware(
 )
 
 
+STATUS_TO_ERROR_CODE: dict[int, str] = {
+    400: "BAD_REQUEST",
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    405: "METHOD_NOT_ALLOWED",
+    408: "REQUEST_TIMEOUT",
+    413: "PAYLOAD_TOO_LARGE",
+    422: "VALIDATION_ERROR",
+    429: "RATE_LIMIT_EXCEEDED",
+    500: "INTERNAL_SERVER_ERROR",
+    502: "BAD_GATEWAY",
+    503: "SERVICE_UNAVAILABLE",
+    504: "GATEWAY_TIMEOUT",
+}
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    correlation_id = (
+        request.headers.get("X-Correlation-ID")
+        or request.headers.get("X-Request-ID")
+        or str(uuid.uuid4())
+    )
+    detail = exc.detail
+    if isinstance(detail, dict):
+        error_code = (
+            detail.get("error")
+            or detail.get("error_code")
+            or STATUS_TO_ERROR_CODE.get(exc.status_code, f"HTTP_{exc.status_code}")
+        )
+        message = str(detail.get("message") or detail.get("detail") or "HTTP exception occurred.")
+    else:
+        error_code = STATUS_TO_ERROR_CODE.get(exc.status_code, f"HTTP_{exc.status_code}")
+        message = str(detail) if detail is not None else "HTTP exception occurred."
+
+    response_headers = dict(exc.headers) if getattr(exc, "headers", None) else {}
+    response_headers["X-Correlation-ID"] = correlation_id
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": error_code,
+            "message": message,
+            "detail": detail,
+            "success": False,
+            "correlation_id": correlation_id,
+        },
+        headers=response_headers,
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Return a 422 that can actually be serialised.
-
-    FastAPI's default handler echoes the offending input back to the caller. Python's
-    ``json`` parses the non-standard literals ``NaN``/``Infinity``, so a body such as
-    ``{"question": "q", "max_agents": 1e309}`` reaches Pydantic as ``inf``; the validator
-    correctly rejects it ("Input should be a finite number"), the error payload carries
-    ``'input': inf``, and Starlette's encoder — which sets ``allow_nan=False`` — raises
-    ``ValueError: Out of range float values are not JSON compliant``. That escaped into
-    the global handler and turned a 422 into a 500 on every validating route: the client
-    was told the server had broken when it had merely sent a bad number.
-    """
+    """Return a 422 that can actually be serialised."""
     correlation_id = (
         request.headers.get("X-Correlation-ID")
         or request.headers.get("X-Request-ID")
@@ -206,9 +257,21 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
             for e in exc.errors()[:5]
         ),
     )
+    details = validation_errors_payload(exc.errors())
+    msg_parts = [
+        f"{'.'.join(str(p) for p in e.get('loc', []))}: {e.get('msg', '')}"
+        for e in exc.errors()[:3]
+    ]
+    message = f"Request validation failed: {'; '.join(msg_parts)}" if msg_parts else "Request validation failed."
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": validation_errors_payload(exc.errors())},
+        content={
+            "error": "VALIDATION_ERROR",
+            "message": message,
+            "detail": details,
+            "success": False,
+            "correlation_id": correlation_id,
+        },
         headers={"X-Correlation-ID": correlation_id},
     )
 
@@ -224,14 +287,17 @@ async def global_exception_handler(request: Request, exc: Exception):
         "Unhandled global exception [correlation_id=%s] on %s %s: %s",
         correlation_id, request.method, request.url.path, str(exc), exc_info=True
     )
+    message = "An internal server error occurred."
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
-            "error_code": "INTERNAL_SERVER_ERROR",
-            "message": "An internal server error occurred.",
-            "correlation_id": correlation_id
+            "error": "INTERNAL_SERVER_ERROR",
+            "message": message,
+            "detail": f"{message} (correlation id {correlation_id})",
+            "success": False,
+            "correlation_id": correlation_id,
         },
-        headers={"X-Correlation-ID": correlation_id}
+        headers={"X-Correlation-ID": correlation_id},
     )
 
 
@@ -329,4 +395,12 @@ async def top_level_stream(req: DirectStreamRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", getattr(settings, "PORT", 8000)))
+    host = os.environ.get("HOST", getattr(settings, "HOST", "0.0.0.0"))
+    uvicorn.run("app.main:app", host=host, port=port, workers=int(os.environ.get("WEB_CONCURRENCY", 1)))
+
 

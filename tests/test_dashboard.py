@@ -44,7 +44,7 @@ async def test_dashboard_read_endpoints_return_expected_shapes():
 
     assert basic.status_code == 200
     basic_payload = basic.json()
-    assert basic_payload["status"] in ("ok", "responding")
+    assert basic_payload["status"] in ("ok", "healthy", "responding")
     assert basic_payload["service"] in ("inference", "inference-api")
     assert basic_payload["evidence_class"] == "process_liveness"
     assert datetime.fromisoformat(basic_payload["observed_at"])

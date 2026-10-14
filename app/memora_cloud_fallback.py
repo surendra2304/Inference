@@ -1,6 +1,7 @@
 """Small cloud-only Memora client for agent images without the full SDK."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -22,6 +23,10 @@ class MemoraClient:
         self.api_key = api_key
         self.timeout = timeout
         self.last_error: str | None = None
+
+    async def arequest(self, agent_name: str, path: str, *, method: str = "GET", payload: dict[str, Any] | None = None) -> Any:
+        """Non-blocking async request delegator for event loops."""
+        return await asyncio.to_thread(self._request, agent_name, path, method=method, payload=payload)
 
     def _request(self, agent_name: str, path: str, *, method: str = "GET", payload: dict[str, Any] | None = None) -> Any:
         agent = agent_name.strip().lower()

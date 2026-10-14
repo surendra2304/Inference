@@ -35,3 +35,7 @@ data/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Agent Squad Temp Files
+.agents/
+ORIGINAL_REQUEST.md

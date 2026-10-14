@@ -202,7 +202,7 @@ class ModelGateway:
 
     def _initialize_pools(self) -> None:
         """Initialize key pools and rate limiters for all known providers."""
-        all_providers = ["gemini", "groq", "mistral", "openrouter", "cohere", "huggingface", "nvidia"]
+        all_providers = ["gemini", "groq", "cerebras", "mistral", "openrouter", "cohere", "huggingface", "nvidia"]
         if settings.LOCAL_ENABLED:
             # Self-hosted tier: keyless, unmetered, and therefore the correct final
             # rung of the fallback ladder. Registered only when enabled so that a

@@ -2,10 +2,9 @@
 
 import time
 
-import httpx
-
 from app.core.config import settings
 from app.providers.base import ProviderRequest, ProviderResponse
+from app.providers.http_client import get_shared_client
 from app.providers.openai_compatible import OpenAICompatibleProvider
 from app.utils.logger import logger
 
@@ -73,9 +72,9 @@ class OpenRouterProvider(OpenAICompatibleProvider):
         url = f"{self.base_url}/models"
         headers = self._get_headers()
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(url, headers=headers)
-                if resp.status_code == 200:
+            client = await get_shared_client()
+            resp = await client.get(url, headers=headers, timeout=10.0)
+            if resp.status_code == 200:
                     data = resp.json().get("data", [])
                     free_models = [
                         m["id"]

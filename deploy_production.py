@@ -35,7 +35,7 @@ def audit_environment():
     # Check Health Endpoints
     print("\n--- [1/3] Verifying Health Endpoints ---")
     r_health = client.get("/health")
-    assert r_health.status_code == 200 and r_health.json()["status"] == "healthy"
+    assert r_health.status_code == 200 and r_health.json().get("status") in ("ok", "healthy")
     print("  [+] GET /health: OK")
 
     r_detailed = client.get("/health/detailed")
@@ -50,23 +50,31 @@ def audit_environment():
     assert r_status.status_code == 200 and r_status.json()["status"] == "operational"
     print("  [+] GET /status: OK (All 10 specialists active)")
 
+    r_ready = client.get("/ready")
+    assert r_ready.status_code == 200 and r_ready.json()["ready"] is True
+    print("  [+] GET /ready: OK (Database & provider routing ready)")
+
     r_metrics = client.get("/metrics")
-    assert r_metrics.status_code == 200 and "ai_universe_requests_total" in r_metrics.text
+    assert r_metrics.status_code == 200 and ("inference_requests_total" in r_metrics.text or "ai_universe_requests_total" in r_metrics.text)
     print("  [+] GET /metrics: OK (Prometheus metrics active)")
 
     # Check Trading Subsystem
     print("\n--- [2/3] Verifying Trading Advisory & A/B / Testnet Endpoints ---")
-    r_trading_health = client.get("/v1/trading/consult/health")
+    from app.core.config import settings
+    auth_key = settings.INFERENCE_API_KEY or (settings.get_valid_api_keys()[0] if settings.get_valid_api_keys() else "dev_secret_key")
+    auth_headers = {"X-INFERENCE-API-KEY": auth_key}
+
+    r_trading_health = client.get("/v1/trading/consult/health", headers=auth_headers)
     assert r_trading_health.status_code == 200
     th = r_trading_health.json()
     assert th["advisory_only"] is True and th["exchange_execution"] is False
     print("  [+] GET /v1/trading/consult/health: OK (Advisory invariant strictly preserved)")
 
-    r_testnet_perf = client.get("/v1/trading/testnet/performance")
+    r_testnet_perf = client.get("/v1/trading/testnet/performance", headers=auth_headers)
     assert r_testnet_perf.status_code == 200
     print("  [+] GET /v1/trading/testnet/performance: OK")
 
-    r_testnet_comp = client.get("/v1/trading/testnet/comparison")
+    r_testnet_comp = client.get("/v1/trading/testnet/comparison", headers=auth_headers)
     assert r_testnet_comp.status_code == 200
     print("  [+] GET /v1/trading/testnet/comparison: OK")
 

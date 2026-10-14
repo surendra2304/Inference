@@ -59,13 +59,13 @@ async def test_chat_completions_non_streaming(auth, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_chat_completions_streaming(auth, monkeypatch):
-    from app.providers.gateway import model_gateway
+    from app.providers.gateway import ModelGateway
 
     async def mock_stream(*args, **kwargs):
         yield "Hello"
         yield " world"
 
-    monkeypatch.setattr(model_gateway, "stream", mock_stream)
+    monkeypatch.setattr(ModelGateway, "stream", mock_stream)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver", headers=auth) as client:
@@ -85,13 +85,13 @@ async def test_chat_completions_streaming(auth, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_top_level_stream(auth, monkeypatch):
-    from app.providers.gateway import model_gateway
+    from app.providers.gateway import ModelGateway
 
     async def mock_stream(*args, **kwargs):
         yield "Token 1"
         yield " Token 2"
 
-    monkeypatch.setattr(model_gateway, "stream", mock_stream)
+    monkeypatch.setattr(ModelGateway, "stream", mock_stream)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver", headers=auth) as client:

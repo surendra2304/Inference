@@ -31,6 +31,7 @@ class ProductionConfig(BaseSettings):
     PROVIDER_PRIORITY: list[str] = [
         "gemini",
         "groq",
+        "cerebras",
         "mistral",
         "openrouter",
         "huggingface",

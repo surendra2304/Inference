@@ -2,6 +2,7 @@
 
 from app.agents.roles import get_all_specialist_agents
 from app.agents.software_specialists import get_software_specialist_agents
+from app.providers.cerebras import CerebrasProvider
 from app.providers.gemini import GeminiProvider
 from app.providers.groq import GroqProvider
 from app.providers.nvidia import NvidiaProvider
@@ -21,6 +22,12 @@ def test_groq_defaults():
     assert provider.default_model == "openai/gpt-oss-120b"
     assert "openai/gpt-oss-120b" in provider.supported_models
     assert "qwen/qwen3.8-27b" in provider.supported_models
+
+
+def test_cerebras_defaults():
+    provider = CerebrasProvider()
+    assert provider.default_model == "llama-3.3-70b"
+    assert "llama-3.3-70b" in provider.supported_models
 
 
 def test_nvidia_defaults():

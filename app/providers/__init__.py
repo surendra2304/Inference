@@ -1,6 +1,7 @@
 """Provider factory and registry for Inference (7 Verified Free Cloud Providers)."""
 
 from app.providers.base import BaseLLMProvider
+from app.providers.cerebras import CerebrasProvider
 from app.providers.cohere import CohereProvider
 from app.providers.gemini import GeminiProvider
 from app.providers.groq import GroqProvider
@@ -17,6 +18,7 @@ from app.providers.sglang import SGLangTransport
 from app.providers.vllm import VLLMTransport
 
 _PROVIDER_MAP: dict[str, type[BaseLLMProvider]] = {
+    "cerebras": CerebrasProvider,
     "gemini": GeminiProvider,
     "groq": GroqProvider,
     "mistral": MistralProvider,
@@ -25,9 +27,6 @@ _PROVIDER_MAP: dict[str, type[BaseLLMProvider]] = {
     "huggingface": HuggingFaceProvider,
     "nvidia": NvidiaProvider,
     "litellm": LiteLLMProvider,
-    # Self-hosted OpenAI-compatible endpoint (llama.cpp / vLLM / SGLang / Ollama).
-    # Registered so that "local inference" is reachable from ModelGateway instead of
-    # existing only as the unregistered transports in llamacpp.py / vllm.py / sglang.py.
     "local": LocalProvider,
 }
 
@@ -52,6 +51,7 @@ def get_provider(name: str = "gemini", **kwargs) -> BaseLLMProvider:
 
 __all__ = [
     "BaseLLMProvider",
+    "CerebrasProvider",
     "CohereProvider",
     "GeminiProvider",
     "GroqProvider",

@@ -123,6 +123,17 @@ class ProductionSecurityMiddleware(BaseHTTPMiddleware):
     """Middleware enforcing security headers, request size limits, and basic rate control."""
 
     async def dispatch(self, request: Request, call_next):
+        # Exempt health, readiness, and metrics probes from security rate limits
+        if request.url.path in (
+            "/health",
+            "/ready",
+            "/health/ready",
+            "/health/detailed",
+            "/health/providers",
+            "/metrics",
+        ) or request.url.path.startswith("/health/"):
+            return await call_next(request)
+
         # Never default an unknown client to loopback: that would lump every
         # unidentified caller into one bucket and grant it localhost treatment.
         client_ip = resolve_client_ip(request)
@@ -131,7 +142,12 @@ class ProductionSecurityMiddleware(BaseHTTPMiddleware):
         if not security_manager.check_rate_limit(client_ip):
             return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                content={"detail": "Too many requests. Please throttle your traffic."}
+                content={
+                    "error": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests. Please throttle your traffic.",
+                    "detail": "Too many requests. Please throttle your traffic.",
+                    "success": False,
+                }
             )
 
         # 2. Request body size check (Max 2MB)
@@ -145,7 +161,12 @@ class ProductionSecurityMiddleware(BaseHTTPMiddleware):
         if content_length_bytes > 2 * 1024 * 1024:
             return JSONResponse(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                content={"detail": "Request payload exceeds 2MB limit."}
+                content={
+                    "error": "PAYLOAD_TOO_LARGE",
+                    "message": "Request payload exceeds 2MB limit.",
+                    "detail": "Request payload exceeds 2MB limit.",
+                    "success": False,
+                }
             )
 
         try:
@@ -160,12 +181,15 @@ class ProductionSecurityMiddleware(BaseHTTPMiddleware):
                 "Unhandled exception [correlation_id=%s] on %s %s: %s",
                 correlation_id, request.method, request.url.path, str(exc), exc_info=True
             )
+            message = "An internal server error occurred."
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content={
-                    "error_code": "INTERNAL_SERVER_ERROR",
-                    "message": "An internal server error occurred.",
-                    "correlation_id": correlation_id
+                    "error": "INTERNAL_SERVER_ERROR",
+                    "message": message,
+                    "detail": f"{message} (correlation id {correlation_id})",
+                    "success": False,
+                    "correlation_id": correlation_id,
                 },
                 headers={"X-Correlation-ID": correlation_id}
             )

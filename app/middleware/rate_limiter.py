@@ -34,8 +34,19 @@ class EnhancedRateLimiterMiddleware(BaseHTTPMiddleware):
         self._lock = threading.RLock()
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Exempt health and docs checks
-        if request.url.path in ("/health", "/", "/docs", "/openapi.json", "/v1/forge/health"):
+        # Exempt health, readiness, metrics, and docs checks
+        if request.url.path in (
+            "/health",
+            "/ready",
+            "/health/ready",
+            "/health/detailed",
+            "/health/providers",
+            "/metrics",
+            "/",
+            "/docs",
+            "/openapi.json",
+            "/v1/forge/health",
+        ):
             return await call_next(request)
 
         # Identify consumer identity
@@ -117,13 +128,17 @@ class EnhancedRateLimiterMiddleware(BaseHTTPMiddleware):
                     "Rate limit exceeded for consumer '%s' (IP: %s): %.2f tokens left, retry in %ds",
                     consumer_id, client_ip, tokens, retry_after,
                 )
+                detail_msg = (
+                    f"Rate limit exceeded for consumer '{consumer_id}'. "
+                    f"Limit: {int(limit)}/hour (sustained)."
+                )
                 return JSONResponse(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     content={
-                        "detail": (
-                            f"Rate limit exceeded for consumer '{consumer_id}'. "
-                            f"Limit: {int(limit)}/hour (sustained)."
-                        ),
+                        "error": "RATE_LIMIT_EXCEEDED",
+                        "message": detail_msg,
+                        "detail": detail_msg,
+                        "success": False,
                         "retry_after_seconds": retry_after,
                     },
                     headers={

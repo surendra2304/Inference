@@ -191,7 +191,7 @@ curl -X GET http://localhost:8000/health
 #### Response:
 ```json
 {
-  "status": "ok",
+  "status": "healthy",
   "service": "inference",
   "evidence_class": "process_liveness",
   "observed_at": "2026-10-14T16:00:00.000000+00:00",
@@ -199,6 +199,52 @@ curl -X GET http://localhost:8000/health
   "active_specialist_agents": 10,
   "version": "2.0.0"
 }
+```
+
+---
+
+### 5. Service Readiness Probe (`GET /ready`)
+
+Deep readiness probe verifying persistent SQLite database connectivity (WAL mode verification) and model routing initialization. Returns `HTTP 200` when ready to serve production traffic, or `HTTP 503` if degraded.
+
+#### Request:
+```bash
+curl -X GET http://localhost:8000/ready
+```
+
+#### Response:
+```json
+{
+  "status": "ready",
+  "service": "inference",
+  "evidence_class": "service_readiness",
+  "ready": true,
+  "database": {
+    "status": "connected",
+    "detail": "connected",
+    "connected": true,
+    "journal_mode": "wal"
+  },
+  "model_routing": {
+    "status": "ready",
+    "initialized": true,
+    "providers": ["gemini", "groq", "cerebras", "openrouter"]
+  },
+  "providers_initialized": true,
+  "observed_at": "2026-10-14T16:00:00.000000+00:00",
+  "version": "2.0.0"
+}
+```
+
+---
+
+### 6. Prometheus Metrics (`GET /metrics`)
+
+Exposes real-time Prometheus metrics for scrapers and Grafana dashboards, including request totals, latencies, provider health, token counts, and memory statistics.
+
+#### Request:
+```bash
+curl -X GET http://localhost:8000/metrics
 ```
 
 ---

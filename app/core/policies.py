@@ -31,8 +31,13 @@ PROVIDER_FALLBACK_MATRIX: dict[str, FallbackRoute] = {
     ),
     "groq": FallbackRoute(
         primary_provider="groq",
-        fallback_provider="nvidia",
-        fallback_model="nvidia/nemotron-3-super-120b-a12b"
+        fallback_provider="cerebras",
+        fallback_model="llama-3.3-70b"
+    ),
+    "cerebras": FallbackRoute(
+        primary_provider="cerebras",
+        fallback_provider="openrouter",
+        fallback_model="liquid/lfm-2.5-2.6b:free"
     ),
     "nvidia": FallbackRoute(
         primary_provider="nvidia",
