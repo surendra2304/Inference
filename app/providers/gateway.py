@@ -9,6 +9,7 @@ Features:
 """
 
 import asyncio
+import math
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -138,6 +139,13 @@ class ProviderRateLimiter:
         self._sem = asyncio.Semaphore(max_concurrency)
 
     async def acquire(self, cost: float = 1.0) -> None:
+        # Reject impossible costs before taking a semaphore slot. A cost larger than
+        # the bucket capacity can never be satisfied and would otherwise wait forever;
+        # NaN and negative values can also corrupt token accounting.
+        if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not math.isfinite(cost) or cost <= 0:
+            raise ValueError("cost must be a finite positive number")
+        if cost > self.capacity:
+            raise ValueError(f"cost ({cost}) cannot exceed token bucket capacity ({self.capacity})")
         """Acquire a concurrency slot and a rate-limit token, without leaking either.
 
         Runaway-safe: this method takes a concurrency slot *first* and only then waits
