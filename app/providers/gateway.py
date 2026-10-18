@@ -591,8 +591,10 @@ class ModelGateway:
         # host: test_every_declared_operation_is_routed 0.6s -> 21.5s. The primary gate already
         # refuses to attempt an unconfigured provider on exactly this reasoning.
         openrouter_pool_for_gate = self.key_pools.get("openrouter")
-        openrouter_has_credentials = provider_has_credentials("openrouter") and (
-            openrouter_pool_for_gate.total_keys_count > 0 if openrouter_pool_for_gate is not None else True
+        openrouter_has_credentials = (
+            (openrouter_pool_for_gate.total_keys_count > 0)
+            if openrouter_pool_for_gate is not None
+            else provider_has_credentials("openrouter")
         )
         if failed_provider != "openrouter" and openrouter_has_credentials:
             openrouter_key: str | None = None

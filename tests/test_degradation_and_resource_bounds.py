@@ -478,9 +478,12 @@ def test_process_exits_when_a_pooled_connection_is_left_open(tmp_path):
         print("reached the end of the script")
         """
     )
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent
     result = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path / "exit.db")],
-        cwd=".",
+        cwd=str(repo_root),
         capture_output=True,
         text=True,
         timeout=60,

@@ -15,6 +15,13 @@ from app.core.config import settings
 TEST_API_KEY = "test_inference_api_key_not_a_secret"
 
 
+@pytest.fixture(autouse=True)
+def default_server_key(monkeypatch):
+    """Ensure the test server has a configured key by default so routes can authenticate."""
+    monkeypatch.setattr(settings, "INFERENCE_API_KEY", TEST_API_KEY)
+    monkeypatch.setattr(settings, "INSECURE_DEV_AUTH", False)
+
+
 @pytest.fixture
 def auth(monkeypatch):
     """Configure a server-side key and yield the headers a caller must send."""
