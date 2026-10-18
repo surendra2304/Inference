@@ -56,6 +56,10 @@ def _request():
 
 def test_openrouter_fallback_uses_one_rotated_key(monkeypatch):
     gateway = _gateway(["first-test-key", "second-test-key"])
+    monkeypatch.setattr(
+        "app.providers.gateway.provider_has_credentials",
+        lambda provider: provider == "openrouter",
+    )
     constructed = []
 
     def get_provider(name, **kwargs):
@@ -119,6 +123,10 @@ def test_openrouter_fallback_does_not_bypass_all_key_quarantines(monkeypatch):
 
 def test_openrouter_fallback_quarantines_only_the_key_that_was_rate_limited(monkeypatch):
     gateway = _gateway(["first-test-key", "second-test-key"])
+    monkeypatch.setattr(
+        "app.providers.gateway.provider_has_credentials",
+        lambda provider: provider == "openrouter",
+    )
     pool = gateway.key_pools["openrouter"]
     constructed = []
 

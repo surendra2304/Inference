@@ -1498,3 +1498,23 @@ def test_credential_scan_ignores_degenerate_hex_runs_but_keeps_real_ones():
     assert "hex_private_key" in detect_credentials(
         {"prompt": "private_key = 0x" + real_looking}
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cost", [0, -1, float("nan"), float("inf"), -float("inf"), True])
+async def test_provider_rate_limiter_rejects_invalid_costs(cost):
+    limiter = gateway_module.ProviderRateLimiter("invalid-cost", max_concurrency=2)
+    with pytest.raises(ValueError, match="cost must be a finite positive number"):
+        await limiter.acquire(cost=cost)
+    # Validation happens before semaphore acquisition, so a corrected call remains usable.
+    await limiter.acquire(cost=1)
+    limiter.release()
+
+
+@pytest.mark.asyncio
+async def test_provider_rate_limiter_rejects_cost_above_bucket_capacity():
+    limiter = gateway_module.ProviderRateLimiter("oversized-cost", max_concurrency=2)
+    with pytest.raises(ValueError, match="cannot exceed token bucket capacity"):
+        await asyncio.wait_for(limiter.acquire(cost=limiter.capacity + 1), timeout=0.1)
+    await limiter.acquire(cost=1)
+    limiter.release()

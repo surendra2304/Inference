@@ -9,6 +9,7 @@ Features:
 """
 
 import asyncio
+import math
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -140,22 +141,22 @@ class ProviderRateLimiter:
     async def acquire(self, cost: float = 1.0) -> None:
         """Acquire a concurrency slot and a rate-limit token, without leaking either.
 
-        Runaway-safe: this method takes a concurrency slot *first* and only then waits
-        for a token, because the wait must not happen while the bucket lock is held. That
-        ordering creates a window in which the caller holds a slot but has not yet been
-        handed the limiter — and if the task is cancelled inside that window the slot
-        would never come back. Cancellation there is not exotic: every caller in this
-        module wraps a provider call in ``asyncio.wait_for`` and a disconnecting client
-        cancels the whole handler task, so the interruption lands on whatever await point
-        the task happens to be at — frequently this one, precisely because the bucket is
-        exhausted when load is high.
-
-        Measured cost of the leak: one cancelled waiter left ``max_concurrency`` slots
-        permanently reduced; the next caller blocked forever, and with four cancellations
-        the provider became permanently unavailable while still appearing healthy. The
-        ``finally`` below returns the slot on every path that does not hand it to the
-        caller, which makes cancellation safe to occur at any point.
+        Runaway-safe: the concurrency slot is taken before waiting for a token, but
+        cancellation or timeout returns the slot unless the caller receives it.
         """
+        # Validate before taking a semaphore slot. Invalid or impossible costs must not
+        # corrupt token accounting or hold a concurrency slot while waiting forever.
+        if (
+            isinstance(cost, bool)
+            or not isinstance(cost, (int, float))
+            or not math.isfinite(cost)
+            or cost <= 0
+        ):
+            raise ValueError("cost must be a finite positive number")
+        if cost > self.capacity:
+            raise ValueError(
+                f"cost ({cost}) cannot exceed token bucket capacity ({self.capacity})"
+            )
         await self._sem.acquire()
         handed_over = False
         try:
@@ -174,10 +175,7 @@ class ProviderRateLimiter:
                 await asyncio.sleep(delay)
         finally:
             if not handed_over:
-                # Cancelled, timed out, or otherwise interrupted while waiting for a
-                # token: the slot is ours to give back, and nobody else can do it —
-                # the caller never received the limiter, so its own ``finally`` (which
-                # calls release()) is never reached.
+                # The caller never received the limiter, so it cannot release this slot.
                 self._sem.release()
 
     def release(self) -> None:
