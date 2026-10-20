@@ -197,10 +197,12 @@ class OutcomeLearningEngine:
         self.outcome_records.append(report)
         logger.info("[OUTCOME] Recorded from %s (task: %s): %s", report.consumer, report.task_type, report.outcome)
 
+        # A measured rate only exists if this report included one. Initialize it for every
+        # outcome because persistence runs for failures too, not just successful records.
+        measured_rate: float | None = None
         # Index successes into the strategy bank, with only what was reported.
         if report.outcome == "success":
             self._pattern_seq += 1
-            measured_rate: float | None = None
             for key in ("success_rate", "success_rate_pct", "closed_won_rate"):
                 raw = report.measured_metrics.get(key)
                 if isinstance(raw, (int, float)):
