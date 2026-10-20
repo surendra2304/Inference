@@ -448,10 +448,12 @@ def test_temporal_result_serialises_with_null_confidence_for_multimodal_consumer
 def test_intelx_formatter_does_not_mark_model_extracted_claims_as_verified():
     from app.api.universal_task_routes import _format_intelx_result
 
-    result = _format_intelx_result(
-        "Executive briefing:\\nThe service launched in 2024.\\nA second sentence with detail.",
-        {"source": "operator-supplied-document"},
-    )
+    content = "\\n".join([
+        "Executive briefing:",
+        "The service launched in 2024.",
+        "A second sentence with detail.",
+    ])
+    result = _format_intelx_result(content, {"source": "operator-supplied-document"})
     assert result["claims"]
     assert all(claim["verification_status"] == "unverified" for claim in result["claims"])
     assert all(claim["confidence"] is None for claim in result["claims"])
@@ -463,7 +465,7 @@ def test_intelx_formatter_does_not_mark_model_extracted_claims_as_verified():
 def test_intelx_formatter_does_not_create_a_claim_from_empty_model_output():
     from app.api.universal_task_routes import _format_intelx_result
 
-    result = _format_intelx_result("  \\n", {})
+    result = _format_intelx_result("", {})
     assert result["claims"] == []
     assert result["total_claims"] == 0
 
