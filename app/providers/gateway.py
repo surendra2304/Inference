@@ -26,6 +26,7 @@ from app.providers.errors import (
     ProviderUnconfiguredError,
     RateLimitError,
     TemporaryUnavailableError,
+    TimeoutError as ProviderTimeoutError,
     normalize_provider_exception,
 )
 from app.providers.health import provider_health_tracker
@@ -905,20 +906,88 @@ class ModelGateway:
         request: ProviderRequest,
         stage_name: str = "general_stream",
     ) -> AsyncIterator[str]:
-        """Stream token chunks directly from the requested provider adapter."""
-        import app.providers
-
+        """Stream from one provider while enforcing the request deadline and limits."""
         prov_name = provider.lower().strip()
+        timeout_budget = float(request.extra_params.get("timeout", settings.REQUEST_TIMEOUT or 60.0))
+        if not math.isfinite(timeout_budget) or timeout_budget <= 0:
+            raise ValueError("stream timeout must be a finite positive number")
+        deadline = time.monotonic() + timeout_budget
+
+        if not provider_has_credentials(prov_name):
+            raise ProviderUnconfiguredError(
+                f"Provider '{prov_name}' has no configured credential; streaming was not attempted.",
+                provider=prov_name,
+                model=request.model,
+            )
+
         pool = self.key_pools.get(prov_name)
         current_key = pool.choose() if pool else None
+        limiter = self.rate_limiters.get(prov_name)
+        if limiter is None:
+            limiter = ProviderRateLimiter(prov_name)
+            self.rate_limiters[prov_name] = limiter
 
-        provider_instance = (
-            app.providers.get_provider(prov_name, api_key=current_key)
-            if current_key
-            else app.providers.get_provider(prov_name)
-        )
-        async for chunk in provider_instance.stream(request):
-            yield chunk
+        started = time.perf_counter()
+        acquired = False
+        iterator: AsyncIterator[str] | None = None
+        try:
+            import app.providers
+
+            provider_instance = (
+                app.providers.get_provider(prov_name, api_key=current_key)
+                if current_key
+                else app.providers.get_provider(prov_name)
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ProviderTimeoutError(f"Stream deadline exceeded for provider '{prov_name}'.")
+            await asyncio.wait_for(limiter.acquire(), timeout=remaining)
+            acquired = True
+            iterator = provider_instance.stream(request).__aiter__()
+
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ProviderTimeoutError(f"Stream deadline exceeded for provider '{prov_name}'.")
+                try:
+                    chunk = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
+                except StopAsyncIteration:
+                    self.health_tracker.record_success(prov_name, time.perf_counter() - started)
+                    return
+                yield chunk
+        except asyncio.CancelledError:
+            raise
+        except (asyncio.TimeoutError, ProviderTimeoutError) as exc:
+            typed_error = ProviderTimeoutError(
+                f"Stream deadline exceeded for provider '{prov_name}' after "
+                f"{time.perf_counter() - started:.2f}s.",
+                provider=prov_name,
+                model=request.model,
+                raw_error=exc,
+            )
+            self.health_tracker.record_failure(
+                prov_name, str(typed_error), is_503=True, latency_seconds=time.perf_counter() - started
+            )
+            raise typed_error from exc
+        except Exception as exc:
+            typed_error = normalize_provider_exception(exc, provider=prov_name, model=request.model)
+            self.health_tracker.record_failure(
+                prov_name,
+                str(typed_error),
+                is_429=isinstance(typed_error, RateLimitError),
+                is_503=isinstance(typed_error, TemporaryUnavailableError),
+                latency_seconds=time.perf_counter() - started,
+            )
+            raise typed_error from exc
+        finally:
+            try:
+                if iterator is not None:
+                    close = getattr(iterator, "aclose", None)
+                    if close is not None:
+                        await close()
+            finally:
+                if acquired:
+                    limiter.release()
 
 
 # Global default gateway instance
