@@ -163,7 +163,8 @@ def _format_intelx_result(content: str, payload: dict[str, Any]) -> dict[str, An
         "total_claims": len(claims),
         "summary": content[:300].strip(),
         "contradictions": [],
-        # Uncertainty has not been calibrated from independent evidence here.\n        "uncertainty_score": None,
+        # Uncertainty has not been calibrated from independent evidence here.
+        "uncertainty_score": None,
     }
 
 
@@ -294,7 +295,6 @@ async def execute_task(
             },
             task_type=task_type,
             provider_used=resp.provider_used,
-            stated_confidence=0.95,
         )
         outcome_learning_engine.record_outcome(outcome_report)
 
