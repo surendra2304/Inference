@@ -883,7 +883,17 @@ async def chat_completions(req: ChatCompletionRequest):
             temperature=req.temperature,
             max_tokens=tokens,
         )
-        provider = "gemini" if "gemini" in req.model.lower() else "groq"
+        norm_model = req.model.lower()
+        if "gemini" in norm_model:
+            provider = "gemini"
+        elif any(k in norm_model for k in ("gpt-4", "gpt-3", "o1", "o3", "openai")):
+            provider = "openai"
+        elif "mistral" in norm_model or "codestral" in norm_model:
+            provider = "mistral"
+        elif "cerebras" in norm_model:
+            provider = "cerebras"
+        else:
+            provider = "groq"
 
         async def _stream_generator():
             cmpl_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -914,13 +924,27 @@ async def chat_completions(req: ChatCompletionRequest):
 
     exec_tokens = max(50, min(tokens, 8192))
     exec_temp = max(0.0, min(float(req.temperature if req.temperature is not None else 0.7), 2.0))
+    norm_model = req.model.lower()
+    if req.model == "auto":
+        exec_provider = "auto"
+    elif "gemini" in norm_model:
+        exec_provider = "gemini"
+    elif any(k in norm_model for k in ("gpt-4", "gpt-3", "o1", "o3", "openai")):
+        exec_provider = "openai"
+    elif "mistral" in norm_model or "codestral" in norm_model:
+        exec_provider = "mistral"
+    elif "cerebras" in norm_model:
+        exec_provider = "cerebras"
+    else:
+        exec_provider = "groq"
+
     exec_req = UnifiedExecutionRequest(
-        provider="auto" if req.model == "auto" else ("gemini" if "gemini" in req.model.lower() else "groq"),
+        provider=exec_provider,
         agent_role="system_architect",
         prompt=f"{system_instruction}\n\n{prompt}",
         temperature=exec_temp,
         max_tokens=exec_tokens,
-        fast_lane=True,
+        fast_lane=True if req.model == "auto" else False,
     )
     res = await unified_provider_manager.execute(exec_req)
     created = int(time.time())
