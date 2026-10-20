@@ -27,52 +27,47 @@ from app.security.prompt_isolation import (
 
 
 def test_deterministic_waterfall_sequence():
-    """Safety Invariant 2: Waterfall order must strictly be Groq -> Mistral -> OpenAI -> Gemini."""
+    """Safety Invariant 2: Waterfall order must strictly be Groq -> OpenRouter -> Gemini across configured keys."""
     names = [p for p, _ in DETERMINISTIC_WATERFALL_ORDER]
-    assert names == ["groq", "mistral", "openai", "gemini"]
+    assert names == ["groq", "openrouter", "gemini"]
 
     # Test cycling starting after Groq
     seq_after_groq = ProviderSwitchingPolicy.get_waterfall_sequence("groq")
-    assert [p for p, _ in seq_after_groq] == ["mistral", "openai", "gemini"]
+    assert [p for p, _ in seq_after_groq] == ["openrouter", "gemini"]
 
-    # Test cycling starting after Mistral
-    seq_after_mistral = ProviderSwitchingPolicy.get_waterfall_sequence("mistral")
-    assert [p for p, _ in seq_after_mistral] == ["openai", "gemini", "groq"]
+    # Test cycling starting after OpenRouter
+    seq_after_openrouter = ProviderSwitchingPolicy.get_waterfall_sequence("openrouter")
+    assert [p for p, _ in seq_after_openrouter] == ["gemini", "groq"]
 
-    # Test cycling starting after OpenAI
-    seq_after_openai = ProviderSwitchingPolicy.get_waterfall_sequence("openai")
-    assert [p for p, _ in seq_after_openai] == ["gemini", "groq", "mistral"]
+    # Test cycling starting after Gemini
+    seq_after_gemini = ProviderSwitchingPolicy.get_waterfall_sequence("gemini")
+    assert [p for p, _ in seq_after_gemini] == ["groq", "openrouter"]
 
 
 def test_model_registry_defaults_and_resolution():
     """ModelRegistry must pre-populate and resolve all deterministic waterfall endpoints."""
     registry = ModelRegistry(populate_defaults=True)
-    groq_rec = registry.resolve("llama-3.3-70b", "groq")
+    groq_rec = registry.resolve("openai/gpt-oss-120b", "groq")
     assert groq_rec is not None
     assert groq_rec.endpoint.provider == "groq"
     assert Capability.CHAT in groq_rec.endpoint.capabilities
 
-    mistral_rec = registry.resolve("codestral-latest", "mistral")
-    assert mistral_rec is not None
-    assert mistral_rec.endpoint.provider == "mistral"
+    openrouter_rec = registry.resolve("meta-llama/llama-3.3-70b-instruct", "openrouter")
+    assert openrouter_rec is not None
+    assert openrouter_rec.endpoint.provider == "openrouter"
 
-    openai_rec = registry.resolve("gpt-4o", "openai")
-    assert openai_rec is not None
-    assert openai_rec.endpoint.provider == "openai"
-    assert Capability.VISION in openai_rec.endpoint.capabilities
-
-    gemini_rec = registry.resolve("gemini-3.8-flash", "gemini")
+    gemini_rec = registry.resolve("gemini-flash-latest", "gemini")
     assert gemini_rec is not None
     assert gemini_rec.endpoint.provider == "gemini"
 
     # Test waterfall sequence
     seq = registry.get_waterfall_sequence()
-    assert [r.endpoint.provider for r in seq] == ["groq", "mistral", "openai", "gemini"]
+    assert [r.endpoint.provider for r in seq] == ["groq", "openrouter", "gemini"]
 
     # Test fallback resolution
-    fb = registry.resolve_fallback("groq", "llama-3.3-70b")
+    fb = registry.resolve_fallback("groq", "openai/gpt-oss-120b")
     assert fb is not None
-    assert fb.endpoint.provider == "mistral"
+    assert fb.endpoint.provider == "openrouter"
 
 
 def test_model_policy_leak_prevention():
@@ -354,7 +349,7 @@ async def test_gateway_dynamic_waterfall_failover_and_key_scrubbing(monkeypatch)
     from app.providers.gateway import ModelGateway
 
     monkeypatch.setattr(settings, "GROQ_API_KEY", "gsk_groq_test_credential_1234567890")
-    monkeypatch.setattr(settings, "MISTRAL_API_KEY", "mistral-test-key-1234567890abcdef")
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "sk-or-v1-test-key-1234567890abcdef")
 
     gw = ModelGateway()
 
@@ -374,11 +369,11 @@ async def test_gateway_dynamic_waterfall_failover_and_key_scrubbing(monkeypatch)
         async def generate(self, r):
             raise RuntimeError("Groq 429 rate limit exceeded with key gsk_groq_secret_leaked_key_9999999999")
 
-    # Mock mistral to succeed
-    class SuccessMistralProvider(BaseLLMProvider):
+    # Mock openrouter to succeed
+    class SuccessOpenRouterProvider(BaseLLMProvider):
         @property
         def provider_name(self) -> str:
-            return "mistral"
+            return "openrouter"
         def capabilities(self):
             return None
         def estimate_usage(self, r):
@@ -389,17 +384,17 @@ async def test_gateway_dynamic_waterfall_failover_and_key_scrubbing(monkeypatch)
             yield "chunk"
         async def generate(self, r):
             return ProviderResponse(
-                content="Response from Mistral in waterfall",
-                model="codestral-latest",
-                provider="mistral",
+                content="Response from OpenRouter in waterfall",
+                model="meta-llama/llama-3.3-70b-instruct",
+                provider="openrouter",
                 latency_seconds=0.15,
             )
 
     def mock_get_provider(name, **kwargs):
         if name.lower() == "groq":
             return FailingGroqProvider()
-        if name.lower() == "mistral":
-            return SuccessMistralProvider()
+        if name.lower() == "openrouter":
+            return SuccessOpenRouterProvider()
         raise ValueError(f"Unknown {name}")
 
     with patch("app.providers.get_provider", side_effect=mock_get_provider):
@@ -409,10 +404,10 @@ async def test_gateway_dynamic_waterfall_failover_and_key_scrubbing(monkeypatch)
         )
         resp = await gw.execute("groq", req)
         assert resp is not None
-        assert resp.provider == "mistral"
+        assert resp.provider == "openrouter"
         assert resp.raw_response is not None
         prov = resp.raw_response.get("fallback_provenance", {})
-        assert prov.get("actual_provider") == "mistral"
+        assert prov.get("actual_provider") == "openrouter"
         # Key must be scrubbed completely!
         assert "gsk_groq_secret_leaked_key" not in prov.get("fallback_reason", "")
         assert "[REDACTED_CREDENTIAL: PROVIDER_KEY]" in prov.get("fallback_reason", "")

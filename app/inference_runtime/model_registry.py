@@ -18,10 +18,9 @@ class ModelRecord:
 
 # Deterministic failover waterfall rungs
 WATERFALL_MODELS: list[tuple[str, str, frozenset[Capability], int]] = [
-    ("groq", "llama-3.3-70b", frozenset({Capability.CHAT, Capability.STREAM, Capability.JSON, Capability.TOOLS}), 128_000),
-    ("mistral", "codestral-latest", frozenset({Capability.CHAT, Capability.STREAM, Capability.JSON, Capability.TOOLS}), 128_000),
-    ("openai", "gpt-4o", frozenset({Capability.CHAT, Capability.STREAM, Capability.JSON, Capability.TOOLS, Capability.VISION}), 128_000),
-    ("gemini", "gemini-3.8-flash", frozenset({Capability.CHAT, Capability.STREAM, Capability.JSON, Capability.TOOLS, Capability.VISION}), 1_000_000),
+    ("groq", "openai/gpt-oss-120b", frozenset({Capability.CHAT, Capability.STREAM, Capability.JSON, Capability.TOOLS}), 128_000),
+    ("openrouter", "meta-llama/llama-3.3-70b-instruct", frozenset({Capability.CHAT, Capability.STREAM, Capability.JSON, Capability.TOOLS}), 128_000),
+    ("gemini", "gemini-flash-latest", frozenset({Capability.CHAT, Capability.STREAM, Capability.JSON, Capability.TOOLS, Capability.VISION}), 1_000_000),
 ]
 
 
@@ -89,7 +88,7 @@ class ModelRegistry:
         """
         with self._lock:
             enabled_map = {r.endpoint.provider: r for r in self._models.values() if r.enabled}
-            waterfall_providers = ["groq", "mistral", "openai", "gemini"]
+            waterfall_providers = ["groq", "openrouter", "gemini"]
 
             if start_provider and start_provider.lower() in waterfall_providers:
                 idx = waterfall_providers.index(start_provider.lower())

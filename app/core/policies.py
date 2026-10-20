@@ -24,58 +24,57 @@ class FallbackRoute(BaseModel):
 
 # Deterministic Failover Waterfall: Groq (Llama-3.3-70b) -> Mistral (Codestral/Large) -> OpenAI (GPT-4o) -> Google Gemini (Gemini 2.5/3.8 Flash/Pro)
 DETERMINISTIC_WATERFALL_ORDER: list[tuple[str, str]] = [
-    ("groq", "llama-3.3-70b"),
-    ("mistral", "codestral-latest"),
-    ("openai", "gpt-4o"),
-    ("gemini", "gemini-3.8-flash"),
+    ("groq", "openai/gpt-oss-120b"),
+    ("openrouter", "meta-llama/llama-3.3-70b-instruct"),
+    ("gemini", "gemini-flash-latest"),
 ]
 
 # Explicit provider fallback configuration across active verified providers
 PROVIDER_FALLBACK_MATRIX: dict[str, FallbackRoute] = {
     "groq": FallbackRoute(
         primary_provider="groq",
-        fallback_provider="mistral",
-        fallback_model="codestral-latest",
+        fallback_provider="openrouter",
+        fallback_model="meta-llama/llama-3.3-70b-instruct",
     ),
-    "mistral": FallbackRoute(
-        primary_provider="mistral",
-        fallback_provider="openai",
-        fallback_model="gpt-4o",
-    ),
-    "openai": FallbackRoute(
-        primary_provider="openai",
+    "openrouter": FallbackRoute(
+        primary_provider="openrouter",
         fallback_provider="gemini",
-        fallback_model="gemini-3.8-flash",
+        fallback_model="gemini-flash-latest",
     ),
     "gemini": FallbackRoute(
         primary_provider="gemini",
         fallback_provider="groq",
-        fallback_model="llama-3.3-70b",
-    ),
-    "cerebras": FallbackRoute(
-        primary_provider="cerebras",
-        fallback_provider="groq",
-        fallback_model="llama-3.3-70b",
-    ),
-    "openrouter": FallbackRoute(
-        primary_provider="openrouter",
-        fallback_provider="groq",
-        fallback_model="llama-3.3-70b",
+        fallback_model="openai/gpt-oss-120b",
     ),
     "nvidia": FallbackRoute(
         primary_provider="nvidia",
         fallback_provider="groq",
-        fallback_model="llama-3.3-70b",
+        fallback_model="openai/gpt-oss-120b",
+    ),
+    "cerebras": FallbackRoute(
+        primary_provider="cerebras",
+        fallback_provider="groq",
+        fallback_model="openai/gpt-oss-120b",
+    ),
+    "mistral": FallbackRoute(
+        primary_provider="mistral",
+        fallback_provider="groq",
+        fallback_model="openai/gpt-oss-120b",
+    ),
+    "openai": FallbackRoute(
+        primary_provider="openai",
+        fallback_provider="groq",
+        fallback_model="openai/gpt-oss-120b",
     ),
     "cohere": FallbackRoute(
         primary_provider="cohere",
         fallback_provider="groq",
-        fallback_model="llama-3.3-70b",
+        fallback_model="openai/gpt-oss-120b",
     ),
     "huggingface": FallbackRoute(
         primary_provider="huggingface",
         fallback_provider="groq",
-        fallback_model="llama-3.3-70b",
+        fallback_model="openai/gpt-oss-120b",
     ),
 }
 

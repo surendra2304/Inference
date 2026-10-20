@@ -19,12 +19,12 @@ CAPABILITY_KEYWORDS: dict[str, list[str]] = {
 }
 
 FALLBACK_FREE_MODELS: dict[str, str] = {
-    "coding": "liquid/lfm-2.5-2.6b:free",
-    "reasoning": "nvidia/nemotron-3.5-lightning:free",
-    "research": "liquid/lfm-2.5-2.6b:free",
-    "analysis": "qwen/qwen3.8-27b:free",
-    "security": "nvidia/nemotron-3.5-lightning:free",
-    "general": "liquid/lfm-2.5-2.6b:free",
+    "coding": "deepseek/deepseek-chat",
+    "reasoning": "meta-llama/llama-3.3-70b-instruct",
+    "research": "google/gemini-2.5-flash",
+    "analysis": "meta-llama/llama-3.3-70b-instruct",
+    "security": "meta-llama/llama-3.3-70b-instruct",
+    "general": "meta-llama/llama-3.3-70b-instruct",
 }
 
 
@@ -32,7 +32,7 @@ class OpenRouterProvider(OpenAICompatibleProvider):
     """Adapter for OpenRouter multi-model aggregation API with dynamic capability matching."""
 
     BASE_URL = "https://openrouter.ai/api/v1"
-    DEFAULT_MODEL = "liquid/lfm-2.5-2.6b:free"
+    DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct"
     SUPPORTED_MODELS = [
         "liquid/lfm-2.5-2.6b:free",
         "qwen/qwen3.8-27b:free",

@@ -43,12 +43,12 @@ def get_all_specialist_agents() -> list[Agent]:
                 "avoid unsubstantiated speculation, and prioritize accuracy and clarity."
             ),
             model_provider="gemini",
-            model_name="gemini-3.8-flash",
+            model_name="gemini-flash-latest",
             models=[
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="research"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="research"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="research"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
-                AgentModelConfig(provider="openrouter", model="liquid/lfm-2.5-2.6b:free", capability="research"),
+                AgentModelConfig(provider="openrouter", model="meta-llama/llama-3.3-70b-instruct", capability="research"),
             ],
             strengths=["information retrieval", "knowledge synthesis", "comparative analysis", "ecosystem awareness"],
             weaknesses=["speculative technical depth without source data"]
@@ -68,7 +68,7 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="openai/gpt-oss-120b",
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="reasoning"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
             strengths=["solution architecture", "hypothesis formulation", "first-principles reasoning", "clarity"],
@@ -85,12 +85,12 @@ def get_all_specialist_agents() -> list[Agent]:
                 "data pipelines, and system interfaces. Focus on modularity, high cohesion, low coupling, fail-safe "
                 "mechanisms, and clear component boundaries. Always state trade-offs explicitly."
             ),
-            model_provider="nvidia",
-            model_name="nvidia/nemotron-3-super-120b-a12b",
+            model_provider="openrouter",
+            model_name="meta-llama/llama-3.3-70b-instruct",
             models=[
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="reasoning"),
             ],
             strengths=["system architecture", "interface design", "scalability", "modularity", "trade-off analysis"],
             weaknesses=["low-level syntax micro-optimizations"]
@@ -110,7 +110,7 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="qwen/qwen3.8-27b",
             models=[
                 AgentModelConfig(provider="groq", model="qwen/qwen3.8-27b", capability="coding"),
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="coding"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="coding"),
                 AgentModelConfig(provider="nvidia", model="z-ai/glm-5.3", capability="coding"),
             ],
             strengths=["clean code", "refactoring", "API implementation", "async programming", "typing"],
@@ -128,9 +128,9 @@ def get_all_specialist_agents() -> list[Agent]:
                 "evidence before accepting fixes."
             ),
             model_provider="gemini",
-            model_name="gemini-3.8-flash",
+            model_name="gemini-flash-latest",
             models=[
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="reasoning"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
@@ -148,12 +148,12 @@ def get_all_specialist_agents() -> list[Agent]:
                 "threat surfaces, prompt injection risks, secret exposures, and privilege escalations. Treat all "
                 "external input as untrusted and enforce least privilege."
             ),
-            model_provider="nvidia",
-            model_name="nvidia/nemotron-3-super-120b-a12b",
+            model_provider="openrouter",
+            model_name="meta-llama/llama-3.3-70b-instruct",
             models=[
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="reasoning"),
             ],
             strengths=["threat modeling", "vulnerability analysis", "zero-secret enforcement", "injection defense"],
             weaknesses=["lenient convenience-oriented shortcuts"]
@@ -173,7 +173,7 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="openai/gpt-oss-120b",
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="reasoning"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
             strengths=["quantitative analysis", "SQL/schema reasoning", "statistical evaluation", "metrics calculation"],
@@ -194,7 +194,7 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="openai/gpt-oss-120b",
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="reasoning"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
             strengths=["red teaming", "counterexamples", "fallacy detection", "failure mode prediction"],
@@ -212,9 +212,9 @@ def get_all_specialist_agents() -> list[Agent]:
                 "or false. Refuse to let speculation pass as evidence."
             ),
             model_provider="gemini",
-            model_name="gemini-3.8-flash",
+            model_name="gemini-flash-latest",
             models=[
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="research"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="research"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="research"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="research"),
             ],
@@ -236,7 +236,7 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="openai/gpt-oss-120b",
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="reasoning"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
             strengths=["multi-criteria decision analysis", "cost-benefit evaluation", "roadmap prioritization"],
@@ -254,9 +254,9 @@ def get_all_specialist_agents() -> list[Agent]:
                 "Explicitly highlight consensus, remaining uncertainties, and dissenting views."
             ),
             model_provider="gemini",
-            model_name="gemini-3.8-flash",
+            model_name="gemini-flash-latest",
             models=[
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="synthesis"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="synthesis"),
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="synthesis"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="synthesis"),
             ],
@@ -279,7 +279,7 @@ def get_all_specialist_agents() -> list[Agent]:
             model_name="openai/gpt-oss-120b",
             models=[
                 AgentModelConfig(provider="groq", model="openai/gpt-oss-120b", capability="reasoning"),
-                AgentModelConfig(provider="gemini", model="gemini-3.8-flash", capability="reasoning"),
+                AgentModelConfig(provider="gemini", model="gemini-flash-latest", capability="reasoning"),
                 AgentModelConfig(provider="nvidia", model="nvidia/nemotron-3-super-120b-a12b", capability="reasoning"),
             ],
             strengths=["quantitative trading analysis", "risk-adjusted return modeling", "drawdown mitigation", "statistical expectancy"],

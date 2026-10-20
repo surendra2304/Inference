@@ -12,9 +12,9 @@ from app.providers.unified_manager import unified_provider_manager
 
 def test_gemini_defaults():
     provider = GeminiProvider()
-    assert provider.default_model == "gemini-3.8-flash"
-    assert "gemini-3.8-flash" in provider.SUPPORTED_MODELS
-    assert "gemini-3.6-flash" in provider.SUPPORTED_MODELS
+    assert provider.default_model == "gemini-flash-latest"
+    assert "gemini-flash-latest" in provider.SUPPORTED_MODELS
+    assert "gemini-2.5-flash" in provider.SUPPORTED_MODELS
 
 
 def test_groq_defaults():
@@ -38,18 +38,18 @@ def test_nvidia_defaults():
 
 def test_openrouter_defaults():
     provider = OpenRouterProvider()
-    assert provider.default_model == "liquid/lfm-2.5-2.6b:free"
-    assert "liquid/lfm-2.5-2.6b:free" in provider.supported_models
+    assert provider.default_model == "meta-llama/llama-3.3-70b-instruct"
+    assert "meta-llama/llama-3.3-70b-instruct" in provider.supported_models
 
 
 def test_unified_manager_roles():
     mapping = unified_provider_manager.ROLE_PROVIDER_MAPPING
-    assert mapping["requirements_analyst"] == ("gemini", "gemini-3.8-flash")
-    assert mapping["code_reviewer"] == ("gemini", "gemini-3.8-flash")
-    assert mapping["test_generator"] == ("gemini", "gemini-3.8-flash")
-    assert mapping["documentation_writer"] == ("gemini", "gemini-3.8-flash")
-    assert mapping["researcher"] == ("gemini", "gemini-3.8-flash")
-    assert mapping["system_architect"] == ("nvidia", "nvidia/nemotron-3-super-120b-a12b")
+    assert mapping["requirements_analyst"] == ("gemini", "gemini-flash-latest")
+    assert mapping["code_reviewer"] == ("gemini", "gemini-flash-latest")
+    assert mapping["test_generator"] == ("gemini", "gemini-flash-latest")
+    assert mapping["documentation_writer"] == ("gemini", "gemini-flash-latest")
+    assert mapping["researcher"] == ("openrouter", "meta-llama/llama-3.3-70b-instruct")
+    assert mapping["system_architect"] == ("openrouter", "meta-llama/llama-3.3-70b-instruct")
     assert mapping["trading_analyst"] == ("groq", "openai/gpt-oss-120b")
 
 
@@ -57,8 +57,8 @@ def test_all_specialist_agents_configured():
     specialists = get_all_specialist_agents()
     assert len(specialists) == 12
     researcher = next(a for a in specialists if a.id == "researcher")
-    assert researcher.model_name == "gemini-3.8-flash"
+    assert researcher.model_name == "gemini-flash-latest"
 
     forge_specialists = get_software_specialist_agents()
     req_analyst = next(a for a in forge_specialists if a.id == "requirements_analyst")
-    assert req_analyst.model_name == "gemini-3.8-flash"
+    assert req_analyst.model_name == "gemini-flash-latest"
