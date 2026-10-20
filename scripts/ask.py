@@ -1,4 +1,4 @@
-"""Interactive CLI for AI Universe — Fast, Review, and Debate query execution."""
+"""Interactive CLI for Inference — Fast, Review, and Debate query execution."""
 
 import asyncio
 import sys
@@ -19,12 +19,12 @@ console = Console()
 async def ask_question(question: str, mode: str = "auto", max_agents: int = 5):
     console.print(Panel.fit(
         f"[bold white]{question}[/bold white]",
-        title=f"🌌 [bold cyan]AI UNIVERSE — QUERY RUNNER (Mode: {mode.upper()})[/bold cyan]",
+        title=f"🌌 [bold cyan]INFERENCE — QUERY RUNNER (Mode: {mode.upper()})[/bold cyan]",
         border_style="cyan"
     ))
 
     t0 = time.perf_counter()
-    with console.status(f"[bold green]Evaluating query via AI Universe Orchestrator (Mode: {mode})...", spinner="dots"):
+    with console.status(f"[bold green]Evaluating query via Inference Orchestrator (Mode: {mode})...", spinner="dots"):
         req = OrchestrationRequest(
             question=question,
             mode=mode,

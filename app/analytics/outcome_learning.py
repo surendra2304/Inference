@@ -224,9 +224,70 @@ class OutcomeLearningEngine:
                 )
             )
 
+        # Persist model latency, token counts, and accuracy scores to database (runs & strategies)
+        self._persist_to_db(report, measured_rate)
+
         # Auto-trigger router adaptation
         self_optimizing_router.adapt_weights_from_outcomes()
         return {"status": "RECORDED", "request_id": report.request_id, "outcome": report.outcome}
+
+    def _persist_to_db(self, report: DetailedOutcomeReport, measured_rate: float | None = None) -> None:
+        """Persists run telemetry and learned strategies directly into database (runs and strategies)."""
+        try:
+            from app.memory.base import RunRecord, StrategyRecord
+            from app.memory.sqlite import _DB_EXECUTOR, SQLiteMemory
+
+            metrics = report.measured_metrics or {}
+            raw_lat = (
+                metrics.get("latency_seconds")
+                or metrics.get("latency_s")
+                or (metrics.get("latency_ms", 0) / 1000.0 if metrics.get("latency_ms") else None)
+                or (metrics.get("build_time_s") if "build_time_s" in metrics else None)
+                or 0.0
+            )
+            lat = float(raw_lat)
+            prompt_tok = metrics.get("prompt_tokens") or metrics.get("input_tokens")
+            comp_tok = metrics.get("completion_tokens") or metrics.get("output_tokens")
+            p_tokens = int(prompt_tok) if prompt_tok is not None else None
+            c_tokens = int(comp_tok) if comp_tok is not None else None
+
+            accuracy = measured_rate if measured_rate is not None else (report.stated_confidence or (1.0 if report.outcome == "success" else 0.0))
+            model_used = metrics.get("model") or ("llama-3.3-70b" if (report.provider_used == "groq") else "gemini-3.8-flash")
+
+            run_rec = RunRecord(
+                id=f"run_{report.request_id}_{int(time.time() * 1000)}",
+                task_id=report.request_id,
+                agent_id=str(report.consumer),
+                provider=report.provider_used or "groq",
+                model=model_used,
+                stage=report.task_type or "general_task",
+                latency_seconds=lat,
+                prompt_tokens=p_tokens,
+                completion_tokens=c_tokens,
+                status="completed" if report.outcome == "success" else "failed",
+                error=report.detail if report.outcome != "success" else None,
+            )
+
+            strat_rec = StrategyRecord(
+                id=f"strat_{report.task_type or 'general'}_{int(time.time() * 1000)}",
+                task_type=report.task_type or f"task_{report.consumer}",
+                strategy=report.detail or f"Optimized execution pattern for {report.task_type}",
+                score=float(min(max(accuracy, 0.0), 1.0)),
+                sample_size=1,
+                recommended_agents=[str(report.consumer)],
+                recommended_provider=report.provider_used or "groq",
+                recommended_model=model_used,
+                metadata={"metrics": metrics, "outcome": report.outcome},
+            )
+
+            async def _do_save() -> None:
+                mem = SQLiteMemory()
+                await mem.save_run(run_rec)
+                await mem.save_strategy(strat_rec)
+
+            _DB_EXECUTOR.submit(_do_save())
+        except Exception as exc:
+            logger.debug("[OUTCOME] DB persistence skipped: %s", exc)
 
     def compute_provider_performance(self) -> dict[str, Any]:
         """Rolling success rates with 3x recent weighting, over observed outcomes only.

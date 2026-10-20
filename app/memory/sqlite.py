@@ -865,12 +865,25 @@ class SQLiteMemory(BaseMemory):
                 model TEXT NOT NULL,
                 stage TEXT NOT NULL,
                 latency REAL NOT NULL DEFAULT 0.0,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
                 status TEXT NOT NULL DEFAULT 'completed',
                 error TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (task_id) REFERENCES tasks(id)
             )
         """)
+
+        # Self-heal columns on existing runs table if needed
+        try:
+            cursor = await db.execute("PRAGMA table_info(runs)")
+            cols = [row["name"] for row in await cursor.fetchall()]
+            if "prompt_tokens" not in cols:
+                await db.execute("ALTER TABLE runs ADD COLUMN prompt_tokens INTEGER")
+            if "completion_tokens" not in cols:
+                await db.execute("ALTER TABLE runs ADD COLUMN completion_tokens INTEGER")
+        except Exception:
+            pass
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS messages (
@@ -1081,14 +1094,16 @@ class SQLiteMemory(BaseMemory):
                 )
 
     async def save_run(self, run: RunRecord) -> None:
-        """Persist an execution run audit record."""
+        """Persist an execution run audit record into SQLite and dokploy-postgres."""
         created_str = run.created_at.isoformat()
         async with self.connect() as db:
             await db.execute("""
-                INSERT INTO runs (id, task_id, agent_id, provider, model, stage, latency, status, error, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO runs (id, task_id, agent_id, provider, model, stage, latency, prompt_tokens, completion_tokens, status, error, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     latency=excluded.latency,
+                    prompt_tokens=excluded.prompt_tokens,
+                    completion_tokens=excluded.completion_tokens,
                     status=excluded.status,
                     error=excluded.error
             """, (
@@ -1099,11 +1114,20 @@ class SQLiteMemory(BaseMemory):
                 run.model,
                 run.stage,
                 run.latency_seconds,
+                run.prompt_tokens,
+                run.completion_tokens,
                 run.status,
                 run.error,
                 created_str
             ))
             await db.commit()
+
+        # Mirror to dokploy-postgres if available
+        try:
+            from app.memory.postgres import postgres_memory
+            await postgres_memory.save_run(run)
+        except Exception as exc:
+            logger.debug("PostgreSQL run mirror skipped: %s", exc)
 
     async def save_message(self, message: MessageRecord) -> None:
         """Persist a conversation or debate message."""
@@ -1276,6 +1300,13 @@ class SQLiteMemory(BaseMemory):
                 meta_json
             ))
             await db.commit()
+
+        # Mirror to dokploy-postgres if available
+        try:
+            from app.memory.postgres import postgres_memory
+            await postgres_memory.save_strategy(strategy)
+        except Exception as exc:
+            logger.debug("PostgreSQL strategy mirror skipped: %s", exc)
 
     async def get_strategy(self, task_type: str) -> StrategyRecord | None:
         """Retrieve the best learned strategy for a specific task type."""

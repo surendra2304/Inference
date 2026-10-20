@@ -1,4 +1,4 @@
-"""Live visual runner for AI Universe's 6-Round Structured Multi-Agent Debate Engine."""
+"""Live visual runner for Inference's 6-Round Structured Multi-Agent Debate Engine."""
 
 import asyncio
 import sys
@@ -32,7 +32,7 @@ ROLE_COLORS = {
 async def run_live_debate(question: str, use_all_agents: bool = True):
     console.print(Panel.fit(
         f"[bold white]{question}[/bold white]",
-        title="🌌 [bold cyan]AI UNIVERSE — LIVE MULTI-AGENT ADVERSARIAL DEBATE[/bold cyan]",
+        title="🌌 [bold cyan]INFERENCE — LIVE MULTI-AGENT ADVERSARIAL DEBATE[/bold cyan]",
         border_style="cyan"
     ))
 

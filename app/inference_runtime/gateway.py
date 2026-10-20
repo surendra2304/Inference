@@ -4,6 +4,8 @@ import asyncio
 import time
 from typing import Protocol
 
+from app.security.prompt_isolation import scrub_credentials
+
 from .budget import BudgetLedger
 from .cache import TenantCache
 from .circuit import CircuitBreaker
@@ -128,7 +130,8 @@ class HardenedGateway:
                 raise
             except Exception as exc:
                 latency = time.perf_counter() - started
-                self.health.failure(provider, str(exc), latency)
+                scrubbed = scrub_credentials(str(exc))
+                self.health.failure(provider, scrubbed, latency)
                 self.router.record(ep, False, latency)
                 breaker and breaker.failure()
                 pool and key and pool.quarantine(key)

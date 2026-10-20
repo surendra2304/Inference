@@ -1,4 +1,4 @@
-"""System policies, execution guardrails, and provider switching rules across 7 Free Cloud Providers."""
+"""System policies, execution guardrails, and provider switching rules."""
 
 from enum import Enum
 
@@ -22,47 +22,60 @@ class FallbackRoute(BaseModel):
     fallback_model: str
 
 
+# Deterministic Failover Waterfall: Groq (Llama-3.3-70b) -> Mistral (Codestral/Large) -> OpenAI (GPT-4o) -> Google Gemini (Gemini 2.5/3.8 Flash/Pro)
+DETERMINISTIC_WATERFALL_ORDER: list[tuple[str, str]] = [
+    ("groq", "llama-3.3-70b"),
+    ("mistral", "codestral-latest"),
+    ("openai", "gpt-4o"),
+    ("gemini", "gemini-3.8-flash"),
+]
+
 # Explicit provider fallback configuration across active verified providers
 PROVIDER_FALLBACK_MATRIX: dict[str, FallbackRoute] = {
-    "gemini": FallbackRoute(
-        primary_provider="gemini",
-        fallback_provider="groq",
-        fallback_model="openai/gpt-oss-120b"
-    ),
     "groq": FallbackRoute(
         primary_provider="groq",
-        fallback_provider="cerebras",
-        fallback_model="llama-3.3-70b"
-    ),
-    "cerebras": FallbackRoute(
-        primary_provider="cerebras",
-        fallback_provider="openrouter",
-        fallback_model="liquid/lfm-2.5-2.6b:free"
-    ),
-    "nvidia": FallbackRoute(
-        primary_provider="nvidia",
-        fallback_provider="gemini",
-        fallback_model="gemini-3.8-flash"
-    ),
-    "openrouter": FallbackRoute(
-        primary_provider="openrouter",
-        fallback_provider="gemini",
-        fallback_model="gemini-3.8-flash"
+        fallback_provider="mistral",
+        fallback_model="codestral-latest",
     ),
     "mistral": FallbackRoute(
         primary_provider="mistral",
+        fallback_provider="openai",
+        fallback_model="gpt-4o",
+    ),
+    "openai": FallbackRoute(
+        primary_provider="openai",
+        fallback_provider="gemini",
+        fallback_model="gemini-3.8-flash",
+    ),
+    "gemini": FallbackRoute(
+        primary_provider="gemini",
         fallback_provider="groq",
-        fallback_model="openai/gpt-oss-120b"
+        fallback_model="llama-3.3-70b",
+    ),
+    "cerebras": FallbackRoute(
+        primary_provider="cerebras",
+        fallback_provider="groq",
+        fallback_model="llama-3.3-70b",
+    ),
+    "openrouter": FallbackRoute(
+        primary_provider="openrouter",
+        fallback_provider="groq",
+        fallback_model="llama-3.3-70b",
+    ),
+    "nvidia": FallbackRoute(
+        primary_provider="nvidia",
+        fallback_provider="groq",
+        fallback_model="llama-3.3-70b",
     ),
     "cohere": FallbackRoute(
         primary_provider="cohere",
-        fallback_provider="gemini",
-        fallback_model="gemini-3.8-flash"
+        fallback_provider="groq",
+        fallback_model="llama-3.3-70b",
     ),
     "huggingface": FallbackRoute(
         primary_provider="huggingface",
-        fallback_provider="gemini",
-        fallback_model="gemini-3.8-flash"
+        fallback_provider="groq",
+        fallback_model="llama-3.3-70b",
     ),
 }
 
@@ -78,7 +91,7 @@ class ProviderSwitchingPolicy:
     def get_fallback_provider(
         primary_provider: str,
         reason: SwitchReason,
-        stage: str | None = None
+        stage: str | None = None,
     ) -> FallbackRoute | None:
         """
         Determines appropriate fallback provider upon error/quota exhaustion.
@@ -92,10 +105,26 @@ class ProviderSwitchingPolicy:
                 route.fallback_provider,
                 route.fallback_model,
                 stage or "general_execution",
-                reason.value
+                reason.value,
             )
             return route
         return None
+
+    @staticmethod
+    def get_waterfall_sequence(start_provider: str | None = None) -> list[tuple[str, str]]:
+        """
+        Returns the remaining deterministic waterfall sequence starting after the given provider.
+        If start_provider is None, returns the complete sequence.
+        """
+        if not start_provider:
+            return list(DETERMINISTIC_WATERFALL_ORDER)
+        norm = start_provider.lower().strip()
+        names = [p for p, _ in DETERMINISTIC_WATERFALL_ORDER]
+        if norm in names:
+            idx = names.index(norm)
+            # Cycle through the rest in waterfall order
+            return DETERMINISTIC_WATERFALL_ORDER[idx + 1 :] + DETERMINISTIC_WATERFALL_ORDER[:idx]
+        return list(DETERMINISTIC_WATERFALL_ORDER)
 
     @staticmethod
     def can_switch_in_stage(stage: str, allow_mid_stage: bool = False) -> bool:

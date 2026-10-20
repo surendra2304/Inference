@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite:///data/universe.db"
 
+    # dokploy-postgres Database Configuration
+    POSTGRES_HOST: str = Field(default="dokploy-postgres", description="PostgreSQL host for inference_db")
+    POSTGRES_PORT: int = Field(default=5432, description="PostgreSQL port")
+    POSTGRES_DB: str = Field(default="inference_db", description="PostgreSQL database name")
+    POSTGRES_USER: str = Field(default="inference_user", description="PostgreSQL user")
+    POSTGRES_PASSWORD: str = Field(default="wzhDNA2iRBDAq1kDZ94OlchO", description="PostgreSQL password")
+
     #: Ceiling for the per-tenant request-id deduplication window. Each entry retains a
     #: full response payload; a deduplicated response is an optimisation (a miss is
     #: recomputed), so this trades memory for occasional recomputation.
@@ -125,6 +132,13 @@ class Settings(BaseSettings):
 
     NVIDIA_API_KEY: str | None = Field(default=None)
     NVIDIA_API_KEYS: str | None = Field(default=None)
+
+    OPENAI_API_KEY: str | None = Field(default=None)
+    OPENAI_API_KEYS: str | None = Field(default=None)
+    THIRD_PARTY_OPENAI_KEY: str | None = Field(default=None)
+    THIRD_PARTY_OPENAI_KEYS: str | None = Field(default=None)
+    OPENAI_FALLBACK_KEY: str | None = Field(default=None)
+    OPENAI_FALLBACK_KEYS: str | None = Field(default=None)
 
     THIRD_PARTY_GEMINI_KEY: str | None = Field(default=None)
     THIRD_PARTY_GEMINI_KEYS: str | None = Field(default=None)
@@ -363,7 +377,7 @@ class Settings(BaseSettings):
     def validate_environment(self) -> dict[str, Any]:
         """Validate startup configuration and return runtime provider readiness summary."""
         configured_providers = []
-        for prov in ("gemini", "groq", "cerebras", "openrouter", "mistral", "nvidia", "cohere", "huggingface"):
+        for prov in ("gemini", "groq", "cerebras", "openrouter", "mistral", "openai", "nvidia", "cohere", "huggingface"):
             if self.get_provider_keys(prov):
                 configured_providers.append(prov)
         if self.LOCAL_ENABLED:

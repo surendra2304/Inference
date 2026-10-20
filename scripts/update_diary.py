@@ -13,7 +13,7 @@ def main():
 
     if not os.path.exists(diary_file):
         with open(diary_file, 'w', encoding='utf-8') as f:
-            f.write(f"# AI UNIVERSE — {today}\n\n")
+            f.write(f"# INFERENCE — {today}\n\n")
             f.write("## Daily Summary\n\n")
             f.write("## User Directives / Requirements\n\n")
             f.write("## Work Performed\n\n")

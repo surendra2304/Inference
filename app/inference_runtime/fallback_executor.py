@@ -4,6 +4,7 @@ import asyncio
 import time
 from dataclasses import dataclass
 
+from app.security.prompt_isolation import scrub_credentials
 from app.utils.bounded_store import BoundedList
 
 from .contracts import CompletionRequest, ProviderEndpoint
@@ -24,9 +25,6 @@ class AttemptRecord:
 class FallbackExecutor:
     def __init__(self, policy: RetryPolicy | None = None, max_history: int = 2000):
         self.policy = policy or RetryPolicy(3)
-        # Bounded: one record is appended per provider attempt, and nothing in this service
-        # reads the list, so an unbounded list was pure accumulation on the failure path
-        # (the path a degraded provider drives hardest).
         self.history: BoundedList[AttemptRecord] = BoundedList(
             "inference_runtime.fallback_attempts", max_entries=max_history
         )
@@ -43,6 +41,8 @@ class FallbackExecutor:
                 raise
             except Exception as exc:
                 latency = time.perf_counter() - start
-                self.history.append(AttemptRecord(ep.provider, ep.model, idx, latency, str(exc)[:300], False))
+                scrubbed = scrub_credentials(str(exc))[:300]
+                self.history.append(AttemptRecord(ep.provider, ep.model, idx, latency, scrubbed, False))
                 last = exc
-        raise ProviderUnavailable(f"all inference endpoints failed: {last}") from last
+        clean_err = scrub_credentials(str(last)) if last else "unknown"
+        raise ProviderUnavailable(f"all inference endpoints failed: {clean_err}") from last

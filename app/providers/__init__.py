@@ -1,4 +1,4 @@
-"""Provider factory and registry for Inference (7 Verified Free Cloud Providers)."""
+"""Provider factory and registry for Inference (Verified Cloud Providers)."""
 
 from app.providers.base import BaseLLMProvider
 from app.providers.cerebras import CerebrasProvider
@@ -12,6 +12,7 @@ from app.providers.llamacpp import LlamaCppTransport
 from app.providers.local import LocalProvider
 from app.providers.mistral import MistralProvider
 from app.providers.nvidia import NvidiaProvider
+from app.providers.openai import OpenAIProvider
 from app.providers.openai_compatible import OpenAICompatibleTransport
 from app.providers.openrouter import OpenRouterProvider
 from app.providers.sglang import SGLangTransport
@@ -22,6 +23,7 @@ _PROVIDER_MAP: dict[str, type[BaseLLMProvider]] = {
     "gemini": GeminiProvider,
     "groq": GroqProvider,
     "mistral": MistralProvider,
+    "openai": OpenAIProvider,
     "openrouter": OpenRouterProvider,
     "cohere": CohereProvider,
     "huggingface": HuggingFaceProvider,
@@ -63,6 +65,7 @@ __all__ = [
     "MistralProvider",
     "NvidiaProvider",
     "OpenAICompatibleTransport",
+    "OpenAIProvider",
     "OpenRouterProvider",
     "SGLangTransport",
     "VLLMTransport",
