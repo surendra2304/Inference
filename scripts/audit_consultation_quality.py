@@ -122,7 +122,7 @@ class QualityAuditor:
     def run_all_audits(self) -> int:
         """Audits all fixture files in tests/fixtures/."""
         print("=" * 80)
-        print("      AI UNIVERSE — TRADING ADVISORY RECOMMENDATION QUALITY AUDIT")
+        print("      INFERENCE — TRADING ADVISORY RECOMMENDATION QUALITY AUDIT")
         print("=" * 80)
 
         fixture_files = [

@@ -1,4 +1,4 @@
-"""Production Deployment and Pre-flight Verification Script for AI Universe."""
+"""Production Deployment and Pre-flight Verification Script for Inference."""
 
 import subprocess
 import sys
@@ -21,7 +21,7 @@ def run_command(cmd: str) -> bool:
 
 def audit_environment():
     print("================================================================================")
-    print("         AI UNIVERSE — PRODUCTION DEPLOYMENT & HEALTH PRE-FLIGHT")
+    print("         INFERENCE — PRODUCTION DEPLOYMENT & HEALTH PRE-FLIGHT")
     print("================================================================================")
     print(f"Timestamp: {datetime.utcnow().isoformat()}")
     print(f"Environment: {production_config.APP_ENV}")
@@ -87,5 +87,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print("\n================================================================================")
-    print("   [SUCCESS] AI Universe production pre-flight audit passed flawlessly.")
+    print("   [SUCCESS] Inference production pre-flight audit passed flawlessly.")
     print("================================================================================")

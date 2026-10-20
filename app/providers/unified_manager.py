@@ -16,7 +16,7 @@ from app.utils.logger import logger
 class UnifiedExecutionRequest(BaseModel):
     """Universal execution request across all models and agents."""
 
-    provider: Literal["auto", "gemini", "groq", "mistral", "openrouter", "nvidia", "cohere", "huggingface"] = Field(
+    provider: Literal["auto", "gemini", "groq", "mistral", "openai", "openrouter", "nvidia", "cohere", "huggingface"] = Field(
         default="auto", description="Target provider name or 'auto' for intelligent capability matching"
     )
     agent_role: str | None = Field(

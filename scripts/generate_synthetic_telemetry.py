@@ -1,4 +1,4 @@
-"""Synthetic Telemetry Generator for AI Universe Trading Consultation Testing."""
+"""Synthetic Telemetry Generator for Inference Trading Consultation Testing."""
 
 import json
 import os

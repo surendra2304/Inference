@@ -72,15 +72,15 @@ _GENERIC_SECRET_FIELD_PATTERN = re.compile(
 _PROVIDER_KEY_LITERAL_PATTERN = re.compile(
     r"\b(?:"
     r"sk-(?:proj-|or-v1-|live-|test-)?[A-Za-z0-9_\-]{16,}"
-    r"|gsk_[A-Za-z0-9]{20,}"
-    r"|hf_[A-Za-z0-9]{20,}"
-    r"|nvapi-[A-Za-z0-9_\-]{20,}"
-    r"|xai-[A-Za-z0-9]{20,}"
-    r"|pplx-[A-Za-z0-9]{20,}"
-    r"|cohere-[A-Za-z0-9]{20,}"
+    r"|gsk_[A-Za-z0-9_\-]{16,}"
+    r"|hf_[A-Za-z0-9_\-]{16,}"
+    r"|nvapi-[A-Za-z0-9_\-]{16,}"
+    r"|xai-[A-Za-z0-9_\-]{16,}"
+    r"|pplx-[A-Za-z0-9_\-]{16,}"
+    r"|cohere-[A-Za-z0-9_\-]{16,}"
     r"|AIza[0-9A-Za-z_\-]{35}"
-    r"|r8_[A-Za-z0-9]{20,}"
-    r"|mistral-[A-Za-z0-9]{20,}"
+    r"|r8_[A-Za-z0-9_\-]{16,}"
+    r"|mistral-[A-Za-z0-9_\-]{16,}"
     r")\b"
 )
 
@@ -105,6 +105,22 @@ FORBIDDEN_CREDENTIAL_KEYS = {
     "session_id",
 }
 
+# Zero-width unicode code points and invisible formatting / directional overrides
+_ZERO_WIDTH_PATTERN = re.compile(
+    r"[\u200B-\u200D\uFEFF\u2060\u00AD\u200E\u200F\u202A-\u202E\u2066-\u2069]"
+)
+_CONTROL_CHARS_PATTERN = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]"
+)
+
+
+def strip_zero_width_and_invisible(text: str) -> str:
+    """Strips zero-width spaces, joiners, BOMs, and invisible control code points."""
+    if not text or not isinstance(text, str):
+        return "" if text is None else str(text)
+    cleaned = _ZERO_WIDTH_PATTERN.sub("", text)
+    return _CONTROL_CHARS_PATTERN.sub("", cleaned)
+
 # Prompt injection markers to neutralize in untrusted inputs
 _INJECTION_PATTERNS = [
     re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?", re.IGNORECASE),
@@ -112,7 +128,10 @@ _INJECTION_PATTERNS = [
     re.compile(r"system\s+prompt\s+override", re.IGNORECASE),
     re.compile(r"<\s*/?\s*system\s*>", re.IGNORECASE),
     re.compile(r"<\s*/?\s*im_start\s*>", re.IGNORECASE),
-    re.compile(r"disregard\s+(?:safety|rules|instructions)", re.IGNORECASE),
+    re.compile(r"<\s*/?\s*im_end\s*>", re.IGNORECASE),
+    re.compile(r"disregard\s+(?:all\s+)?(?:safety|rules|instructions)", re.IGNORECASE),
+    re.compile(r"bypass\s+(?:all\s+)?(?:guardrails|filters|safety|restrictions)", re.IGNORECASE),
+    re.compile(r"forget\s+(?:all\s+)?(?:prior|previous)\s+instructions?", re.IGNORECASE),
 ]
 
 
@@ -312,8 +331,10 @@ def wrap_untrusted_data(data: str, source: str = "untrusted") -> str:
     if not data or not isinstance(data, str):
         return ""
 
+    # 0. Strip zero-width and invisible characters
+    clean_data = strip_zero_width_and_invisible(data)
     # 1. First scrub any credentials
-    sanitized = scrub_credentials(data)
+    sanitized = scrub_credentials(clean_data)
 
     # 2. Escape any boundary closure attempts
     sanitized = sanitized.replace("</UNTRUSTED_DATA_BOUNDARY>", "<!UNTRUSTED_DATA_BOUNDARY_ESCAPED>")
@@ -333,3 +354,31 @@ def wrap_untrusted_data(data: str, source: str = "untrusted") -> str:
         f"</UNTRUSTED_DATA_BOUNDARY>"
     )
     return wrapped
+
+def sanitize_incoming_prompt(text: str, source: str = "untrusted") -> str:
+    """Ingress Prompt Injection Barrier:
+    1. Strips all zero-width characters and invisible control code points.
+    2. Neutralizes active prompt injection vectors.
+    3. Scrubs credentials and API keys.
+    """
+    if not text or not isinstance(text, str):
+        return ""
+    # 1. Strip zero-width and invisible control code points
+    cleaned = strip_zero_width_and_invisible(text)
+    # 2. Neutralize injection patterns
+    for pattern in _INJECTION_PATTERNS:
+        cleaned = pattern.sub("[NEUTRALIZED_PROMPT_INJECTION_ATTEMPT]", cleaned)
+    # 3. Scrub credentials
+    cleaned = scrub_credentials(cleaned)
+    return cleaned.strip()
+
+
+def sanitize_incoming_payload(data: Any) -> Any:
+    """Recursively traverses incoming task payloads to strip zero-width characters and neutralize injection vectors."""
+    if isinstance(data, dict):
+        return {k: sanitize_incoming_payload(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [sanitize_incoming_payload(item) for item in data]
+    if isinstance(data, str):
+        return sanitize_incoming_prompt(data)
+    return data

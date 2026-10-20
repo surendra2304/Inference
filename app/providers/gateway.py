@@ -29,6 +29,7 @@ from app.providers.errors import (
     normalize_provider_exception,
 )
 from app.providers.health import provider_health_tracker
+from app.security.prompt_isolation import scrub_credentials
 from app.utils.logger import logger
 
 #: Providers that are legitimately able to serve a request with no credential at
@@ -543,7 +544,7 @@ class ModelGateway:
                 "actual_provider": "local",
                 "actual_model": local_req.model,
                 "capability": capability,
-                "fallback_reason": str(last_error) if last_error else "local_preferred",
+                "fallback_reason": scrub_credentials(str(last_error)) if last_error else "local_preferred",
             }
             self.health_tracker.record_success("local", resp.latency_seconds)
             logger.info(
@@ -668,7 +669,7 @@ class ModelGateway:
                     "actual_provider": "openrouter",
                     "actual_model": dynamic_model,
                     "capability": capability,
-                    "fallback_reason": str(last_error) if last_error else "primary_exhausted",
+                    "fallback_reason": scrub_credentials(str(last_error)) if last_error else "primary_exhausted",
                 }
 
                 self.health_tracker.record_success("openrouter", resp.latency_seconds)
@@ -690,29 +691,31 @@ class ModelGateway:
                     "OpenRouter dynamic fallback failed (%s)", type(typed_error).__name__
                 )
 
-        # 2. Check standard policy matrix fallback as second safeguard
+        # 2. Deterministic Failover Waterfall: Groq -> Mistral -> OpenAI -> Gemini
         remaining = (deadline - time.monotonic()) if deadline else 60.0
         if remaining > 0:
+            waterfall_sequence = ProviderSwitchingPolicy.get_waterfall_sequence(failed_provider)
             fallback_route = ProviderSwitchingPolicy.get_fallback_provider(
                 failed_provider, SwitchReason.TIMEOUT, stage=stage_name
             )
+            candidate_rungs: list[tuple[str, str]] = []
             if fallback_route and fallback_route.fallback_provider != failed_provider:
+                candidate_rungs.append((fallback_route.fallback_provider, fallback_route.fallback_model))
+            for item in waterfall_sequence:
+                if item not in candidate_rungs and item[0] != failed_provider:
+                    candidate_rungs.append(item)
+
+            for sec_name, sec_model in candidate_rungs:
+                rem = (deadline - time.monotonic()) if deadline else 60.0
+                if rem <= 0:
+                    break
+                if not provider_has_credentials(sec_name):
+                    logger.debug("GATEWAY FALLBACK: Skipping '%s' — no credentials configured.", sec_name)
+                    continue
+
                 try:
                     import app.providers
 
-                    sec_name = fallback_route.fallback_provider
-                    if not provider_has_credentials(sec_name):
-                        # Same reasoning as the primary pre-flight gate: a policy-matrix
-                        # route to a provider nobody configured is not a fallback, it is
-                        # a delay. Skip it without touching the limiter or health state.
-                        logger.warning(
-                            "GATEWAY FALLBACK: Skipping secondary provider '%s' — no credential configured.",
-                            sec_name,
-                        )
-                        raise ProviderUnconfiguredError(
-                            f"Secondary fallback provider '{sec_name}' has no configured credential.",
-                            provider=sec_name,
-                        )
                     sec_prov = app.providers.get_provider(sec_name)
                     sec_limiter = self.rate_limiters.get(sec_name)
                     if not sec_limiter:
@@ -722,7 +725,7 @@ class ModelGateway:
                     sec_req = ProviderRequest(
                         messages=request.messages,
                         system_instruction=request.system_instruction,
-                        model=fallback_route.fallback_model,
+                        model=sec_model,
                         temperature=request.temperature,
                         max_tokens=request.max_tokens or 1024,
                     )
@@ -730,28 +733,30 @@ class ModelGateway:
                     try:
                         rem = (deadline - time.monotonic()) if deadline else 60.0
                         if rem <= 0:
-                            raise TimeoutError(f"Deadline exceeded for secondary fallback {sec_name}.")
+                            raise TimeoutError(f"Deadline exceeded for waterfall fallback {sec_name}.")
                         resp = await asyncio.wait_for(sec_prov.generate(sec_req), timeout=rem)
                     finally:
                         sec_limiter.release()
 
                     if not resp.raw_response:
                         resp.raw_response = {}
+                    clean_reason = scrub_credentials(str(last_error)) if last_error else "primary_exhausted"
                     resp.raw_response["fallback_provenance"] = {
                         "requested_provider": failed_provider,
                         "requested_model": request.model,
-                        "actual_provider": fallback_route.fallback_provider,
-                        "actual_model": fallback_route.fallback_model,
+                        "actual_provider": sec_name,
+                        "actual_model": sec_model,
                         "capability": capability,
-                        "fallback_reason": str(last_error) if last_error else "primary_exhausted",
+                        "fallback_reason": clean_reason,
                     }
                     self.health_tracker.record_success(sec_name, resp.latency_seconds)
                     return resp
                 except Exception as sec_exc:
-                    logger.error(
-                        "Secondary fallback provider '%s' failed: %s", fallback_route.fallback_provider, str(sec_exc)
+                    scrubbed_exc = scrub_credentials(str(sec_exc))
+                    logger.warning(
+                        "Waterfall fallback provider '%s' failed: %s", sec_name, scrubbed_exc
                     )
-
+                    last_error = sec_exc
         # 3. Self-hosted terminal tier. If a local server is running it has no quota,
         #    no key, and no network dependency, which makes it the most reliable rung
         #    of the ladder — but also usually the slowest, so it is tried after the
@@ -788,7 +793,7 @@ class ModelGateway:
                     "actual_provider": "litellm",
                     "actual_model": litellm_resp.model,
                     "capability": capability,
-                    "fallback_reason": str(last_error) if last_error else "primary_exhausted",
+                    "fallback_reason": scrub_credentials(str(last_error)) if last_error else "primary_exhausted",
                 }
                 self.health_tracker.record_success("litellm", litellm_resp.latency_seconds)
                 return litellm_resp
