@@ -701,9 +701,9 @@ class ModelGateway:
             candidate_rungs: list[tuple[str, str]] = []
             if fallback_route and fallback_route.fallback_provider != failed_provider:
                 candidate_rungs.append((fallback_route.fallback_provider, fallback_route.fallback_model))
-            for item in waterfall_sequence:
-                if item not in candidate_rungs and item[0] != failed_provider:
-                    candidate_rungs.append(item)
+                for item in waterfall_sequence:
+                    if item not in candidate_rungs and item[0] != failed_provider:
+                        candidate_rungs.append(item)
 
             for sec_name, sec_model in candidate_rungs:
                 rem = (deadline - time.monotonic()) if deadline else 60.0
@@ -717,6 +717,9 @@ class ModelGateway:
                     import app.providers
 
                     sec_prov = app.providers.get_provider(sec_name)
+                    if not sec_prov:
+                        continue
+
                     sec_limiter = self.rate_limiters.get(sec_name)
                     if not sec_limiter:
                         sec_limiter = ProviderRateLimiter(sec_name)
@@ -756,7 +759,6 @@ class ModelGateway:
                     logger.warning(
                         "Waterfall fallback provider '%s' failed: %s", sec_name, scrubbed_exc
                     )
-                    last_error = sec_exc
         # 3. Self-hosted terminal tier. If a local server is running it has no quota,
         #    no key, and no network dependency, which makes it the most reliable rung
         #    of the ladder — but also usually the slowest, so it is tried after the
