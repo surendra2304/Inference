@@ -1,9 +1,9 @@
 # Task 1 checkpoint — Inference — 2026-10-22
 
-- Connected GitHub access includes admin/push; direct writes/PRs work.
-- Open PR #31: https://github.com/surendra2304/Inference/pull/31, branch `fix/task1-forced-agent-max-bound-20261022`, head `32957964472c1026a784cc97a11e1546e6d7f62c`. Changed `app/core/orchestrator.py` to return [] before any lookup when `max_agents <= 0`; added tests in `tests/test_forced_agent_selection.py` for 0 and -1 and assert no registry lookups.
-- CI run `39673218580` passed lint, pytest, and Docker on exact head: https://github.com/surendra2304/Inference/actions/runs/39673218580. PR is open, unmerged, and mergeable.
-- Current main run `39672821899` passed at SHA `6becc799667e02e1830a90cd5710888e64278d32`. Latest PR #32 prediction-contract branch has moved to head `bb5dfb46764319384fd0767752f6714c6b1fc069`; earlier runs included failed/older heads, so check current status before editing.
-- Local tests did not run (laptop MCP HTTP 404); duration not measured.
+- Open PR #31: https://github.com/surendra2304/Inference/pull/31, branch `fix/task1-forced-agent-max-bound-20261022`, head `32957964472c1026a784cc97a11e1546e6d7f62c`. `app/core/orchestrator.py` returns [] before lookup for `max_agents <= 0`; `tests/test_forced_agent_selection.py` covers 0 and -1 and confirms no registry access.
+- CI run `39673218580` passed lint, pytest, Docker on the exact head: https://github.com/surendra2304/Inference/actions/runs/39673218580. PR remains open, unmerged, mergeable.
+- Main run `39672821899` had passed earlier. Latest main CI `39674354552` on SHA `6540537bb68aa7b7ebec7ce13d909eca87596072` is also success.
+- Prediction tracking PR #32 is now closed; its latest earlier run `39674147330` on SHA `bb5dfb46764319384fd0767752f6714c6b1fc069` passed. A newer separate branch `fix/prediction-api-input-bounds-20261022` has runs `39674800949` (in progress) and `39674867308` (queued); check whether there is an open PR before engaging.
+- Local tests unavailable because laptop MCP returns HTTP 404. Active duration not measurable. No merge/force-push.
 
-Next: recheck PR #31 current head/status and review PR #32 current CI failure or latest result. No auto-merge/force-push.
+Next: verify PR #31 stays green; inspect current status/PR for `fix/prediction-api-input-bounds-20261022` and work on a specific current CI failure only.
