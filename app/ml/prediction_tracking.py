@@ -99,15 +99,17 @@ class PredictionTrackingEngine:
         symbol_value = symbol.strip()
         direction_value = direction.strip()
         source_value = source.strip()
-        for label, value, max_length in (
-            ("symbol", symbol_value, 64),
-            ("direction", direction_value, 32),
-            ("source", source_value, 128),
+        for label, raw_value, value, max_length in (
+            ("symbol", symbol, symbol_value, 64),
+            ("direction", direction, direction_value, 32),
+            ("source", source, source_value, 128),
         ):
+            # Inspect the original input before strip(), since strip() would erase
+            # a trailing newline/tab and make an unsafe label look valid.
+            if any(ord(char) < 32 or ord(char) == 127 for char in raw_value):
+                raise ValueError(f"{label} must not contain control characters")
             if len(value) > max_length:
                 raise ValueError(f"{label} must not exceed {max_length} characters")
-            if any(ord(char) < 32 or ord(char) == 127 for char in value):
-                raise ValueError(f"{label} must not contain control characters")
         if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
             raise ValueError("confidence must be a finite number between 0 and 1")
         try:
