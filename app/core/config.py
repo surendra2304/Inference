@@ -189,7 +189,6 @@ class Settings(BaseSettings):
     inference_api_KEY: str | None = Field(default=None)
     FRIDAY_UNIVERSE_API_KEY: str | None = Field(default=None)
     X_FRIDAY_API_KEY: str | None = Field(default=None)
-    FRIDAY_API_KEY: str | None = Field(default=None)
 
     def get_friday_api_key(self) -> str | None:
         return self.INFERENCE_API_KEY or self.inference_api_KEY or self.FRIDAY_UNIVERSE_API_KEY or self.X_FRIDAY_API_KEY or self.FRIDAY_API_KEY
