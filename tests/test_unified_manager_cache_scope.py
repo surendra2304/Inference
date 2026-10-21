@@ -104,3 +104,26 @@ async def test_unified_cache_separates_fast_lane_from_standard_execution(fake_ga
     assert standard.content != fast.content
     assert fast.status == "success"
     assert len(fake_gateway) == 2
+
+
+@pytest.mark.asyncio
+async def test_unified_cache_does_not_cross_requested_providers(fake_gateway):
+    manager = UnifiedProviderManager()
+    automatic = await manager.execute(_request(provider="auto"))
+    explicit = await manager.execute(_request(provider="openrouter"))
+
+    assert automatic.provider_used == "groq"
+    assert explicit.provider_used == "openrouter"
+    assert explicit.status == "success"
+    assert len(fake_gateway) == 2
+
+
+@pytest.mark.asyncio
+async def test_unified_cache_does_not_cross_agent_roles(fake_gateway):
+    manager = UnifiedProviderManager()
+    researcher = await manager.execute(_request(agent_role="researcher"))
+    trader = await manager.execute(_request(agent_role="trading_analyst"))
+
+    assert researcher.agent_role == "researcher"
+    assert trader.agent_role == "trading_analyst"
+    assert len(fake_gateway) == 2
