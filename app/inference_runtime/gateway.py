@@ -100,51 +100,59 @@ class HardenedGateway:
         decision = self.router.choose(request)
         ep = decision.endpoint
         estimate = self._estimate_cost(request, ep)
-        self.budget.reserve(request.tenant_id, estimate)
-        reservation_held = True
-        try:
-            # Caller-supplied request IDs are not globally unique. Include the tenant
-            # and full request payload so a reused ID cannot make one tenant or prompt
-            # receive another request's in-flight result.
-            dedupe_key = self.dedupe.fingerprint(
-                {
-                    "tenant_id": request.tenant_id,
-                    "request": request.__dict__,
-                }
-            )
-            result = await self.dedupe.run(dedupe_key, lambda: self._execute(request, ep))
 
-            # Validation gates caching, not billing: even malformed provider output
-            # can incur real token charges, so reconcile that actual cost exactly once.
-            if request.response_schema is not None:
-                try:
-                    validate_json(result.text, dict(request.response_schema))
-                except BaseException:
-                    self.budget.reconcile(request.tenant_id, estimate, result.cost_usd)
-                    reservation_held = False
-                    raise
+        # One provider execution must own one reservation and one spend
+        # reconciliation. Reserving/reconciling around dedupe.run() charges every
+        # waiter for the same upstream call, even though the provider ran once.
+        dedupe_key = self.dedupe.fingerprint(
+            {
+                "tenant_id": request.tenant_id,
+                "request": request.__dict__,
+            }
+        )
 
-            self.budget.reconcile(request.tenant_id, estimate, result.cost_usd)
-            reservation_held = False
+        async def execute_and_account() -> CompletionResult:
+            self.budget.reserve(request.tenant_id, estimate)
+            reservation_held = True
+            try:
+                result = await self._execute(request, ep)
 
-            if cache_key:
-                self.cache.put(cache_key, result.__dict__, request.tenant_id, self.config.cache_ttl_seconds)
-            self.trace.emit(
-                "completed",
-                request.request_id,
-                ep.provider,
-                ep.model,
-                latency=result.latency_seconds,
-                tokens=result.total_tokens,
-                cost=result.cost_usd,
-            )
-            return result
-        except BaseException:
-            # Cancellation is a BaseException in supported Python versions. Refund a
-            # pending reservation for cancellation as well as ordinary failures.
-            if reservation_held:
-                self.budget.reconcile(request.tenant_id, estimate, 0.0)
-            raise
+                # Validation gates caching, not billing: an invalid provider response
+                # can still incur real cost. Reconcile it exactly once in this shared
+                # operation before propagating the contract failure to every waiter.
+                if request.response_schema is not None:
+                    try:
+                        validate_json(result.text, dict(request.response_schema))
+                    except BaseException:
+                        self.budget.reconcile(request.tenant_id, estimate, result.cost_usd)
+                        reservation_held = False
+                        raise
+
+                self.budget.reconcile(request.tenant_id, estimate, result.cost_usd)
+                reservation_held = False
+                self.trace.emit(
+                    "completed",
+                    request.request_id,
+                    result.provider,
+                    result.model,
+                    latency=result.latency_seconds,
+                    tokens=result.total_tokens,
+                    cost=result.cost_usd,
+                )
+                return result
+            except BaseException:
+                # The shared operation itself is shielded from individual waiters.
+                # If every waiter leaves, the deduper cancels this factory and any
+                # outstanding reservation is released here.
+                if reservation_held:
+                    self.budget.reconcile(request.tenant_id, estimate, 0.0)
+                raise
+
+        result = await self.dedupe.run(dedupe_key, execute_and_account)
+
+        if cache_key:
+            self.cache.put(cache_key, result.__dict__, request.tenant_id, self.config.cache_ttl_seconds)
+        return result
 
     async def _execute(self, request: CompletionRequest, ep: ProviderEndpoint) -> CompletionResult:
         provider = ep.provider

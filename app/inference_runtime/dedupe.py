@@ -65,6 +65,7 @@ class RequestDeduper:
             # waiter still receives its own CancelledError.
             return await asyncio.shield(task)
         finally:
+            cancel_orphan = False
             async with self._lock:
                 entry.waiters -= 1
                 if entry.waiters == 0 and self._tasks.get(key) is entry:
@@ -73,3 +74,11 @@ class RequestDeduper:
                     # provider request when the final waiter was cancelled.
                     if not task.done():
                         task.cancel()
+                        cancel_orphan = True
+
+            if cancel_orphan:
+                # Await cancellation cleanup before returning to the final cancelled
+                # waiter. Shared factories may own budget reservations or semaphores;
+                # those invariants must be restored synchronously with cancellation,
+                # not on a later event-loop turn.
+                await asyncio.gather(task, return_exceptions=True)
