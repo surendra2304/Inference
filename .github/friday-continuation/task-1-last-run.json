@@ -2,31 +2,33 @@
   "task": 1,
   "repository": "Inference",
   "updated_at": "2026-10-22",
-  "status": "pr_open_ci_queued",
-  "branch": "fix/task1-forced-agent-max-bound-20261022",
-  "pr": {
-    "number": 31,
+  "status": "pr31_ci_green",
+  "pr31": {
     "url": "https://github.com/surendra2304/Inference/pull/31",
     "head": "32957964472c1026a784cc97a11e1546e6d7f62c",
-    "commits": [
-      "919835b90fd405674d784f985abc69151279aa50",
-      "32957964472c1026a784cc97a11e1546e6d7f62c"
-    ],
-    "files_changed": [
-      "app/core/orchestrator.py",
-      "tests/test_forced_agent_selection.py"
-    ]
+    "ci": {
+      "id": 39673218580,
+      "url": "https://github.com/surendra2304/Inference/actions/runs/39673218580",
+      "status": "success",
+      "checks": [
+        "lint",
+        "pytest",
+        "Docker"
+      ]
+    }
   },
-  "ci": {
-    "run": 39673218580,
-    "url": "https://github.com/surendra2304/Inference/actions/runs/39673218580",
-    "status": "queued"
+  "main": {
+    "sha": "6becc799667e02e1830a90cd5710888e64278d32",
+    "ci_run": 39672821899,
+    "status": "success"
+  },
+  "pr32": {
+    "url": "https://github.com/surendra2304/Inference/pull/32",
+    "latest_head_observed": "bb5dfb46764319384fd0767752f6714c6b1fc069",
+    "status": "recheck_latest_ci"
   },
   "local_tests_run": false,
   "merged": false,
-  "blockers": [
-    "Laptop MCP returned HTTP 404"
-  ],
   "active_duration_seconds": "not measured",
-  "next": "Poll PR31 CI, then inspect disposition of former master-plan/schema PR30 and review migration compatibility."
+  "next": "Recheck PR31 and inspect current PR32 CI/logs."
 }
