@@ -20,7 +20,13 @@ async def get_tenant_policy(tenant_id: str = Path(..., description="Tenant ID"))
     policy = tenant_manager.tenants.get(tenant_id)
     if not policy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
-    return policy.model_dump()
+    # A general service/API credential must not be able to enumerate the tenant's
+    # live credentials. Return safe key metadata only; rotation is the sole endpoint
+    # that returns a newly minted key to its authenticated caller.
+    payload = policy.model_dump(exclude={"active_keys"})
+    payload["active_key_count"] = len(policy.active_keys)
+    payload["keys_configured"] = bool(policy.active_keys)
+    return payload
 
 
 @governance_router.post("/tenants/{tenant_id}/rotate-key", status_code=status.HTTP_200_OK)
