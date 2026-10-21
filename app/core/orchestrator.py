@@ -142,9 +142,15 @@ class Orchestrator(BaseOrchestrator):
             )
             dag.add_node(node)
 
-        # Add synthesis node (Layer 1)
+        # Keep the orchestration node distinct from the registered "synthesizer"
+        # agent. A panel is allowed to contain that specialist, and using the same
+        # node ID creates a duplicate/self-dependency under strict DAG validation.
+        synth_node_id = "node___consensus_synthesis__"
+        while synth_node_id in dag.nodes:
+            synth_node_id = f"_{synth_node_id}"
+
         synth_node = DAGNode(
-            node_id="node_synthesizer",
+            node_id=synth_node_id,
             agent_id="synthesizer",
             agent_role="Synthesizer",
             dependencies=[f"node_{agent.id}" for agent in participating_agents],
