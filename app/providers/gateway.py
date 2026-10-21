@@ -547,7 +547,10 @@ class ModelGateway:
                 max_tokens=request.max_tokens or 1024,
                 response_schema=request.response_schema,
             )
-            await local_limiter.acquire()
+            acquire_timeout = (deadline - time.monotonic()) if deadline else remaining
+            if acquire_timeout <= 0:
+                raise TimeoutError("Deadline exceeded while waiting for the self-hosted tier limiter.")
+            await asyncio.wait_for(local_limiter.acquire(), timeout=acquire_timeout)
             try:
                 rem = (deadline - time.monotonic()) if deadline else remaining
                 if rem <= 0:
@@ -671,11 +674,14 @@ class ModelGateway:
                     openrouter_limiter = ProviderRateLimiter("openrouter")
                     self.rate_limiters["openrouter"] = openrouter_limiter
 
-                await openrouter_limiter.acquire()
+                acquire_timeout = (deadline - time.monotonic()) if deadline else 60.0
+                if acquire_timeout <= 0:
+                    raise TimeoutError("Deadline exceeded while waiting for OpenRouter limiter.")
+                await asyncio.wait_for(openrouter_limiter.acquire(), timeout=acquire_timeout)
                 try:
                     rem = (deadline - time.monotonic()) if deadline else 60.0
                     if rem <= 0:
-                        raise TimeoutError("Deadline exceeded waiting for OpenRouter rate limit.")
+                        raise TimeoutError("Deadline exceeded before OpenRouter fallback call.")
                     resp = await asyncio.wait_for(openrouter_prov.generate(fallback_req), timeout=rem)
                 finally:
                     openrouter_limiter.release()
@@ -752,7 +758,10 @@ class ModelGateway:
                         temperature=request.temperature,
                         max_tokens=request.max_tokens or 1024,
                     )
-                    await sec_limiter.acquire()
+                    acquire_timeout = (deadline - time.monotonic()) if deadline else 60.0
+                    if acquire_timeout <= 0:
+                        break
+                    await asyncio.wait_for(sec_limiter.acquire(), timeout=acquire_timeout)
                     try:
                         rem = (deadline - time.monotonic()) if deadline else 60.0
                         if rem <= 0:
