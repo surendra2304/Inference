@@ -97,8 +97,8 @@ class SensitiveDataFilter(logging.Filter):
             # in record.args could be added back by the formatter after this filter.
             try:
                 rendered_message = record.getMessage()
-            except Exception:  # noqa: BLE001 - a defensive logger filter must not raise
-                rendered_message = str(record.msg)
+            except Exception:  # noqa: BLE001 - malformed format strings must fail closed
+                rendered_message = "[REDACTED: log formatting failed]"
             record.msg = _redact_text(rendered_message)
             record.args = ()
 
