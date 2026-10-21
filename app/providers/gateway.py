@@ -26,10 +26,8 @@ from app.providers.errors import (
     ProviderUnconfiguredError,
     RateLimitError,
     TemporaryUnavailableError,
-    normalize_provider_exception,
-)
-from app.providers.errors import (
     TimeoutError as ProviderTimeoutError,
+    normalize_provider_exception,
 )
 from app.providers.health import provider_health_tracker
 from app.security.prompt_isolation import scrub_credentials
