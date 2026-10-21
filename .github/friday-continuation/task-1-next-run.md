@@ -1,7 +1,7 @@
-# Task 1 next-run instructions — Inference (2026-10-22)
+# Task 1 next-run — Inference (2026-10-22)
 
-1. Recheck PR #30 current head and combined checks. The prior green runs `39671781899` at `0199cf81c69437f0314b94ed2d10ae62aa249e8a` and `39671769752` at `64c758a11499e0c378340aadca8668cea86c838b` passed Ruff, pytest, Docker, but may be behind current API head `daf519d8f401446838017fb9bb7dcff5db0ab2fa`; don't infer current-head status.
-2. Review PR #30's scope, especially nullable confidence and `ALTER TABLE deliberations ALTER COLUMN confidence DROP NOT NULL`; inspect how schema DDL runs on fresh vs existing deployments before any merge.
-3. Continue existing PR #22 cancellation cleanup, do not create a duplicate PR.
-4. Next regression candidate: `app/core/orchestrator.py::_resolve_forced_agents` and `tests/test_forced_agent_selection.py`; inspect zero/negative `max_agents` contract and add a focused boundary test. Preserve candidate scan bounds.
-5. Laptop execution endpoint returned HTTP 404; no local tests ran this invocation. Use connected GitHub and actual CI evidence. Update all three handoff files and never auto-merge/force push.
+1. Recheck main head, branch `automation/friday-universe-task-1`, and open PRs. The current `/pulls?state=open` response is empty; earlier PR #30 is not open in the current live list. Confirm whether it was closed or merged, and inspect current main before creating related work.
+2. Latest observed current main run `39672821899` passed on `6becc799667e02e1830a90cd5710888e64278d32`; cancellation cleanup branch run `39672605944` passed on `637b7fa8b82cd600b186dfa07da446edfedddf81`. PR-style runs for the previous CI/schema-plan branch also succeeded on their exact SHAs, but only treat them as evidence for those SHAs.
+3. Review migration compatibility in `app/memory/postgres.py` and the related DDL for nullable `deliberations.confidence`, especially fresh versus existing DB startup. Do not assume old PR exists, do not duplicate a still-existing review branch.
+4. After that, inspect `app/core/orchestrator.py::_resolve_forced_agents` and `tests/test_forced_agent_selection.py`; determine API contract for zero/negative `max_agents`; add minimal regression/validation if needed. Preserve `MAX_FORCED_AGENT_CANDIDATES` bound.
+5. Laptop/local tests were not available (HTTP 404). Use connected GitHub to write commits and check CI. No merge/force push. Update all handoffs with exact evidence and do not claim unmeasured duration.
