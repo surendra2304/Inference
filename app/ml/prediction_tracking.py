@@ -204,6 +204,15 @@ class PredictionTrackingEngine:
         else:
             evidence_class = "observed_predictions_pending_resolution"
 
+        calibration_basis = (
+            "withheld: no scoreable resolved observations to calibrate against"
+            if not resolved
+            else (
+                f"withheld: {len(resolved)} scoreable resolved observations; "
+                f"{MIN_OBSERVATIONS_FOR_SCORE} required before publishing a calibration score"
+            )
+        )
+
         report: dict[str, Any] = {
             "total_predictions_evaluated": len(resolved),
             "observed_predictions_recorded": len(observed_all),
@@ -213,7 +222,7 @@ class PredictionTrackingEngine:
             "overall_directional_accuracy_pct": None,
             "sub_model_accuracies": {},
             "calibration_score_0_to_1": None,
-            "calibration_basis": "withheld: no scoreable resolved observations to calibrate against",
+            "calibration_basis": calibration_basis,
             "accuracy_status": "INSUFFICIENT_DATA",
             "min_observations_required": MIN_OBSERVATIONS_FOR_SCORE,
             "baseline_accuracy_pct": BASELINE_ACCURACY_PCT,
