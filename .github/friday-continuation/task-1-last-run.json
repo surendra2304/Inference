@@ -2,13 +2,12 @@
   "task": 1,
   "repository": "Inference",
   "updated_at": "2026-10-22",
-  "status": "pr31_ci_green",
+  "status": "pr31_green_main_green_new_prediction_bounds_ci_running",
   "pr31": {
     "url": "https://github.com/surendra2304/Inference/pull/31",
     "head": "32957964472c1026a784cc97a11e1546e6d7f62c",
     "ci": {
       "id": 39673218580,
-      "url": "https://github.com/surendra2304/Inference/actions/runs/39673218580",
       "status": "success",
       "checks": [
         "lint",
@@ -18,17 +17,37 @@
     }
   },
   "main": {
-    "sha": "6becc799667e02e1830a90cd5710888e64278d32",
-    "ci_run": 39672821899,
+    "sha": "6540537bb68aa7b7ebec7ce13d909eca87596072",
+    "ci_run": 39674354552,
     "status": "success"
   },
   "pr32": {
     "url": "https://github.com/surendra2304/Inference/pull/32",
-    "latest_head_observed": "bb5dfb46764319384fd0767752f6714c6b1fc069",
-    "status": "recheck_latest_ci"
+    "state": "closed",
+    "head": "bb5dfb46764319384fd0767752f6714c6b1fc069",
+    "last_ci": 39674147330,
+    "ci_status": "success"
+  },
+  "new_prediction_bounds_branch": {
+    "branch": "fix/prediction-api-input-bounds-20261022",
+    "runs": [
+      {
+        "id": 39674800949,
+        "sha": "a9fc836b384f21847448084728c6a1e849f12840",
+        "status": "in_progress"
+      },
+      {
+        "id": 39674867308,
+        "sha": "1c89fb87af6fa24b24b538828a0ef14759853a67",
+        "status": "queued"
+      }
+    ]
   },
   "local_tests_run": false,
   "merged": false,
+  "blockers": [
+    "Laptop MCP HTTP 404"
+  ],
   "active_duration_seconds": "not measured",
-  "next": "Recheck PR31 and inspect current PR32 CI/logs."
+  "next": "Verify PR31 and check open PR/current CI for prediction-api-input-bounds branch."
 }
