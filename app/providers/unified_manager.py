@@ -89,6 +89,8 @@ class UnifiedProviderManager:
         executions can reuse a response.
         """
         return {
+            "provider": req.provider,
+            "agent_role": req.agent_role,
             "context": req.context,
             "max_tokens": req.max_tokens,
             "temperature": req.temperature,
