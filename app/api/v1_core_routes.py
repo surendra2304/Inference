@@ -38,7 +38,7 @@ from app.memory.base import TaskRecord
 from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.errors import TimeoutError as ProviderTimeoutError
 from app.providers.gateway import model_gateway
-from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
+from app.providers.unified_manager import ProviderName, UnifiedExecutionRequest, unified_provider_manager
 from app.schemas.v1_models import (
     DebateRequest,
     InferenceAskRequest,
@@ -946,7 +946,7 @@ async def chat_completions(req: ChatCompletionRequest):
     elif "cerebras" in norm_model:
         exec_provider = "cerebras"
     else:
-        exec_provider = "groq"
+        exec_provider: ProviderName = "groq"
 
     exec_req = UnifiedExecutionRequest(
         provider=exec_provider,
