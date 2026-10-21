@@ -2,7 +2,7 @@
   "task": 1,
   "repository": "Inference",
   "updated_at": "2026-10-22",
-  "status": "pr31_green_pr34_open_green_ci_mergeable_divergence",
+  "status": "pr31_pr34_ci_green_mergeability_needs_refresh",
   "pr31": {
     "url": "https://github.com/surendra2304/Inference/pull/31",
     "head": "32957964472c1026a784cc97a11e1546e6d7f62c",
@@ -30,13 +30,12 @@
         "Docker"
       ]
     },
-    "state": "open",
-    "mergeable": true,
-    "compare": {
+    "mergeable": "latest fetch false; must refresh",
+    "earlier_compare": {
       "status": "diverged",
       "ahead_by": 8,
       "behind_by": 1,
-      "changed_files": [
+      "files": [
         "MASTER_PLAN.md",
         "app/ml/prediction_aggregator.py",
         "app/routers/predictions.py",
@@ -49,18 +48,12 @@
     "ci_run": 39675092616,
     "status": "success"
   },
-  "pr32": {
-    "state": "closed",
-    "head": "bb5dfb46764319384fd0767752f6714c6b1fc069",
-    "ci_run": 39674147330,
-    "status": "success"
-  },
   "local_tests_run": false,
   "merged": false,
   "blockers": [
     "Laptop MCP HTTP 404",
-    "PR34 has one-behind/diverged history requiring safe review"
+    "PR34 mergeability uncertain"
   ],
   "active_duration_seconds": "not measured",
-  "next": "Inspect PR34 ancestry safely, then verify PR31."
+  "next": "Refresh PR34 head/main/checks and inspect mergeability safely."
 }
