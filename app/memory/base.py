@@ -95,7 +95,7 @@ class DeliberationRecord(BaseModel):
     participating_agents: list[str] = Field(default_factory=list)
     consensus_strategy: str = "adjudicator"
     final_decision: str
-    confidence: float = 0.85
+    confidence: float | None = None
     rounds: int = 1
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)

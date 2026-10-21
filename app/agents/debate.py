@@ -119,6 +119,13 @@ class CollaborationResult(BaseModel):
     agent_coverage: dict[str, str] = Field(default_factory=dict)
     failed_agents: list[str] = Field(default_factory=list)
 
+    @property
+    def round_one_messages(self) -> list[CollaborationMessage]:
+        """Returns messages from Round 1 (specialist analysis) if present."""
+        if self.rounds:
+            return self.rounds[0].messages
+        return []
+
 
 class CollaborationEngine:
     """
