@@ -23,7 +23,7 @@ _SECRET_FIELD_NAMES = (
     r"password|passwd|passphrase|secret|session[-_ ]?(?:id|token)|"
     r"cookie|set[-_ ]?cookie|api[-_ ]?token|bearer|key|token"
 )
-_SECRET_PREFIX = rf"""(?P<prefix>["']?\b(?:{_SECRET_FIELD_NAMES})\b["']?\s*[:=]\s*)"""
+_SECRET_PREFIX = rf"""(?P<prefix>["']?\b(?:{_SECRET_FIELD_NAMES})\b["']?\s*[:=]\s*(?!\[REDACTED\]))"""
 _QUOTED_SECRET_FIELD = re.compile(
     _SECRET_PREFIX + r"""(?P<quote>["'])(?P<secret>.*?)(?P=quote)""",
     re.IGNORECASE | re.DOTALL,
