@@ -220,8 +220,8 @@ class UnifiedProviderManager:
                             },
                         ),
                         caller_id=req.agent_role or "unified",
-                    extra=cache_scope,
-                    namespace="provider.unified",
+                        extra=cache_scope,
+                        namespace="provider.unified",
                 )
                 return UnifiedExecutionResponse(
                     provider_used=spec_winner,
