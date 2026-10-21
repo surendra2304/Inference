@@ -17,6 +17,8 @@ The first objective is a reproducible green baseline. New capabilities must foll
 - The repository has **60+ test modules** covering APIs, provider routing, cancellation, security, monitoring, persistence, batch work, and Docker configuration.
 - The latest recorded CI run on `main` is [run 39666816838](https://github.com/surendra2304/Inference/actions/runs/39666816838). Dependency installation succeeded, but `ruff check .` failed with one `I001` import-order error in `app/monitoring.py`; pytest and Docker verification were skipped.
 - The immediate lint failure is caused by a missing blank line before a guarded datetime import in `app/monitoring.py`. A focused fix is being submitted separately and must be validated by GitHub Actions.
+- Configuration review also found a hard-coded PostgreSQL password default. The current hardening branch removes the default and fails closed without an explicitly supplied password. Because the old value is in public Git history, rotate it if it was ever valid in a live environment; a source change cannot revoke a committed credential.
+- The PostgreSQL adapter's driver (`asyncpg`) is not installed by the base dependency set, and the production Compose file deliberately runs SQLite. Treat PostgreSQL persistence as opt-in until the driver and secret-managed connection settings are explicitly provisioned; do not infer that a PostgreSQL connection is active just because its adapter exists.
 - PR [#22](https://github.com/surendra2304/Inference/pull/22) contains an async cancellation cleanup fix and regression tests. Its last reported CI success was against an older base commit, so the latest `main` must be revalidated before it is merged.
 - Direct clone/test execution was not available in the current engineering workspace. CI is therefore the authoritative test runner for these remote changes; no tests are considered passed until the matching commit's run reports success.
 
@@ -90,6 +92,7 @@ The first objective is a reproducible green baseline. New capabilities must foll
 3. Ensure SQLite async resources are used and closed on the owning event loop.
 4. Make schema migration idempotent and persistence behavior explicit under concurrent startup or database failures.
 5. Keep peer health, identity, configured capacity, and observed availability distinct; never infer live reachability from static configuration.
+6. Keep PostgreSQL persistence opt-in unless the driver and secret-managed credentials are installed; preserve unknown measurements as SQL NULL and migrate older schemas without inventing values.
 
 **Acceptance:** DAG, memory, database, selection-bound, and mesh contract suites pass; tests do not require live external services.
 
