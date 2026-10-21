@@ -17,6 +17,8 @@ class PredictionAggregationEngine:
         *,
         inputs_simulated: bool = False,
         input_source: str = "caller_supplied",
+        price_is_simulated: bool | None = None,
+        returns_are_simulated: bool | None = None,
     ) -> dict[str, Any]:
         """Generates unified ensemble directional signal and key drivers.
 
@@ -28,6 +30,14 @@ class PredictionAggregationEngine:
         evidence class says why, because a confidence attached to invented inputs is a
         fabricated measurement.
         """
+        if price_is_simulated is None:
+            price_is_simulated = inputs_simulated
+        if returns_are_simulated is None:
+            returns_are_simulated = inputs_simulated
+        # Keep the legacy flag for compatibility with existing callers, while letting
+        # the API route distinguish which supplied data was actually replaced.
+        inputs_simulated = price_is_simulated or returns_are_simulated
+
         dl_pred = deep_models_engine.predict_horizons(symbol, current_price, recent_returns)
         alt_data = alt_data_engine.get_consolidated_alternative_data(symbol)
 
@@ -69,15 +79,22 @@ class PredictionAggregationEngine:
             "onchain_intelligence (netflow, whale bias, active addresses)",
             "macro_intelligence (dxy, sp500 futures, gold, vix)",
         ]
-        if inputs_simulated:
+        if price_is_simulated:
             synthetic_legs.insert(0, "price_series (no current_price supplied)")
-            synthetic_legs.insert(1, "return_series (no recent_returns supplied)")
+        if returns_are_simulated:
+            insert_at = 1 if price_is_simulated else 0
+            synthetic_legs.insert(insert_at, "return_series (no recent_returns supplied)")
 
         confidence: float | None = raw_confidence
         if inputs_simulated:
+            missing_inputs = []
+            if price_is_simulated:
+                missing_inputs.append("current_price")
+            if returns_are_simulated:
+                missing_inputs.append("recent_returns")
             confidence_basis = (
-                "withheld: the price and return inputs were simulated by the caller "
-                "(inputs_simulated=true), so no measurement of this signal's reliability exists"
+                "withheld: " + ", ".join(missing_inputs)
+                + " input(s) were simulated, so no measurement of this signal's reliability exists"
             )
         else:
             confidence_basis = (
@@ -104,8 +121,12 @@ class PredictionAggregationEngine:
             "conflicting_signals": [] if abs(lstm_signal - news_signal) <= 1.0 else ["Deep Learning vs News Divergence"],
             "evidence_class": (
                 "synthetic_fixture_inputs"
-                if inputs_simulated
-                else "caller_supplied_price_and_returns_with_synthetic_alt_data"
+                if price_is_simulated and returns_are_simulated
+                else (
+                    "partially_synthetic_inputs"
+                    if inputs_simulated
+                    else "caller_supplied_price_and_returns_with_synthetic_alt_data"
+                )
             ),
             "inputs_simulated": inputs_simulated,
             "input_source": input_source,
