@@ -25,9 +25,6 @@ from app.utils.logger import logger
 
 
 
-MAX_FORCED_AGENT_CANDIDATES = 50
-
-
 class OrchestrationRequest(BaseModel):
     """Input payload for a high-level orchestration task."""
     question: str
@@ -74,6 +71,9 @@ class OrchestrationResult(BaseModel):
 #: How many recent task records are kept in the fast in-memory lookup window. Sized for a
 #: busy operator session, deliberately far smaller than the unbounded dict it replaces;
 #: older tasks are read back from the durable store (SQLite) instead.
+MAX_FORCED_AGENT_CANDIDATES = 50
+
+
 RECENT_TASK_CACHE = 1024
 
 
