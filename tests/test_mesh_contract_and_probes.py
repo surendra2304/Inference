@@ -178,7 +178,7 @@ async def test_ready_probe_simulated_model_routing_unready_returns_503(async_cli
 async def test_ready_probe_does_not_call_external_llm_apis(async_client):
     """GET /ready must inspect local state only and never invoke external LLM APIs."""
     mock_execute = MagicMock()
-    with patch.object(model_gateway, "execute", mock_execute):
+    with patch.object(type(model_gateway), "execute", mock_execute):
         async with async_client as client:
             resp = await client.get("/ready")
         assert resp.status_code == status.HTTP_200_OK
