@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
 from app.inference_runtime.budget import BudgetLedger
 from app.inference_runtime.config import RuntimeConfig
+from app.inference_runtime.circuit import CircuitState
 from app.inference_runtime.contracts import (
     Capability,
     CompletionRequest,
@@ -157,6 +159,35 @@ async def test_cancelled_inference_releases_its_budget_reservation():
         await task
 
     assert gateway.budget.remaining(request.tenant_id) == pytest.approx(starting_budget)
+
+
+@pytest.mark.asyncio
+async def test_gateway_cancellation_releases_half_open_circuit_probe():
+    started = asyncio.Event()
+
+    async def respond(_request, _endpoint, _key):
+        started.set()
+        await asyncio.sleep(30)
+
+    transport = _Transport(respond)
+    gateway = _gateway(transport)
+    breaker = gateway.breakers["test-provider"]
+
+    for _ in range(breaker.threshold):
+        breaker.failure()
+    breaker.opened_at = time.monotonic() - breaker.recovery_seconds - 1.0
+
+    task = asyncio.create_task(gateway.complete(_request()))
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    assert breaker.state is CircuitState.HALF_OPEN
+    assert breaker._probe_in_flight is True
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert breaker.state is CircuitState.OPEN
+    assert breaker._probe_in_flight is False
 
 
 @pytest.mark.asyncio
