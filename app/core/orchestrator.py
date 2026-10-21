@@ -24,7 +24,6 @@ from app.utils.ids import generate_task_id
 from app.utils.logger import logger
 
 
-
 class OrchestrationRequest(BaseModel):
     """Input payload for a high-level orchestration task."""
     question: str
