@@ -56,6 +56,20 @@ def provider_has_credentials(prov_name: str) -> bool:
         return False
 
 
+def _request_timeout_budget(request: ProviderRequest) -> float:
+    """Validate the finite positive deadline shared by primary and fallback work."""
+    value = request.extra_params.get("timeout", settings.REQUEST_TIMEOUT or 60.0)
+    if isinstance(value, bool):
+        raise ValueError("request timeout must be a finite positive number")
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("request timeout must be a finite positive number") from exc
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("request timeout must be a finite positive number")
+    return timeout
+
+
 class KeyPool:
     """Manages round-robin key rotation and 60-second quarantines for a provider."""
 
@@ -259,7 +273,7 @@ class ModelGateway:
         5. If all keys exhausted/quarantined, routes through capability-matched fallback.
         6. Updates health metrics and records provenance.
         """
-        timeout_budget = float(request.extra_params.get("timeout", settings.REQUEST_TIMEOUT or 60.0))
+        timeout_budget = _request_timeout_budget(request)
         deadline = time.monotonic() + timeout_budget
         # Reserve the tail of the budget for the fallback ladder. Without this, a
         # primary provider that times out (the single most common provider failure)
@@ -397,10 +411,15 @@ class ModelGateway:
                     else app.providers.get_provider(prov_name)
                 )
 
-                # Acquire isolated rate limiter slot
-                await limiter.acquire()
+                # Rate-limit acquisition consumes the same request budget as the
+                # provider call. Bound the wait itself, then recalculate remaining
+                # primary time so a slow token/concurrency wait cannot start a call after
+                # the primary deadline has already expired.
+                await asyncio.wait_for(limiter.acquire(), timeout=remaining)
                 try:
-                    call_timeout = min(remaining, timeout_budget)
+                    call_timeout = primary_deadline - time.monotonic()
+                    if call_timeout <= 0:
+                        raise asyncio.TimeoutError("Primary deadline expired while acquiring provider capacity")
                     resp = await asyncio.wait_for(provider_instance.generate(request), timeout=call_timeout)
                 finally:
                     limiter.release()
@@ -528,7 +547,10 @@ class ModelGateway:
                 max_tokens=request.max_tokens or 1024,
                 response_schema=request.response_schema,
             )
-            await local_limiter.acquire()
+            acquire_timeout = (deadline - time.monotonic()) if deadline else remaining
+            if acquire_timeout <= 0:
+                raise TimeoutError("Deadline exceeded while waiting for the self-hosted tier limiter.")
+            await asyncio.wait_for(local_limiter.acquire(), timeout=acquire_timeout)
             try:
                 rem = (deadline - time.monotonic()) if deadline else remaining
                 if rem <= 0:
@@ -652,11 +674,14 @@ class ModelGateway:
                     openrouter_limiter = ProviderRateLimiter("openrouter")
                     self.rate_limiters["openrouter"] = openrouter_limiter
 
-                await openrouter_limiter.acquire()
+                acquire_timeout = (deadline - time.monotonic()) if deadline else 60.0
+                if acquire_timeout <= 0:
+                    raise TimeoutError("Deadline exceeded while waiting for OpenRouter limiter.")
+                await asyncio.wait_for(openrouter_limiter.acquire(), timeout=acquire_timeout)
                 try:
                     rem = (deadline - time.monotonic()) if deadline else 60.0
                     if rem <= 0:
-                        raise TimeoutError("Deadline exceeded waiting for OpenRouter rate limit.")
+                        raise TimeoutError("Deadline exceeded before OpenRouter fallback call.")
                     resp = await asyncio.wait_for(openrouter_prov.generate(fallback_req), timeout=rem)
                 finally:
                     openrouter_limiter.release()
@@ -733,7 +758,10 @@ class ModelGateway:
                         temperature=request.temperature,
                         max_tokens=request.max_tokens or 1024,
                     )
-                    await sec_limiter.acquire()
+                    acquire_timeout = (deadline - time.monotonic()) if deadline else 60.0
+                    if acquire_timeout <= 0:
+                        break
+                    await asyncio.wait_for(sec_limiter.acquire(), timeout=acquire_timeout)
                     try:
                         rem = (deadline - time.monotonic()) if deadline else 60.0
                         if rem <= 0:
@@ -908,9 +936,7 @@ class ModelGateway:
     ) -> AsyncIterator[str]:
         """Stream from one provider while enforcing the request deadline and limits."""
         prov_name = provider.lower().strip()
-        timeout_budget = float(request.extra_params.get("timeout", settings.REQUEST_TIMEOUT or 60.0))
-        if not math.isfinite(timeout_budget) or timeout_budget <= 0:
-            raise ValueError("stream timeout must be a finite positive number")
+        timeout_budget = _request_timeout_budget(request)
         deadline = time.monotonic() + timeout_budget
 
         if not provider_has_credentials(prov_name):
