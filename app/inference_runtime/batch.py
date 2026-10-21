@@ -60,12 +60,11 @@ class MicroBatcher(Generic[T]):
     async def submit(self, payload: T) -> object:
         if not self._started:
             raise RuntimeError("batcher must be started before submit")
-        future: asyncio.Future[object] = asyncio.get_running_loop().create_future()
-        item = BatchItem(payload=payload, future=future, submitted_at=time.monotonic())
-
         async with self._cv:
             if self._closed:
                 raise RuntimeError("cannot submit to a closed batcher")
+            future: asyncio.Future[object] = asyncio.get_running_loop().create_future()
+            item = BatchItem(payload=payload, future=future, submitted_at=time.monotonic())
             self._q.append(item)
             self._cv.notify()
 
@@ -140,10 +139,12 @@ class MicroBatcher(Generic[T]):
                 self._closed = True
                 self._cv.notify_all()
 
+            current = asyncio.current_task()
+            task_was_cancelled = current is not None and current.cancelling() > 0
             for item in active_batch + queued:
                 if item.future.done():
                     continue
-                if asyncio.current_task() and asyncio.current_task().cancelled():
+                if task_was_cancelled:
                     item.future.cancel()
                 else:
                     item.future.set_exception(
