@@ -171,3 +171,15 @@ async def test_deliberation_without_observed_confidence_is_persisted_as_null():
 
     assert await mem.save_deliberation(record) is True
     assert mock_conn.execute.await_args.args[7] is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_pool_is_not_created_without_explicit_password(monkeypatch):
+    """PostgreSQL must not use an embedded or implicit credential."""
+    mem = PostgresMemory()
+    mem.password = None
+    monkeypatch.setattr("app.memory.postgres.HAS_ASYNCPG", True)
+
+    assert await mem.initialize() is False
+    assert mem._pool is None
+    assert mem._is_available is False
