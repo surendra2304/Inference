@@ -92,7 +92,8 @@ async def test_chat_completions_streaming(auth, monkeypatch):
     ],
 )
 async def test_chat_completions_streaming_reports_failure_without_success(auth, monkeypatch, failure, error_code):
-    from app.providers.errors import GatewayError, TimeoutError as ProviderTimeoutError
+    from app.providers.errors import GatewayError
+    from app.providers.errors import TimeoutError as ProviderTimeoutError
     from app.providers.gateway import ModelGateway
 
     async def mock_stream(*args, **kwargs):
@@ -404,7 +405,8 @@ async def test_agent_stream_falls_back_before_first_token(monkeypatch):
 @pytest.mark.asyncio
 async def test_agent_stream_fallback_failure_emits_single_safe_terminal_error(monkeypatch):
     from app.api.agent_routes import AgentAssistRequest, agent_stream_endpoint
-    from app.providers.errors import GatewayError, TimeoutError as ProviderTimeoutError
+    from app.providers.errors import GatewayError
+    from app.providers.errors import TimeoutError as ProviderTimeoutError
     from app.providers.gateway import ModelGateway
 
     providers = []
@@ -490,7 +492,8 @@ async def test_agent_stream_fallback_provider_error_preserves_partial_content(mo
 @pytest.mark.asyncio
 async def test_agent_stream_fallback_timeout_preserves_partial_content(monkeypatch):
     from app.api.agent_routes import AgentAssistRequest, agent_stream_endpoint
-    from app.providers.errors import GatewayError, TimeoutError as ProviderTimeoutError
+    from app.providers.errors import GatewayError
+    from app.providers.errors import TimeoutError as ProviderTimeoutError
     from app.providers.gateway import ModelGateway
 
     providers = []
