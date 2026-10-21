@@ -1088,7 +1088,7 @@ async def test_agent_stream_falls_back_before_first_chunk(auth, monkeypatch):
     assert response.status_code == 200
     assert 'fallback answer' in response.text
     assert ' continues' in response.text
-    assert response.text.endswith('data: {"token": "", "done": true}\\n\\n')
+    assert response.text.endswith('data: {"token": "", "done": true}\n\n')
     assert "private provider transport detail" not in response.text
     assert stream_calls == [
         ("groq", "openai/gpt-oss-120b", prompt, 0.4, 222, "agent_stream_forge"),
