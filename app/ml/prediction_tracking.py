@@ -96,6 +96,18 @@ class PredictionTrackingEngine:
             raise ValueError("direction must be a non-empty string")
         if not isinstance(source, str) or not source.strip():
             raise ValueError("source must be a non-empty string")
+        symbol_value = symbol.strip()
+        direction_value = direction.strip()
+        source_value = source.strip()
+        for label, value, max_length in (
+            ("symbol", symbol_value, 64),
+            ("direction", direction_value, 32),
+            ("source", source_value, 128),
+        ):
+            if len(value) > max_length:
+                raise ValueError(f"{label} must not exceed {max_length} characters")
+            if any(ord(char) < 32 or ord(char) == 127 for char in value):
+                raise ValueError(f"{label} must not contain control characters")
         if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
             raise ValueError("confidence must be a finite number between 0 and 1")
         confidence_value = float(confidence)
@@ -111,10 +123,10 @@ class PredictionTrackingEngine:
         entry = {
             "id": f"pred_{uuid.uuid4().hex[:12]}",
             "timestamp": time.time(),
-            "symbol": symbol.strip().upper(),
-            "direction": direction.strip().upper(),
+            "symbol": symbol_value.upper(),
+            "direction": direction_value.upper(),
             "confidence": confidence_value,
-            "source": source.strip(),
+            "source": source_value,
             "horizon_hours": horizon_hours,
             "evidence_class": "observed_prediction",
             "actual_outcome": None,
