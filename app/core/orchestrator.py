@@ -70,6 +70,9 @@ class OrchestrationResult(BaseModel):
 #: How many recent task records are kept in the fast in-memory lookup window. Sized for a
 #: busy operator session, deliberately far smaller than the unbounded dict it replaces;
 #: older tasks are read back from the durable store (SQLite) instead.
+MAX_FORCED_AGENT_CANDIDATES = 50
+
+
 RECENT_TASK_CACHE = 1024
 
 
@@ -115,6 +118,49 @@ class Orchestrator(BaseOrchestrator):
 
         # Ensure all 10 specialist roles are registered
         register_all_specialists()
+
+    def _resolve_forced_agents(self, value: Any, max_agents: int) -> list[Agent] | None:
+        """Resolve caller-supplied agent IDs, bounded by both input size and max_agents.
+
+        Returns None when no override was supplied, otherwise a deduplicated list of
+        known registered agents. Unknown/non-string candidates are ignored so malformed
+        optional context cannot crash the task before its failure record exists.
+        """
+        if not value:
+            return None
+        if isinstance(value, str):
+            candidates: list[Any] = [value]
+        elif isinstance(value, list):
+            if len(value) > MAX_FORCED_AGENT_CANDIDATES:
+                logger.warning(
+                    "Forced agent list had %d entries; inspecting at most %d candidates",
+                    len(value),
+                    MAX_FORCED_AGENT_CANDIDATES,
+                )
+            candidates = value[:MAX_FORCED_AGENT_CANDIDATES]
+        else:
+            logger.warning(
+                "Ignoring malformed context_data.assigned_agents value of type %s",
+                type(value).__name__,
+            )
+            return []
+
+        resolved: list[Agent] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            if not isinstance(candidate, str):
+                continue
+            agent_id = candidate.strip()
+            if not agent_id or agent_id in seen:
+                continue
+            seen.add(agent_id)
+            agent = self.registry.get_agent(agent_id)
+            if agent is None:
+                continue
+            resolved.append(agent)
+            if len(resolved) >= max_agents:
+                break
+        return resolved
 
     def build_execution_dag(
         self,
@@ -200,14 +246,19 @@ class Orchestrator(BaseOrchestrator):
         route_reason = decision.reason
         selected_agent_ids = decision.selected_agent_ids
         forced_agents = request.context_data.get("assigned_agents") if request.context_data else None
-        if forced_agents:
-            selected_agent_ids = forced_agents if isinstance(forced_agents, list) else [forced_agents]
-            route_reason = f"Forced agent assignment via context_data: {selected_agent_ids}"
-
-        participating_agents: list[Agent] = [
-            a for aid in selected_agent_ids
-            if (a := self.registry.get_agent(aid)) is not None
-        ]
+        forced_selection = self._resolve_forced_agents(forced_agents, request.max_agents)
+        if forced_selection is None:
+            participating_agents: list[Agent] = [
+                a for aid in selected_agent_ids
+                if isinstance(aid, str) and (a := self.registry.get_agent(aid)) is not None
+            ]
+        else:
+            participating_agents = forced_selection
+            selected_agent_ids = [agent.id for agent in participating_agents]
+            route_reason = (
+                f"Forced agent assignment via context_data (max_agents={request.max_agents}): "
+                f"{selected_agent_ids}"
+            )
         if not participating_agents:
             fallback_agent = self.registry.get_agent("researcher") or self.registry.get_agent("synthesizer")
             if fallback_agent:
@@ -236,7 +287,7 @@ class Orchestrator(BaseOrchestrator):
 
         try:
             # For review/debate modes, pad specialist agents if needed
-            if mode_used == "review" and len(participating_agents) < 2:
+            if mode_used == "review" and request.max_agents >= 2 and len(participating_agents) < 2:
                 extra_candidates = ["critic", "fact_checker", "strategist", "researcher"]
                 existing_ids = [a.id for a in participating_agents]
                 for cid in extra_candidates:
