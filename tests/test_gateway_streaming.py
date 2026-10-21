@@ -48,24 +48,27 @@ def _request(timeout=1.0):
     )
 
 
+def _patch_provider(monkeypatch, provider):
+    monkeypatch.setattr("app.providers.gateway.provider_has_credentials", lambda _provider: True)
+    monkeypatch.setattr(app.providers, "get_provider", lambda *_args, **_kwargs: provider)
+
+
 @pytest.mark.asyncio
 async def test_stream_completes_and_releases_limiter(monkeypatch):
     gateway = _gateway()
-    monkeypatch.setattr("app.providers.gateway.provider_has_credentials", lambda _provider: True)
-    supplied = []
+    started = []
 
     class _Provider:
         async def stream(self, _request):
-            supplied.append("started")
+            started.append(True)
             yield "hello"
             yield " world"
 
-    monkeypatch.setattr(app.providers, "get_provider", lambda *_args, **_kwargs: _Provider())
-
+    _patch_provider(monkeypatch, _Provider())
     chunks = [chunk async for chunk in gateway.stream("test-provider", _request())]
 
     assert chunks == ["hello", " world"]
-    assert supplied == ["started"]
+    assert started == [True]
     assert gateway.rate_limiters["test-provider"].acquired == 1
     assert gateway.rate_limiters["test-provider"].released == 1
     assert [item[0] for item in gateway.health_tracker.successes] == ["test-provider"]
@@ -75,7 +78,6 @@ async def test_stream_completes_and_releases_limiter(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_total_deadline_produces_typed_timeout_and_closes(monkeypatch):
     gateway = _gateway()
-    monkeypatch.setattr("app.providers.gateway.provider_has_credentials", lambda _provider: True)
     closed = asyncio.Event()
 
     class _Provider:
@@ -87,7 +89,7 @@ async def test_stream_total_deadline_produces_typed_timeout_and_closes(monkeypat
             finally:
                 closed.set()
 
-    monkeypatch.setattr(app.providers, "get_provider", lambda *_args, **_kwargs: _Provider())
+    _patch_provider(monkeypatch, _Provider())
     chunks = []
 
     with pytest.raises(TimeoutError, match="Stream deadline exceeded"):
@@ -103,7 +105,6 @@ async def test_stream_total_deadline_produces_typed_timeout_and_closes(monkeypat
 @pytest.mark.asyncio
 async def test_stream_cancellation_closes_iterator_and_releases_limiter(monkeypatch):
     gateway = _gateway()
-    monkeypatch.setattr("app.providers.gateway.provider_has_credentials", lambda _provider: True)
     started = asyncio.Event()
     closed = asyncio.Event()
 
@@ -116,7 +117,7 @@ async def test_stream_cancellation_closes_iterator_and_releases_limiter(monkeypa
             finally:
                 closed.set()
 
-    monkeypatch.setattr(app.providers, "get_provider", lambda *_args, **_kwargs: _Provider())
+    _patch_provider(monkeypatch, _Provider())
 
     async def consume():
         async for _chunk in gateway.stream("test-provider", _request(timeout=20)):
@@ -144,19 +145,20 @@ async def test_stream_rejects_unconfigured_provider_before_acquiring(monkeypatch
             pass
 
     assert gateway.rate_limiters["test-provider"].acquired == 0
+    assert gateway.rate_limiters["test-provider"].released == 0
+    assert gateway.health_tracker.failures == []
 
 
 @pytest.mark.asyncio
 async def test_stream_normalizes_provider_failure(monkeypatch):
     gateway = _gateway()
-    monkeypatch.setattr("app.providers.gateway.provider_has_credentials", lambda _provider: True)
 
     class _Provider:
         async def stream(self, _request):
             raise RuntimeError("503 service unavailable")
             yield "unreachable"
 
-    monkeypatch.setattr(app.providers, "get_provider", lambda *_args, **_kwargs: _Provider())
+    _patch_provider(monkeypatch, _Provider())
 
     with pytest.raises(GatewayError) as caught:
         async for _chunk in gateway.stream("test-provider", _request()):
@@ -164,4 +166,31 @@ async def test_stream_normalizes_provider_failure(monkeypatch):
 
     assert caught.value.provider == "test-provider"
     assert gateway.rate_limiters["test-provider"].released == 1
+    assert gateway.health_tracker.failures[0][2]["is_503"] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_deadline_includes_time_waiting_for_rate_limiter(monkeypatch):
+    gateway = _gateway()
+
+    class _SlowLimiter(_Limiter):
+        async def acquire(self):
+            self.acquired += 1
+            await asyncio.sleep(0.2)
+
+    gateway.rate_limiters["test-provider"] = _SlowLimiter()
+
+    class _Provider:
+        async def stream(self, _request):
+            yield "should not happen"
+
+    _patch_provider(monkeypatch, _Provider())
+
+    with pytest.raises(TimeoutError, match="Stream deadline exceeded"):
+        async for _chunk in gateway.stream("test-provider", _request(timeout=0.03)):
+            pass
+
+    assert gateway.rate_limiters["test-provider"].acquired == 1
+    # acquire() never completed, so this call must not release another request's slot.
+    assert gateway.rate_limiters["test-provider"].released == 0
     assert gateway.health_tracker.failures[0][2]["is_503"] is True
