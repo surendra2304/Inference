@@ -97,10 +97,13 @@ class PostgresMemory:
         return pool is not None
 
     async def _get_pool(self) -> Any:
-        if not HAS_ASYNCPG:
-            return None
+        # Respect an explicitly injected pool before checking the optional driver.
+        # This keeps adapter-level tests and externally supplied compatible pools
+        # usable even when asyncpg is not installed in the current environment.
         if self._pool is not None:
             return self._pool
+        if not HAS_ASYNCPG:
+            return None
         if self._is_available is False:
             return None
 
