@@ -259,7 +259,13 @@ class ModelGateway:
         5. If all keys exhausted/quarantined, routes through capability-matched fallback.
         6. Updates health metrics and records provenance.
         """
-        timeout_budget = float(request.extra_params.get("timeout", settings.REQUEST_TIMEOUT or 60.0))
+        timeout_value = request.extra_params.get("timeout", settings.REQUEST_TIMEOUT or 60.0)
+        try:
+            timeout_budget = float(timeout_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("request timeout must be a finite positive number") from exc
+        if not math.isfinite(timeout_budget) or timeout_budget <= 0:
+            raise ValueError("request timeout must be a finite positive number")
         deadline = time.monotonic() + timeout_budget
         # Reserve the tail of the budget for the fallback ladder. Without this, a
         # primary provider that times out (the single most common provider failure)
@@ -397,10 +403,15 @@ class ModelGateway:
                     else app.providers.get_provider(prov_name)
                 )
 
-                # Acquire isolated rate limiter slot
-                await limiter.acquire()
+                # Rate-limit acquisition consumes the same request budget as the
+                # provider call. Bound the wait itself, then recalculate remaining
+                # primary time so a slow token/concurrency wait cannot start a call after
+                # the primary deadline has already expired.
+                await asyncio.wait_for(limiter.acquire(), timeout=remaining)
                 try:
-                    call_timeout = min(remaining, timeout_budget)
+                    call_timeout = primary_deadline - time.monotonic()
+                    if call_timeout <= 0:
+                        raise asyncio.TimeoutError("Primary deadline expired while acquiring provider capacity")
                     resp = await asyncio.wait_for(provider_instance.generate(request), timeout=call_timeout)
                 finally:
                     limiter.release()
