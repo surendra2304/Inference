@@ -105,9 +105,15 @@ class PostgresMemory:
         # usable even when asyncpg is not installed in the current environment.
         if self._pool is not None:
             return self._pool
-        if not HAS_ASYNCPG:
-            return None
         if self._is_available is False:
+            return None
+        if not self.password:
+            # Never attempt database authentication with a baked-in, empty, or
+            # missing credential. Operators must provide the secret explicitly.
+            self._is_available = False
+            logger.debug("PostgreSQL persistence disabled: POSTGRES_PASSWORD is not configured.")
+            return None
+        if not HAS_ASYNCPG:
             return None
 
         try:
