@@ -28,11 +28,35 @@ so a 500 here is never the client's fault.
 
 import asyncio
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.providers.base import ProviderResponse
+from app.providers.unified_manager import UnifiedExecutionResponse
+
+
+@pytest.fixture(autouse=True)
+def _mock_inference_calls(monkeypatch):
+    mock_resp = ProviderResponse(content='mock contract test response', model='mock-model', provider='groq')
+    mock_unified = UnifiedExecutionResponse(
+        provider_used='groq',
+        model_used='mock-model',
+        agent_role='system_architect',
+        content='mock contract test response',
+        latency_ms=10.0,
+        timestamp=1234567890.0,
+        token_usage={'prompt_tokens': 10, 'completion_tokens': 10, 'total_tokens': 20},
+        status='success',
+        degraded=False,
+        error=None,
+        finish_reason='stop',
+    )
+    monkeypatch.setattr('app.providers.gateway.model_gateway.execute', AsyncMock(return_value=mock_resp))
+    monkeypatch.setattr('app.providers.gateway.model_gateway.execute_speculative', AsyncMock(return_value=mock_resp))
+    monkeypatch.setattr('app.providers.unified_manager.unified_provider_manager.execute', AsyncMock(return_value=mock_unified))
 
 # Requests are sent to the in-process ASGI app, so this exercises the real middleware
 # stack (security, rate limiting, error encoding) without needing a running server.

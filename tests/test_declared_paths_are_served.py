@@ -14,9 +14,12 @@ message (e.g. ``"Task 'x' not found."`` or an eviction-aware retention explanati
 from __future__ import annotations
 
 import re
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+
+from app.providers.base import ProviderResponse
 
 ROUTING_MISS_DETAIL = "Not Found"
 
@@ -44,23 +47,29 @@ def _unrouted_operations(paths: dict, client: TestClient, auth: dict) -> tuple[l
     """Return the declared operations that answer with a bare routing miss."""
     unrouted: list[str] = []
     checked = 0
-    for path, operations in sorted(paths.items()):
-        for method in operations:
-            if method not in ("get", "post", "put", "patch", "delete"):
-                continue
-            checked += 1
-            kwargs: dict = {"headers": auth}
-            if method not in _IDEMPOTENT:
-                kwargs["json"] = {}
-            response = client.request(method.upper(), _concrete(path), **kwargs)
-            body = (
-                response.json()
-                if response.headers.get("content-type", "").startswith("application/json")
-                else {}
-            )
-            detail = body.get("detail") if isinstance(body, dict) else None
-            if response.status_code == 404 and detail == ROUTING_MISS_DETAIL:
-                unrouted.append(f"{method.upper()} {path} -> 404 routing miss")
+
+    async def _dummy_execute(*args, **kwargs):
+        return ProviderResponse(content="mock test response", model="mock-model", provider="groq")
+
+    with patch("app.providers.gateway.model_gateway.execute", side_effect=_dummy_execute), \
+         patch("app.providers.unified_manager.unified_provider_manager.execute", side_effect=_dummy_execute):
+        for path, operations in sorted(paths.items()):
+            for method in operations:
+                if method not in ("get", "post", "put", "patch", "delete"):
+                    continue
+                checked += 1
+                kwargs: dict = {"headers": auth}
+                if method not in _IDEMPOTENT:
+                    kwargs["json"] = {}
+                response = client.request(method.upper(), _concrete(path), **kwargs)
+                body = (
+                    response.json()
+                    if response.headers.get("content-type", "").startswith("application/json")
+                    else {}
+                )
+                detail = body.get("detail") if isinstance(body, dict) else None
+                if response.status_code == 404 and detail == ROUTING_MISS_DETAIL:
+                    unrouted.append(f"{method.upper()} {path} -> 404 routing miss")
     return unrouted, checked
 
 

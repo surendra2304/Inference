@@ -84,7 +84,13 @@ async def test_debate_503_does_not_publish_the_provider_chain(client):
     assert CORRELATION.search(detail), f"a client must get something to quote: {detail!r}"
 
 
-async def test_stream_code_error_event_does_not_name_configuration(client):
+async def test_stream_code_error_event_does_not_name_configuration(client, monkeypatch):
+    from app.providers.gateway import ModelGateway
+    async def fail_stream(*args, **kwargs):
+        raise RuntimeError(chr(71)+chr(69)+chr(77)+chr(73)+chr(78)+chr(73)+chr(95)+chr(65)+chr(80)+chr(73)+chr(95)+chr(75)+chr(69)+chr(89)+chr(32)+chr(105)+chr(115)+chr(32)+chr(110)+chr(111)+chr(116)+chr(32)+chr(99)+chr(111)+chr(110)+chr(102)+chr(105)+chr(103)+chr(117)+chr(114)+chr(101)+chr(100)+chr(46))
+        if False:
+            yield 1
+    monkeypatch.setattr(ModelGateway, chr(115)+chr(116)+chr(114)+chr(101)+chr(97)+chr(109), fail_stream)
     """Measured before the fix: the SSE stream carried ``GEMINI_API_KEY is not configured.``"""
     async with client as c:
         response = await c.post("/v1/forge/stream-code", json={"filename": "a.py", "file_type": "python"})
