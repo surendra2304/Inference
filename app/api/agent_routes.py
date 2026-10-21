@@ -125,12 +125,11 @@ _ROLE_MAP: dict[tuple[str, str], str] = {
 
 @agent_router.post("/assist", response_model=AgentAssistResponse, status_code=status.HTTP_200_OK)
 async def agent_assist_endpoint(req: AgentAssistRequest):
-    """Ultra-low latency inter-agent intelligence endpoint.
+    """Run an inter-agent assistance request through the configured inference path.
 
-    Sub-second guarantee: ALL /v1/agent/assist calls are unconditionally routed to the
-    Groq fast-lane (openai/gpt-oss-120b, reasoning_effort=low, max_tokens=120).
-    This guarantees ≤760ms server-side processing regardless of caller role or task type.
-    L1 cache TTL is 600s (10 min) to make repeat queries return in <1ms.
+    Latency depends on provider availability, queueing, retries, and request size. Cache hits
+    may return much faster than model-backed calls, but the endpoint does not guarantee a
+    fixed sub-second deadline for every request.
     """
     start_time = time.perf_counter()
 
