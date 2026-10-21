@@ -1,52 +1,9 @@
-# Task 1 next-run instructions — Inference
+# Task 1 next-run — Inference
 
-Last updated: 2026-10-21T01:55:11Z
+Continue from PR #18, branch fix/bound-forced-agent-selection-20261021, head 4cd82fdb575edc7451076f7f11a85dbdcfe2035e. CI run 39557358134 passed Ruff, pytest, and Docker build.
 
-Read .github/friday-continuation/task-1-checkpoint.md before coding. Resume branch automation/friday-universe-task-1; continue existing implementation rather than restarting repository review.
-
-## Previous run evidence
-
-- Result: failed
-- Active coding seconds: 3
-- Coding passes: 1
-- Source paths changed against main: 7
-
-### Changed source paths
-
-- app/api/agent_routes.py
-- app/api/friday_routes.py
-- app/api/v1_core_routes.py
-- app/providers/gateway.py
-- github/friday-continuation/task-1-checkpoint.md
-- tests/test_gateway_streaming.py
-- tests/test_openai_gateway.py
-
-### Runner failures or blockers
-
-- Pass 1 failed with exit 1. See log pass-1.log.
-
-## Detailed continuation notes from the previous coding pass
-
-# Task 1 next-run instructions — Inference
-
-Updated by the runner at 2026-10-21T01:55:11Z; pass 1 did not revise the prompt.
-
-Read the checkpoint, inspect current diffs and logs, and continue implementation. Do not write a report instead of code.
-
-## Current changes
-- No working-tree changes detected; inspect failing tests, TODOs and incomplete product flows.
-
-## Previous run log (tail)
-
-
-
-You have exceeded your monthly quota (Request ID: 702B:3DD859:4CBE1:53A5F:6AD81B7E)
-
-
-## First action
-Run the focused checks for current changes, repair failures, and implement the next highest-impact source/test improvement. Rewrite this prompt with exact paths and test commands.
-
-
-## First action next run
-
-Read the checkpoint and these previous notes, inspect the branch diff, run the focused tests for the last implementation, fix failures, and implement the next highest-impact feature or regression fix. Record exact commands/results and revise both handoff files before ending.
+1. Re-read the PR diff and tests/test_forced_agent_selection.py before editing.
+2. Check latest CI status and review any new findings. Keep max_agents enforced for caller-provided agent IDs, bound candidate scanning, and ignore malformed/duplicate values.
+3. Select one concrete follow-up issue from the existing source/tests; make a focused change and regression test rather than broad refactoring.
+4. Run the focused tests and lint through an available runner, or report that they were not run. Do not infer a local pass from CI on a different commit.
+5. Update this checkpoint, next-run file, and last-run JSON with exact commit SHA, files, test command/results, CI URL/status, and next concrete change.
