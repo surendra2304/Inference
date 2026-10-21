@@ -8,19 +8,20 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.providers.base import ProviderResponse
+from app.providers.gateway import ModelGateway
 
 
 @pytest.fixture(autouse=True)
 def mock_gateway_stream(monkeypatch):
     """Mocks model_gateway.stream to return predictable tokens for fast deterministic tests."""
-    async def _mock_stream(provider, request, stage_name="general_stream"):
+    async def _mock_stream(_self, provider, request, stage_name="general_stream"):
         tokens = ["Deliberation ", "consensus ", "achieved ", "cleanly."]
         for t in tokens:
             yield t
 
     mock_resp = ProviderResponse(content="Deliberation consensus achieved cleanly.", model="openai/gpt-oss-120b", provider="groq")
-    monkeypatch.setattr("app.providers.gateway.model_gateway.stream", _mock_stream)
-    monkeypatch.setattr("app.providers.gateway.model_gateway.execute", AsyncMock(return_value=mock_resp))
+    monkeypatch.setattr(ModelGateway, "stream", _mock_stream)
+    monkeypatch.setattr(ModelGateway, "execute", AsyncMock(return_value=mock_resp))
 
 
 def test_ws_deliberation_connect_and_handshake(auth):
