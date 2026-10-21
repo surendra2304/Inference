@@ -13,8 +13,8 @@ The first objective is a reproducible green baseline. New capabilities must foll
 
 ## Baseline findings
 
-- The recursive Git tree currently contains **403 files**.
-- The repository has **64 Python test modules** covering APIs, provider routing, cancellation, security, monitoring, persistence, batch work, and Docker configuration.
+- The recursive Git tree currently contains **405 files** on the active hardening branch.
+- The repository has **66 Python test modules** on the active hardening branch, covering APIs, provider routing, cancellation, security, monitoring, persistence, batch work, and Docker configuration.
 - Initial baseline run [39666816838](https://github.com/surendra2304/Inference/actions/runs/39666816838) failed at `ruff check .` with one `I001` import-order error in `app/monitoring.py`, preventing pytest and Docker verification from running. PR [#30](https://github.com/surendra2304/Inference/pull/30) fixed the gate and also corrected PostgreSQL persistence/credential defects.
 - PR [#30](https://github.com/surendra2304/Inference/pull/30) merged as `5176b080ee4843a2ed392b76bc1530f99f22ba99`; its current-head CI [run 39672285579](https://github.com/surendra2304/Inference/actions/runs/39672285579) passed lint, the full pytest suite, and Docker build.
 - PR [#22](https://github.com/surendra2304/Inference/pull/22) fixed cancellation-token task cleanup and added a pre-cancelled-token regression test. It merged as `6becc799667e02e1830a90cd5710888e64278d32`; its current-head CI [run 39672605944](https://github.com/surendra2304/Inference/actions/runs/39672605944) passed lint, the full pytest suite, and Docker build.
@@ -22,7 +22,8 @@ The first objective is a reproducible green baseline. New capabilities must foll
 - Configuration review found and removed a hard-coded PostgreSQL password default. Because the prior value remains in public Git history, rotate it in the database and secret store if it was ever valid in a live environment; a source change cannot revoke a committed credential.
 - The PostgreSQL adapter's driver (`asyncpg`) is not installed by the base dependency set, and the production Compose file runs SQLite. Treat PostgreSQL persistence as opt-in until the driver and secret-managed connection settings are explicitly provisioned.
 - This workspace could not run a local clone/test cycle. GitHub Actions is the verification source for remote changes; only the latest matching commit's workflow is used as evidence.
-- The follow-up prediction API hardening branch `fix/prediction-api-input-bounds-20261022` validates finite positive prices, finite return observations, rejects empty/malformed return values, caps the request to 256 returns, and distinguishes fully supplied data from partially synthetic inputs. Its PR-head CI gate is still pending at the time this plan snapshot was prepared.
+- PR [#33](https://github.com/surendra2304/Inference/pull/33) merged as `a9059633aa0bc515e585b009353d7c2bb6d1f88f`; its latest-head run [39674879487](https://github.com/surendra2304/Inference/actions/runs/39674879487) and post-merge main run [39675092616](https://github.com/surendra2304/Inference/actions/runs/39675092616) passed Ruff, the full pytest suite, and Docker build. The endpoint now validates finite positive prices, finite return observations, rejects malformed/oversized values, and tracks per-input synthetic provenance.
+- `SensitiveDataFilter` was a no-op despite its security contract. The current branch `fix/logging-credential-redaction-20261022` adds standard-library credential redaction for structured assignments, provider key formats, logging arguments, and exception tracebacks; its PR-head CI is the current merge gate.
 
 ## Workstreams and acceptance gates
 
@@ -73,7 +74,7 @@ The first objective is a reproducible green baseline. New capabilities must foll
 4. Keep internal stack traces, provider diagnostics, API keys, and sensitive environment values out of public responses.
 5. Maintain stable API contracts for success, partial/degraded results, cancellation, rate limiting, and service-unavailable conditions.
 
-**Current change:** the prediction API hardening branch adds finite/range/shape limits and explicit input provenance; current-head CI must pass before merge.
+**Current change:** PR #33's prediction API request bounds and data provenance fix is merged and verified. The active PR adds logging credential redaction so exception formatting cannot leak raw tokens through the standard logger.
 
 **Acceptance:** authentication, contract fuzz, size/bounds, client-IP trust, and no-error-leak suites pass with no weakened assertions.
 
