@@ -93,13 +93,19 @@ async def get_asset_prediction(
 
     # Supplying one input does not make a prediction fully observation-backed: both the
     # price and return series must be present before the result can be labeled as such.
-    inputs_simulated = current_price is None or recent_returns is None
+    price_is_simulated = current_price is None
+    returns_are_simulated = recent_returns is None
+    inputs_simulated = price_is_simulated or returns_are_simulated
     price = current_price if current_price is not None else (65200.0 if "BTC" in symbol else 3450.0)
     returns = supplied_returns if recent_returns is not None else [0.002, -0.001, 0.003, 0.001, 0.004]
-    source = (
-        "caller_supplied_price_and_returns" if not inputs_simulated
-        else "placeholder_price_and_returns_hardcoded_in_route"
-    )
+    if not inputs_simulated:
+        source = "caller_supplied_price_and_returns"
+    elif price_is_simulated and returns_are_simulated:
+        source = "placeholder_price_and_returns_hardcoded_in_route"
+    elif price_is_simulated:
+        source = "placeholder_price_with_caller_supplied_returns"
+    else:
+        source = "caller_supplied_price_with_placeholder_returns"
 
     result = prediction_aggregator.aggregate_prediction(
         symbol=symbol,
@@ -107,6 +113,8 @@ async def get_asset_prediction(
         recent_returns=returns,
         inputs_simulated=inputs_simulated,
         input_source=source,
+        price_is_simulated=price_is_simulated,
+        returns_are_simulated=returns_are_simulated,
     )
     result["disclaimer"] = (
         "Advisory signal only; not investment advice. Directional signals are computed from "
