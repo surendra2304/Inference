@@ -13,6 +13,8 @@ def test_schema_ddl_contains_required_tables():
     assert "CREATE TABLE IF NOT EXISTS strategies" in SCHEMA_DDL
     assert "CREATE TABLE IF NOT EXISTS deliberations" in SCHEMA_DDL
     assert "CREATE INDEX IF NOT EXISTS idx_deliberations_session_id" in SCHEMA_DDL
+    assert "confidence DOUBLE PRECISION," in SCHEMA_DDL
+    assert "ALTER TABLE deliberations ALTER COLUMN confidence DROP NOT NULL" in SCHEMA_DDL
 
 
 @pytest.mark.asyncio
@@ -140,3 +142,32 @@ async def test_injected_pool_works_when_asyncpg_is_not_installed(monkeypatch):
     monkeypatch.setattr("app.memory.postgres.HAS_ASYNCPG", False)
 
     assert await mem._get_pool() is injected_pool
+
+
+@pytest.mark.asyncio
+async def test_deliberation_without_observed_confidence_is_persisted_as_null():
+    """Unknown confidence is stored as NULL, never coerced or fabricated to a number."""
+    mem = PostgresMemory()
+    mock_conn = MagicMock()
+    mock_conn.execute = AsyncMock()
+
+    acquire_cm = MagicMock()
+    acquire_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+    acquire_cm.__aexit__ = AsyncMock(return_value=None)
+
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value = acquire_cm
+    mem._pool = mock_pool
+    mem._is_available = True
+
+    record = DeliberationRecord(
+        id="delib_unknown_confidence",
+        session_id="session_unknown_confidence",
+        topic="Unknown confidence persistence",
+        participating_agents=["friday"],
+        final_decision="Insufficient evidence",
+        confidence=None,
+    )
+
+    assert await mem.save_deliberation(record) is True
+    assert mock_conn.execute.await_args.args[7] is None
