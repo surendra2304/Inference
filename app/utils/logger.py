@@ -157,8 +157,13 @@ def setup_logger(
             datefmt="%Y-%m-%d %H:%M:%S",
         )
         handler.setFormatter(formatter)
-        handler.addFilter(sensitive_filter)
         logger.addHandler(handler)
+
+    # The logger-level filter covers its own records; handler-level filters also
+    # cover records propagated from child loggers, which skip ancestor logger filters.
+    for handler in logger.handlers:
+        if not any(isinstance(item, SensitiveDataFilter) for item in handler.filters):
+            handler.addFilter(sensitive_filter)
 
     return logger
 
