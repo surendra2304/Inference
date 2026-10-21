@@ -15,18 +15,19 @@ The first objective is a reproducible green baseline. New capabilities must foll
 
 - The recursive Git tree currently contains **401 files**.
 - The repository has **60+ test modules** covering APIs, provider routing, cancellation, security, monitoring, persistence, batch work, and Docker configuration.
-- The latest recorded CI run on `main` is [run 39666816838](https://github.com/surendra2304/Inference/actions/runs/39666816838). Dependency installation succeeded, but `ruff check .` failed with one `I001` import-order error in `app/monitoring.py`; pytest and Docker verification were skipped.
-- The immediate lint failure is caused by a missing blank line before a guarded datetime import in `app/monitoring.py`. A focused fix is being submitted separately and must be validated by GitHub Actions.
-- Configuration review also found a hard-coded PostgreSQL password default. The current hardening branch removes the default and fails closed without an explicitly supplied password. Because the old value is in public Git history, rotate it if it was ever valid in a live environment; a source change cannot revoke a committed credential.
-- The PostgreSQL adapter's driver (`asyncpg`) is not installed by the base dependency set, and the production Compose file deliberately runs SQLite. Treat PostgreSQL persistence as opt-in until the driver and secret-managed connection settings are explicitly provisioned; do not infer that a PostgreSQL connection is active just because its adapter exists.
-- PR [#22](https://github.com/surendra2304/Inference/pull/22) contains an async cancellation cleanup fix and regression tests. Its last reported CI success was against an older base commit, so the latest `main` must be revalidated before it is merged.
-- Direct clone/test execution was not available in the current engineering workspace. CI is therefore the authoritative test runner for these remote changes; no tests are considered passed until the matching commit's run reports success.
+- Initial baseline run [39666816838](https://github.com/surendra2304/Inference/actions/runs/39666816838) failed at `ruff check .` with one `I001` import-order error in `app/monitoring.py`, preventing pytest and Docker verification from running. PR [#30](https://github.com/surendra2304/Inference/pull/30) fixed the gate and also corrected PostgreSQL persistence/credential defects.
+- PR [#30](https://github.com/surendra2304/Inference/pull/30) merged as `5176b080ee4843a2ed392b76bc1530f99f22ba99`; its current-head CI [run 39672285579](https://github.com/surendra2304/Inference/actions/runs/39672285579) passed lint, the full pytest suite, and Docker build.
+- PR [#22](https://github.com/surendra2304/Inference/pull/22) fixed cancellation-token task cleanup and added a pre-cancelled-token regression test. It merged as `6becc799667e02e1830a90cd5710888e64278d32`; its current-head CI [run 39672605944](https://github.com/surendra2304/Inference/actions/runs/39672605944) passed lint, the full pytest suite, and Docker build.
+- The latest verified `main` commit is `6becc799667e02e1830a90cd5710888e64278d32`; post-merge workflow [39672821899](https://github.com/surendra2304/Inference/actions/runs/39672821899) passed all workflow steps, including lint, pytest, and Docker build.
+- Configuration review found and removed a hard-coded PostgreSQL password default. Because the prior value remains in public Git history, rotate it in the database and secret store if it was ever valid in a live environment; a source change cannot revoke a committed credential.
+- The PostgreSQL adapter's driver (`asyncpg`) is not installed by the base dependency set, and the production Compose file runs SQLite. Treat PostgreSQL persistence as opt-in until the driver and secret-managed connection settings are explicitly provisioned.
+- This workspace could not run a local clone/test cycle. GitHub Actions is the verification source for remote changes; only the latest matching commit's workflow is used as evidence.
 
 ## Workstreams and acceptance gates
 
 ### P0 — Restore trustworthy CI
 
-**Status:** In progress.
+**Status:** Complete for the verified `main` commit listed above; continue to enforce the gate on every PR.
 
 1. Fix the observed Ruff import-order regression with the smallest possible change.
 2. Re-run the complete workflow on the PR head.
@@ -36,6 +37,8 @@ The first objective is a reproducible green baseline. New capabilities must foll
 **Acceptance:** latest PR-head CI is green for all three checks and the merged `main` head is green.
 
 ### P1 — Async lifecycle and cancellation safety
+
+**Status:** Cancellation-token race cleanup is merged and verified; broader lifecycle coverage remains in progress.
 
 **Primary surfaces:** `app/inference_runtime/cancellation.py`, `app/core/dag_executor.py`, task/batch routes, microbatching, streaming.
 
@@ -80,8 +83,9 @@ The first objective is a reproducible green baseline. New capabilities must foll
 3. Review rolling windows and caches for explicit size/TTL limits and stable behavior under high volume.
 4. Ensure concurrent reads/writes and test fixtures cannot leak process-global state across tests.
 5. Keep Prometheus exposition syntactically valid when an observation has no samples or is unavailable.
+6. Validate prediction-ingestion data before storing it: reject non-finite/out-of-range confidence, malformed labels, and invalid horizons; distinguish unresolved outcomes from terminal FLAT outcomes, and make demo fixtures immutable.
 
-**Acceptance:** tests cover empty samples, bounds, malformed telemetry, concurrency-sensitive state, and honest unknown values.
+**Acceptance:** tests cover empty samples, bounds, malformed telemetry, concurrency-sensitive state, honest unknown values, and prediction-ingestion edge cases.
 
 ### P5 — Orchestration, persistence, and mesh contracts
 
@@ -108,6 +112,22 @@ The first objective is a reproducible green baseline. New capabilities must foll
 
 **Acceptance:** Docker builds in CI, health checks match actual service behavior, and documented configuration matches the implementation.
 
+
+### P7 — Architecture reachability and subsystem ownership
+
+**Status:** Confirmed debt; plan the migration before wiring competing implementations into production.
+
+The repository contains several substantial modules whose production activation is not established by source presence or unit tests alone:
+
+1. `OrchestrationEngine.build_execution_dag()` constructs dependency layers, but `process_task()` delegates the real collaboration to `CollaborationEngine.run_collaboration()` instead of executing nodes through `DAGExecutor`. The graph is currently a topology preview, not the engine driving the live collaboration. Do not describe it as DAG-scheduled execution until the adapter is implemented and validated.
+2. `HardenedGateway` is exported and tested as a standalone gateway, but repository call-site review did not find it instantiated by the `app.main` production path; production requests currently route through `app/providers/gateway.py::ModelGateway`. Avoid maintaining two competing routing, retry, budget, and observability stacks indefinitely.
+3. A prior reachability report lists adjacent runtime, token-optimizer, Memora, and HA modules as potentially orphaned. Re-run static/import/runtime reachability on the current tree before deleting or promoting any of them; declaration-only search results are not enough to prove a module is safe to remove.
+4. The prior audit also reported drift in `docs/openapi.yaml`. Regenerate or compare it against the live FastAPI OpenAPI schema and verify request/response examples before treating the docs as an API contract.
+
+**Next decision gate:** choose a single supported production gateway and define how it will be activated/migrated with endpoint parity, auth, timeout/cancellation, budget accounting, and telemetry tests. Decompose the collaboration algorithm into explicit DAG-node operations before adopting `DAGExecutor`; preserve peer recovery, consensus/rebuttal, evidence requirements, and degradation semantics during any migration.
+
+**Acceptance:** production call-site inventory is current and repeatable; every retained subsystem has a declared supported entry point or is documented as internal/experimental; routing and orchestration migration tests prove behavior parity before any default-path change.
+
 ## Pull request and merge policy
 
 - Use a named feature/fix branch per coherent workstream; do not develop directly on `main`.
@@ -120,12 +140,12 @@ The first objective is a reproducible green baseline. New capabilities must foll
 
 ## Completion checklist
 
-- [ ] Latest `main` lint passes.
-- [ ] Full pytest suite passes on a current `main` commit.
-- [ ] Docker build passes on a current `main` commit.
-- [ ] Async cancellation and queue shutdown regressions are covered and merged.
+- [x] Latest verified `main` lint passes at `6becc799667e02e1830a90cd5710888e64278d32`.
+- [x] Full pytest suite passes on the verified current `main` commit.
+- [x] Docker build passes on the verified current `main` commit.
+- [x] Cancellation-token race cleanup and pre-cancelled-token regressions are covered and merged; other queue/shutdown acceptance cases remain under P1.
 - [ ] Security and request/resource bounds are verified.
 - [ ] Provider deadlines, fallback behavior, and credential isolation are verified.
-- [ ] Telemetry reports only measured or clearly qualified values.
+- [x] Confirmed fabricated Prometheus/accuracy/debate metrics on current tree have regression tests; continue the audit for other unmeasured claims.
 - [ ] Persistence and mesh contracts are validated.
 - [ ] No known failing CI checks or unreviewed release-blocking regressions remain.
