@@ -17,6 +17,8 @@ class Entry:
 
 class TenantCache:
     def __init__(self, max_items: int = 1000) -> None:
+        if max_items < 1:
+            raise ValueError("max_items must be at least 1")
         self.max_items = max_items
         self._data: dict[str, Entry] = {}
         self._lock = threading.RLock()
@@ -36,10 +38,18 @@ class TenantCache:
             return e.value
 
     def put(self, key: str, value: Any, tenant: str, ttl: float) -> None:
+        if ttl <= 0:
+            self.delete(key)
+            return
         with self._lock:
-            if len(self._data) >= self.max_items:
+            if key not in self._data and len(self._data) >= self.max_items:
                 self._data.pop(next(iter(self._data)))
             self._data[key] = Entry(value, time.monotonic() + ttl, tenant)
+
+    def delete(self, key: str) -> None:
+        """Evict one entry, including a malformed value discovered during validation."""
+        with self._lock:
+            self._data.pop(key, None)
 
     def invalidate_tenant(self, tenant: str) -> None:
         with self._lock:
