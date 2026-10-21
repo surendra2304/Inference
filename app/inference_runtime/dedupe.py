@@ -52,7 +52,10 @@ class RequestDeduper:
         async with self._lock:
             entry = self._tasks.get(key)
             if entry is None:
-                task = asyncio.create_task(factory())
+                async def execute_factory() -> T:
+                    return await factory()
+
+                task: asyncio.Task[T] = asyncio.create_task(execute_factory())
                 task.add_done_callback(self._consume_exception)
                 entry = _InFlight(task=task)
                 self._tasks[key] = entry
