@@ -299,7 +299,7 @@ def test_dedup_cache_is_registered_and_ceiling_is_honoured():
 
 @pytest.mark.parametrize(
     "confidence",
-    [-0.01, 1.01, float("nan"), float("inf"), float("-inf"), True, "0.7", None],
+    [-0.01, 1.01, float("nan"), float("inf"), float("-inf"), True, "0.7", None, 10**1000],
 )
 def test_prediction_ingestion_rejects_invalid_confidence(confidence):
     engine = PredictionTrackingEngine()
