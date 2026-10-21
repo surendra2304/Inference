@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.core.config import Settings
 from app.memory.base import DeliberationRecord, RunRecord, StrategyRecord
 from app.memory.postgres import SCHEMA_DDL, PostgresMemory
 
@@ -183,3 +184,7 @@ async def test_postgres_pool_is_not_created_without_explicit_password(monkeypatc
     assert await mem.initialize() is False
     assert mem._pool is None
     assert mem._is_available is False
+
+
+def test_postgres_password_has_no_hardcoded_default():
+    assert Settings.model_fields["POSTGRES_PASSWORD"].default is None
