@@ -6,8 +6,8 @@ import time
 import pytest
 
 from app.inference_runtime.budget import BudgetLedger
-from app.inference_runtime.config import RuntimeConfig
 from app.inference_runtime.circuit import CircuitState
+from app.inference_runtime.config import RuntimeConfig
 from app.inference_runtime.contracts import (
     Capability,
     CompletionRequest,
