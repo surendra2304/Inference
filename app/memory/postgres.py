@@ -15,7 +15,8 @@ from app.memory.base import DeliberationRecord, RunRecord, StrategyRecord
 from app.utils.logger import logger
 
 try:
-    import asyncpg  # type: ignore[import-not-found] -- optional PostgreSQL extra
+    # asyncpg is an optional dependency used only by PostgreSQL deployments.
+    import asyncpg  # type: ignore[import-not-found]
     HAS_ASYNCPG = True
 except ImportError:
     HAS_ASYNCPG = False
