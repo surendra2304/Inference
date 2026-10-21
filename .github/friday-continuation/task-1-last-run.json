@@ -2,7 +2,7 @@
   "task": 1,
   "repository": "Inference",
   "updated_at": "2026-10-22",
-  "status": "pr31_green_main_green_new_prediction_bounds_ci_running",
+  "status": "pr31_green_main_green_prediction_bounds_ci_running",
   "pr31": {
     "url": "https://github.com/surendra2304/Inference/pull/31",
     "head": "32957964472c1026a784cc97a11e1546e6d7f62c",
@@ -25,10 +25,10 @@
     "url": "https://github.com/surendra2304/Inference/pull/32",
     "state": "closed",
     "head": "bb5dfb46764319384fd0767752f6714c6b1fc069",
-    "last_ci": 39674147330,
-    "ci_status": "success"
+    "ci_run": 39674147330,
+    "status": "success"
   },
-  "new_prediction_bounds_branch": {
+  "prediction_api_bounds": {
     "branch": "fix/prediction-api-input-bounds-20261022",
     "runs": [
       {
@@ -49,5 +49,5 @@
     "Laptop MCP HTTP 404"
   ],
   "active_duration_seconds": "not measured",
-  "next": "Verify PR31 and check open PR/current CI for prediction-api-input-bounds branch."
+  "next": "Verify PR31 and check prediction API bounds branch/PR status."
 }
