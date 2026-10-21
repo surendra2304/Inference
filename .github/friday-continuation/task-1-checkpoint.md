@@ -1,19 +1,18 @@
 # Task 1 checkpoint — Inference — 2026-10-22
 
-## State and CI
-- Connected GitHub integration permissions confirmed include admin and push. Earlier generic statement that GitHub writes were blocked was incorrect.
-- Open PR #30: https://github.com/surendra2304/Inference/pull/30, branch `fix/ci-import-order-and-master-plan-20261022`. API head observed `daf519d8f401446838017fb9bb7dcff5db0ab2fa`; related runs `39671781899` at `0199cf81c69437f0314b94ed2d10ae62aa249e8a` and `39671769752` at `64c758a11499e0c378340aadca8668cea86c838b` both passed every job step (Ruff, pytest, Docker), but predates the observed API head; recheck exact latest head before merge.
-- Root-cause CI run `39666816838` failed Ruff I001 in `app/monitoring.py`; logs reported missing blank line after `from collections import defaultdict`; pytest and Docker skipped. Green runs verify fix on the cited earlier commits.
-- Open PR #22 cancellation fix remains open; no duplicate created.
+## Current repository state
+- Connected GitHub permission check returned admin, maintain, push.
+- Open PR list endpoint now returns no open PRs for Inference. The former PR #30 (`fix/ci-import-order-and-master-plan-20261022`) is not present in the current open PR list; do not assume it remains open. Its prior commits/runs are still in history.
+- PR branch run `39671970764` at `daf519d8f401446838017fb9bb7dcff5db0ab2fa`, `39671973274` at `6a5bfce696533898098fe3bae8ccb5130d87f9ab`, `39672100004` at `87364537a1c4cfeaf6da5c2da3ab9ec4f97b0d31`, `39672126118` at `5eef4c53b4bd28f71e6adb2d3945c586140150b8`, `39672140595` at `43a08b4a1e4df7c23bd1c0a0c6f43a491c4f62d8`, `39672178281` at `1cc8e711d92c293437a9d9866a76644f8314b40a`, `39672285579` at `3cc30c08c0e0f3bcb906e765be113065da9d96a9`, and run `39671970764` all completed success in recent API output; current `main` run `39672821899` on `6becc799667e02e1830a90cd5710888e64278d32` passed; latest cancellation branch run `39672605944` at `637b7fa8b82cd600b186dfa07da446edfedddf81` also passed.
+- Previous CI root cause on main run `39666816838`: Ruff `I001` in `app/monitoring.py`, missing blank separator after `from collections import defaultdict`. Later checks went green.
 
-## This invocation files
-- No Inference source commit this invocation. Read `tests/test_forced_agent_selection.py` and `app/core/orchestrator.py`: helper caps candidates at `MAX_FORCED_AGENT_CANDIDATES`, deduplicates string IDs, ignores unknown/non-string IDs and stops after `max_agents` registered agents.
+## This invocation source changes
+- No Inference source commits made this invocation. Reviewed `app/core/orchestrator.py` and `tests/test_forced_agent_selection.py`: forced selection candidate scan is bounded by `MAX_FORCED_AGENT_CANDIDATES`, IDs are deduplicated and malformed/unknown candidates skipped, and `max_agents` is enforced after successful lookup.
 
-## Validation
-- CI runs `39671781899` and `39671769752`: all job steps passed on their stated SHAs.
-- Local tests not run; laptop command returned HTTP 404.
+## Verification / limitations
+- Current observed CI: `39672821899` main succeeded; `39672605944` cancellation branch succeeded; prior migration/nullable-confidence PR branch runs listed above succeeded on their exact SHAs.
+- Local tests unavailable: laptop MCP execution endpoint returns HTTP 404. No local test command was run.
+- Active engineering minutes are not reliably measured; do not claim the 30-minute target.
 
-## Risk and next step
-- PR #30 mixes Ruff fix with nullable `deliberations.confidence` / PostgreSQL migration changes. Review `app/memory/postgres.py` initialization and `ALTER TABLE deliberations ALTER COLUMN confidence DROP NOT NULL` against fresh and existing DB behavior before merge.
-- Next coding task: test `_resolve_forced_agents` behavior for zero/negative `max_agents` or validate it upstream; confirm contract before change. Use current PR-head CI as truth.
-- No merge performed; duration not measured.
+## Next coding step
+Inspect the branch `fix/ci-import-order-and-master-plan-20261022` and its master-plan/schema migration changes before creating a replacement or PR. Current open PR list says none open, so first confirm whether the PR was closed/merged and inspect `main` before any duplicate work. Then add a bounded regression for forced agent selection with `max_agents <= 0` only after confirming intended API contract; write to a new, focused branch based on the current main, and verify with GitHub CI.
