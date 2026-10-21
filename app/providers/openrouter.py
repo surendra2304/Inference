@@ -19,10 +19,10 @@ CAPABILITY_KEYWORDS: dict[str, list[str]] = {
 }
 
 FALLBACK_FREE_MODELS: dict[str, str] = {
-    "coding": "deepseek/deepseek-chat",
-    "reasoning": "meta-llama/llama-3.3-70b-instruct",
+    "coding": "qwen/qwen-2.5-coder-32b-instruct",
+    "reasoning": "deepseek/deepseek-r1",
     "research": "google/gemini-2.5-flash",
-    "analysis": "meta-llama/llama-3.3-70b-instruct",
+    "analysis": "deepseek/deepseek-r1",
     "security": "meta-llama/llama-3.3-70b-instruct",
     "general": "meta-llama/llama-3.3-70b-instruct",
 }
@@ -40,6 +40,8 @@ class OpenRouterProvider(OpenAICompatibleProvider):
         "z-ai/glm-5.2:free",
         "poolside/laguna-s-2.1:free",
         "meta-llama/llama-3.3-70b-instruct",
+        "deepseek/deepseek-r1",
+        "qwen/qwen-2.5-coder-32b-instruct",
     ]
 
     def __init__(self, api_key: str | None = None, default_model: str | None = None, timeout: float = 60.0) -> None:

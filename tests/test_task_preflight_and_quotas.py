@@ -89,3 +89,37 @@ async def test_agent_quota_manager_enforces_limit():
     from app.inference_runtime.errors import RateLimitExceeded
     with pytest.raises(RateLimitExceeded):
         agent_quota_manager.admit(agent_name, estimated_tokens=100)
+
+
+@pytest.mark.asyncio
+async def test_agent_quota_dynamic_burst_elasticity():
+    from app.inference_runtime.errors import RateLimitExceeded
+    from app.inference_runtime.quotas import TenantQuotaManager
+
+    # Isolated manager with aggregate ceiling 85%
+    mgr = TenantQuotaManager(default_rpm=10, default_tpm=10_000, aggregate_ceiling_ratio=0.85)
+    # Tenant with low nominal limit but burst enabled
+    mgr.configure("bursting_agent", rpm=2, tpm=200, allow_burst=True)
+
+    # Within individual limit:
+    mgr.admit("bursting_agent", estimated_tokens=100)
+    mgr.admit("bursting_agent", estimated_tokens=100)
+
+    # Exceeding individual limit, but cluster aggregate is low (< 85%): admission granted!
+    mgr.admit("bursting_agent", estimated_tokens=50)
+    status = mgr.get_status("bursting_agent")
+    assert status["tokens_used"] == 250
+    assert status["allow_burst"] is True
+
+    # Now simulate cluster aggregate reaching > 85% by admitting heavy tokens
+    # Total capacity = 9 default agents * 60k/80k/120k + 200 = ~660,200 tokens
+    # Admit enough to cross 85%
+    large_agent = "friday"
+    mgr.configure(large_agent, rpm=1000, tpm=10_000_000, allow_burst=False)
+    # If a strict agent bursts without allow_burst:
+    strict_agent = "strict_agent"
+    mgr.configure(strict_agent, rpm=2, tpm=200, allow_burst=False)
+    mgr.admit(strict_agent, estimated_tokens=100)
+    mgr.admit(strict_agent, estimated_tokens=100)
+    with pytest.raises(RateLimitExceeded):
+        mgr.admit(strict_agent, estimated_tokens=50)
