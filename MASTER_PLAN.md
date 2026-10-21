@@ -23,7 +23,8 @@ The first objective is a reproducible green baseline. New capabilities must foll
 - The PostgreSQL adapter's driver (`asyncpg`) is not installed by the base dependency set, and the production Compose file runs SQLite. Treat PostgreSQL persistence as opt-in until the driver and secret-managed connection settings are explicitly provisioned.
 - This workspace could not run a local clone/test cycle. GitHub Actions is the verification source for remote changes; only the latest matching commit's workflow is used as evidence.
 - PR [#33](https://github.com/surendra2304/Inference/pull/33) merged as `a9059633aa0bc515e585b009353d7c2bb6d1f88f`; its latest-head run [39674879487](https://github.com/surendra2304/Inference/actions/runs/39674879487) and post-merge main run [39675092616](https://github.com/surendra2304/Inference/actions/runs/39675092616) passed Ruff, the full pytest suite, and Docker build. The endpoint now validates finite positive prices, finite return observations, rejects malformed/oversized values, and tracks per-input synthetic provenance.
-- `SensitiveDataFilter` was a no-op despite its security contract. The current branch `fix/logging-credential-redaction-20261022` adds standard-library credential redaction for structured assignments, provider key formats, logging arguments, and exception tracebacks; its PR-head CI is the current merge gate.
+- PR [#35](https://github.com/surendra2304/Inference/pull/35) replaced the no-op `SensitiveDataFilter` with standard-library redaction for structured/compound secret fields, provider token formats, logging arguments, and tracebacks. Its head CI [39676561681](https://github.com/surendra2304/Inference/actions/runs/39676561681) passed, and the merge commit is `e7376ea26feeac5c16cddbefb1761a3eaac093a6`; post-merge CI [39676772665](https://github.com/surendra2304/Inference/actions/runs/39676772665) passed Ruff, pytest, and Docker build.
+- A static deployment-helper review found `deploy_production.py::run_command` used `subprocess.run(..., shell=True)` with a string and has no in-repository callers. The current branch changes it to parse strings into argument arrays with `shlex.split`, uses `shell=False`, validates arguments, and covers failure paths; CI is the merge gate.
 
 ## Workstreams and acceptance gates
 
@@ -74,7 +75,7 @@ The first objective is a reproducible green baseline. New capabilities must foll
 4. Keep internal stack traces, provider diagnostics, API keys, and sensitive environment values out of public responses.
 5. Maintain stable API contracts for success, partial/degraded results, cancellation, rate limiting, and service-unavailable conditions.
 
-**Current change:** PR #33's prediction API request bounds and data provenance fix is merged and verified. The active PR adds logging credential redaction so exception formatting cannot leak raw tokens through the standard logger.
+**Current status:** PR #33's prediction API request bounds/data provenance fix and PR #35's logging credential redaction are merged; both current-head and post-merge CI passed. Deployment command execution hardening is in the P6 workstream.
 
 **Acceptance:** authentication, contract fuzz, size/bounds, client-IP trust, and no-error-leak suites pass with no weakened assertions.
 
@@ -107,6 +108,8 @@ The first objective is a reproducible green baseline. New capabilities must foll
 ### P6 — Deployment and operational readiness
 
 **Primary surfaces:** `Dockerfile`, `docker-compose.production.yml`, `k8s/`, health endpoints and CI configuration.
+
+**Current change:** harden the standalone deployment helper against shell interpretation and keep its subprocess behavior under regression tests.
 
 1. Ensure the image builds from a clean context, runs as a non-root user, and has deterministic health checks.
 2. Verify environment configuration is documented without committing secrets or unsafe development defaults.
@@ -145,11 +148,11 @@ The repository contains several substantial modules whose production activation 
 
 ## Completion checklist
 
-- [x] Latest verified `main` lint passes at `6becc799667e02e1830a90cd5710888e64278d32`.
+- [x] Latest verified `main` lint passes at `e7376ea26feeac5c16cddbefb1761a3eaac093a6` (post-merge run [39676772665](https://github.com/surendra2304/Inference/actions/runs/39676772665)).
 - [x] Full pytest suite passes on the verified current `main` commit.
 - [x] Docker build passes on the verified current `main` commit.
 - [x] Cancellation-token race cleanup and pre-cancelled-token regressions are covered and merged; other queue/shutdown acceptance cases remain under P1.
-- [ ] Security and request/resource bounds are verified.
+- [ ] Security and request/resource bounds are verified end-to-end; prediction inputs and logger redaction are covered, but a full route/credential audit remains.
 - [ ] Provider deadlines, fallback behavior, and credential isolation are verified.
 - [x] Confirmed fabricated Prometheus/accuracy/debate metrics on current tree have regression tests; continue the audit for other unmeasured claims.
 - [ ] Persistence and mesh contracts are validated.
