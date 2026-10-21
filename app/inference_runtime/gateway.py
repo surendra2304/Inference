@@ -130,6 +130,15 @@ class HardenedGateway:
 
                 self.budget.reconcile(request.tenant_id, estimate, result.cost_usd)
                 reservation_held = False
+                self.trace.emit(
+                    "completed",
+                    request.request_id,
+                    result.provider,
+                    result.model,
+                    latency=result.latency_seconds,
+                    tokens=result.total_tokens,
+                    cost=result.cost_usd,
+                )
                 return result
             except BaseException:
                 # The shared operation itself is shielded from individual waiters.
@@ -143,15 +152,6 @@ class HardenedGateway:
 
         if cache_key:
             self.cache.put(cache_key, result.__dict__, request.tenant_id, self.config.cache_ttl_seconds)
-        self.trace.emit(
-            "completed",
-            request.request_id,
-            result.provider,
-            result.model,
-            latency=result.latency_seconds,
-            tokens=result.total_tokens,
-            cost=result.cost_usd,
-        )
         return result
 
     async def _execute(self, request: CompletionRequest, ep: ProviderEndpoint) -> CompletionResult:
