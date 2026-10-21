@@ -128,3 +128,43 @@ async def test_execute_uses_remaining_deadline_after_limiter_acquisition(monkeyp
     assert call_started.is_set()
     assert provider_cancelled.is_set()
     assert limiter._sem._value == 1
+
+
+@pytest.mark.asyncio
+async def test_local_fallback_deadline_bounds_limiter_wait(monkeypatch):
+    monkeypatch.setattr(settings, "LOCAL_ENABLED", True)
+    monkeypatch.setattr(settings, "LOCAL_MAX_RPS", 0.001)
+    monkeypatch.setattr(settings, "LOCAL_MAX_CONCURRENCY", 1)
+
+    gateway = ModelGateway()
+    limiter = ProviderRateLimiter("local", requests_per_second=0.001, max_concurrency=1)
+    limiter.tokens = 0.0
+    limiter.updated = time.monotonic()
+    gateway.rate_limiters["local"] = limiter
+    provider_calls = 0
+
+    class _LocalProvider:
+        async def generate(self, _request):
+            nonlocal provider_calls
+            provider_calls += 1
+            raise AssertionError("local provider must not run after its deadline")
+
+    monkeypatch.setattr(app.providers, "get_provider", lambda *_args, **_kwargs: _LocalProvider())
+    request = ProviderRequest(
+        messages=[ProviderMessage(role="user", content="local fallback timeout")],
+    )
+
+    started = time.monotonic()
+    result = await gateway._execute_local_tier(
+        failed_provider="groq",
+        request=request,
+        capability="general",
+        last_error=RuntimeError("primary provider failed"),
+        deadline=time.monotonic() + 0.05,
+    )
+    elapsed = time.monotonic() - started
+
+    assert result is None
+    assert provider_calls == 0
+    assert elapsed < 0.5
+    assert limiter._sem._value == 1
