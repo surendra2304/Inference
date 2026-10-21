@@ -382,3 +382,21 @@ def test_resolve_rejects_invalid_outcome_types_and_values(outcome):
 
     assert entry["actual_outcome"] is None
     assert engine.get_source_accuracy_report()["pending_resolution"] == 1
+
+
+@pytest.mark.parametrize(
+    ("symbol", "direction", "source"),
+    [
+        ("S" * 65, "BULLISH", "primary"),
+        ("BTCUSDT", "D" * 33, "primary"),
+        ("BTCUSDT", "BULLISH", "s" * 129),
+        ("BTC\nUSDT", "BULLISH", "primary"),
+        ("BTCUSDT", "BULLISH\n", "primary"),
+        ("BTCUSDT", "BULLISH", "primary\tworker"),
+    ],
+)
+def test_prediction_ingestion_bounds_labels_and_rejects_control_characters(symbol, direction, source):
+    engine = PredictionTrackingEngine()
+    with pytest.raises(ValueError):
+        engine.record_prediction(symbol, direction, 0.7, source=source)
+    assert engine.get_source_accuracy_report()["observed_predictions_recorded"] == 0
