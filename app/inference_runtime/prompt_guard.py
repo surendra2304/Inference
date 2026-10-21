@@ -94,6 +94,7 @@ def inspect(text: str) -> GuardResult:
             findings.append(p.pattern)
 
     # 4. Determine risk level
+    risk: Literal["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
     if any("exfiltrat" in f or "jailbreak" in f or "im_start" in f for f in findings):
         risk = "CRITICAL"
     elif any("turn_" in f or "SYS" in f or "INST" in f or "system" in f for f in findings):
