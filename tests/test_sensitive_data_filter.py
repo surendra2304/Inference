@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import sys
 
 import pytest
 
-from app.utils.logger import SensitiveDataFilter
+from app.utils.logger import SensitiveDataFilter, setup_logger
 
 
 def _record(message: str, args: tuple[object, ...] = (), exc_info=None) -> logging.LogRecord:
@@ -132,3 +133,22 @@ def test_filter_is_idempotent_for_already_redacted_fields(message):
 
     assert twice == once
     assert "[REDACTED]]" not in twice
+
+
+def test_setup_logger_attaches_redaction_to_preexisting_handlers():
+    name = "inference.test.existing-handler-redaction"
+    test_logger = logging.getLogger(name)
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    test_logger.addHandler(handler)
+    try:
+        configured = setup_logger(name=name)
+
+        assert any(isinstance(item, SensitiveDataFilter) for item in configured.filters)
+        assert any(isinstance(item, SensitiveDataFilter) for item in handler.filters)
+
+        configured.error("provider failed password=%s", "configured-handler-secret")
+        assert "configured-handler-secret" not in stream.getvalue()
+        assert "[REDACTED]" in stream.getvalue()
+    finally:
+        test_logger.removeHandler(handler)
