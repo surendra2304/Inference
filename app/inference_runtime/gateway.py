@@ -170,6 +170,9 @@ class HardenedGateway:
                 breaker and breaker.success()
                 return raw
             except asyncio.CancelledError:
+                # A cancelled recovery probe must not leave the provider breaker
+                # permanently half-open with its sole permit held.
+                breaker and breaker.release_probe()
                 raise
             except Exception as exc:
                 latency = time.perf_counter() - started
