@@ -35,7 +35,8 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.providers.base import ProviderResponse
-from app.providers.unified_manager import UnifiedExecutionResponse
+from app.providers.gateway import ModelGateway
+from app.providers.unified_manager import UnifiedExecutionResponse, UnifiedProviderManager
 
 
 @pytest.fixture(autouse=True)
@@ -54,9 +55,9 @@ def _mock_inference_calls(monkeypatch):
         error=None,
         finish_reason='stop',
     )
-    monkeypatch.setattr('app.providers.gateway.model_gateway.execute', AsyncMock(return_value=mock_resp))
-    monkeypatch.setattr('app.providers.gateway.model_gateway.execute_speculative', AsyncMock(return_value=mock_resp))
-    monkeypatch.setattr('app.providers.unified_manager.unified_provider_manager.execute', AsyncMock(return_value=mock_unified))
+    monkeypatch.setattr(ModelGateway, 'execute', AsyncMock(return_value=mock_resp))
+    monkeypatch.setattr(ModelGateway, 'execute_speculative', AsyncMock(return_value=mock_resp))
+    monkeypatch.setattr(UnifiedProviderManager, 'execute', AsyncMock(return_value=mock_unified))
 
 # Requests are sent to the in-process ASGI app, so this exercises the real middleware
 # stack (security, rate limiting, error encoding) without needing a running server.

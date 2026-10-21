@@ -32,7 +32,7 @@ def _request(**overrides) -> UnifiedExecutionRequest:
 def fake_gateway(monkeypatch):
     calls = []
 
-    async def execute(*, provider_name, request, capability="general", stage_name="general"):
+    async def execute(_self, *, provider_name, request, capability="general", stage_name="general"):
         calls.append({
             "provider": provider_name,
             "content": request.messages[0].content,
@@ -51,7 +51,7 @@ def fake_gateway(monkeypatch):
             total_tokens=4,
         )
 
-    monkeypatch.setattr(model_gateway, "execute", execute)
+    monkeypatch.setattr(type(model_gateway), "execute", execute)
     return calls
 
 

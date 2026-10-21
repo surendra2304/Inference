@@ -306,6 +306,8 @@ async def execute_task(
                     "response": "",
                     "model_used": resp.model_used,
                     "provider_used": resp.provider_used,
+                    # Usage is empty when no provider completed; never synthesize token counts.
+                    "token_usage": resp.token_usage or {},
                     "confidence": DEGRADED_CONFIDENCE,
                     "degraded": True,
                 },

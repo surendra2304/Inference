@@ -51,8 +51,11 @@ def _unrouted_operations(paths: dict, client: TestClient, auth: dict) -> tuple[l
     async def _dummy_execute(*args, **kwargs):
         return ProviderResponse(content="mock test response", model="mock-model", provider="groq")
 
-    with patch("app.providers.gateway.model_gateway.execute", side_effect=_dummy_execute), \
-         patch("app.providers.unified_manager.unified_provider_manager.execute", side_effect=_dummy_execute):
+    from app.providers.gateway import ModelGateway
+    from app.providers.unified_manager import UnifiedProviderManager
+
+    with patch.object(ModelGateway, "execute", side_effect=_dummy_execute), \
+         patch.object(UnifiedProviderManager, "execute", side_effect=_dummy_execute):
         for path, operations in sorted(paths.items()):
             for method in operations:
                 if method not in ("get", "post", "put", "patch", "delete"):
