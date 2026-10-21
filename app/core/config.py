@@ -70,6 +70,34 @@ class Settings(BaseSettings):
                     origins.append(cleaned)
         return origins
 
+    # FRIDAY Universe Peer Mesh Configuration (9 Specialist Agents)
+    FRIDAY_URL: str = Field(default="http://friday:8000", description="FRIDAY Agent 1 URL")
+    FRIDAY_API_KEY: str | None = Field(default=None)
+
+    MEMORA_URL: str = Field(default="http://memora:8000", description="Memora Agent 3 URL")
+    MEMORA_API_KEY: str | None = Field(default=None)
+
+    STRATEX_URL: str = Field(default="http://stratex:8000", description="Stratex Agent 7 URL")
+    STRATEX_API_KEY: str | None = Field(default=None)
+
+    FORGE_URL: str = Field(default="http://forge:8000", description="Forge Agent 4 URL")
+    FORGE_API_KEY: str | None = Field(default=None)
+
+    CORTEX_URL: str = Field(default="http://cortex:8000", description="Cortex Agent 5 URL")
+    CORTEX_API_KEY: str | None = Field(default=None)
+
+    SENTINEL_URL: str = Field(default="http://sentinel:8000", description="Sentinel Agent 6 URL")
+    SENTINEL_API_KEY: str | None = Field(default=None)
+
+    INTELX_URL: str = Field(default="http://intelx:8000", description="IntelX Agent 8 URL")
+    INTELX_API_KEY: str | None = Field(default=None)
+
+    FUTURIS_URL: str = Field(default="http://futuris:8000", description="Futuris Agent 9 URL")
+    FUTURIS_API_KEY: str | None = Field(default=None)
+
+    VYRALX_URL: str = Field(default="http://vyralx:8000", description="VyralX Agent 10 URL")
+    VYRALX_API_KEY: str | None = Field(default=None)
+
     INFERENCE_URL: str = Field(default="https://friday-universe.duckdns.org/inference", description="Canonical live deployment URL for Inference")
 
     # Security & Auth Configuration
@@ -347,6 +375,22 @@ class Settings(BaseSettings):
             "when it is needed."
         ),
     )
+
+    def get_peer_config(self, peer: str) -> tuple[str, str | None]:
+        """Returns (url, api_key) for a given peer agent."""
+        p = peer.lower().strip()
+        mapping = {
+            "friday": (self.FRIDAY_URL, self.FRIDAY_API_KEY),
+            "memora": (self.MEMORA_URL, self.MEMORA_API_KEY),
+            "stratex": (self.STRATEX_URL, self.STRATEX_API_KEY),
+            "forge": (self.FORGE_URL, self.FORGE_API_KEY),
+            "cortex": (self.CORTEX_URL, self.CORTEX_API_KEY),
+            "sentinel": (self.SENTINEL_URL, self.SENTINEL_API_KEY),
+            "intelx": (self.INTELX_URL, self.INTELX_API_KEY),
+            "futuris": (self.FUTURIS_URL, self.FUTURIS_API_KEY),
+            "vyralx": (self.VYRALX_URL, self.VYRALX_API_KEY),
+        }
+        return mapping.get(p, (f"http://{p}:8000", None))
 
     def get_provider_keys(self, provider_name: str) -> list[str]:
         """
