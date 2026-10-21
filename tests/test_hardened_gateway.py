@@ -186,6 +186,12 @@ async def test_gateway_cancellation_releases_half_open_circuit_probe():
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    # The shared executor task handles cancellation on its own event-loop turn.
+    for _ in range(50):
+        if breaker.state is CircuitState.OPEN and not breaker._probe_in_flight:
+            break
+        await asyncio.sleep(0)
+
     assert breaker.state is CircuitState.OPEN
     assert breaker._probe_in_flight is False
 
