@@ -36,6 +36,7 @@ from app.core.dag import TaskComplexity
 from app.core.orchestrator import orchestrator
 from app.memory.base import TaskRecord
 from app.providers.base import ProviderMessage, ProviderRequest
+from app.providers.errors import TimeoutError as ProviderTimeoutError
 from app.providers.gateway import model_gateway
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
 from app.schemas.v1_models import (
@@ -908,16 +909,25 @@ async def chat_completions(req: ChatCompletionRequest):
                         "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
                     }
                     yield f"data: {json.dumps(payload)}\n\n"
-            except Exception:
-                pass
-            end_payload = {
-                "id": cmpl_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": req.model,
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-            }
-            yield f"data: {json.dumps(end_payload)}\n\n"
+            except Exception as exc:
+                error_code = "provider_timeout" if isinstance(exc, ProviderTimeoutError) else "provider_error"
+                error_payload = {
+                    "error": {
+                        "message": "The provider could not complete the stream.",
+                        "type": "gateway_error",
+                        "code": error_code,
+                    }
+                }
+                yield f"data: {json.dumps(error_payload)}\n\n"
+            else:
+                end_payload = {
+                    "id": cmpl_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": req.model,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+                yield f"data: {json.dumps(end_payload)}\n\n"
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(_stream_generator(), media_type="text/event-stream")
@@ -971,7 +981,6 @@ async def chat_completions(req: ChatCompletionRequest):
             "total_tokens": usage.get("total_tokens", 0),
         },
     }
-
 
 
 

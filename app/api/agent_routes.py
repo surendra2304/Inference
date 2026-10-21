@@ -10,10 +10,11 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.performance_cache import as_answer_pair, perf_cache
 from app.providers.base import ProviderMessage, ProviderRequest
+from app.providers.errors import TimeoutError as ProviderTimeoutError
 from app.providers.gateway import model_gateway
 from app.providers.unified_manager import (
     UnifiedExecutionRequest,
@@ -53,13 +54,20 @@ class AgentAssistRequest(BaseModel):
 
     caller_agent: CallerAgent = Field(default="general", description="Calling agent identity")
     task_type: TaskType = Field(default="general", description="Domain of requested assistance")
-    prompt: str = Field(..., description="Query, task, or directive")
+    prompt: str = Field(..., min_length=1, description="Query, task, or directive")
     context: dict[str, Any] = Field(default_factory=dict, description="Structured contextual parameters")
     fast_lane: bool = Field(default=True, description="Enable ultra-low latency routing")
     speculative: bool = Field(default=False, description="Enable concurrent speculative provider race")
     no_cache: bool = Field(default=False, description="Bypass L1 cache for non-deterministic inference")
     max_tokens: int = Field(default=1500, ge=50, le=8192, description="Max output tokens")
     temperature: float = Field(default=0.2, ge=0.0, le=2.0, description="Sampling temperature")
+
+    @field_validator("prompt")
+    @classmethod
+    def prompt_must_contain_non_whitespace(cls, prompt: str) -> str:
+        if not prompt.strip():
+            raise ValueError("prompt must contain non-whitespace text")
+        return prompt
 
 
 class AgentAssistResponse(BaseModel):
@@ -140,9 +148,22 @@ async def agent_assist_endpoint(req: AgentAssistRequest):
 
     # Check L1 cache first — if hit, we're done in <1ms
     cache_mode = f"agent_assist_{req.caller_agent}_{req.task_type}"
+    cache_extra = {
+        "caller_agent": req.caller_agent,
+        "task_type": req.task_type,
+        "context": req.context,
+        "max_tokens": AGENT_MAX_TOKENS,
+        "temperature": req.temperature,
+        "speculative": req.speculative,
+    }
     if not req.no_cache:
         cached_pair = as_answer_pair(perf_cache.get_query(
-            req.prompt, mode=cache_mode, caller_id=req.caller_agent, namespace="agent.assist"))
+            req.prompt,
+            mode=cache_mode,
+            caller_id=req.caller_agent,
+            extra=cache_extra,
+            namespace="agent.assist",
+        ))
         if cached_pair:
             cached_answer, cached_meta = cached_pair
             elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
@@ -186,6 +207,7 @@ async def agent_assist_endpoint(req: AgentAssistRequest):
             value=(exec_res.content, {"provider": exec_res.provider_used, "model": exec_res.model_used, "tokens": exec_res.token_usage.get("total_tokens", 0)}),
             caller_id=req.caller_agent,
             ttl=AGENT_CACHE_TTL,
+            extra=cache_extra,
             namespace="agent.assist",
         )
 
@@ -225,11 +247,17 @@ async def agent_stream_endpoint(req: AgentAssistRequest):
     )
 
     async def _event_generator():
+        emitted_chunk = False
         try:
             async for chunk in model_gateway.stream("groq", prov_req, stage_name=f"agent_stream_{req.caller_agent}"):
+                emitted_chunk = True
                 yield f"data: {json.dumps({'token': chunk, 'done': False})}\n\n"
             yield f"data: {json.dumps({'token': '', 'done': True})}\n\n"
         except Exception as exc:
+            if emitted_chunk:
+                error_code = "provider_timeout" if isinstance(exc, ProviderTimeoutError) else "provider_error"
+                yield f"data: {json.dumps({'error': 'The provider could not complete the stream.', 'code': error_code, 'done': True})}\n\n"
+                return
             logger.warning("Groq stream failed for %s, falling back to gemini: %s", req.caller_agent, exc)
             try:
                 prov_req.model = "gemini-3.6-flash"
@@ -239,7 +267,8 @@ async def agent_stream_endpoint(req: AgentAssistRequest):
                     yield f"data: {json.dumps({'token': chunk, 'done': False})}\n\n"
                 yield f"data: {json.dumps({'token': '', 'done': True})}\n\n"
             except Exception as fb_exc:
-                yield f"data: {json.dumps({'error': str(fb_exc), 'done': True})}\n\n"
+                error_code = "provider_timeout" if isinstance(fb_exc, ProviderTimeoutError) else "provider_error"
+                yield f"data: {json.dumps({'error': 'The provider could not complete the stream.', 'code': error_code, 'done': True})}\n\n"
 
     return StreamingResponse(
         _event_generator(),

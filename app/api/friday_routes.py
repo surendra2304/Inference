@@ -14,6 +14,7 @@ from app.core.orchestrator import OrchestrationRequest, orchestrator
 from app.core.security import verify_friday_api_key
 from app.performance_cache import perf_cache
 from app.providers.base import ProviderMessage, ProviderRequest
+from app.providers.errors import TimeoutError as ProviderTimeoutError
 from app.providers.gateway import model_gateway
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
 from app.security.prompt_isolation import scrub_credentials
@@ -489,7 +490,8 @@ async def friday_stream(request: FridayRequest) -> StreamingResponse:
 
             yield f"data: {json.dumps({'done': True, 'task_id': task_id, 'total_chars': len(full_text)})}\n\n"
         except Exception as err:
-            yield f"data: {json.dumps({'error': str(err), 'done': True})}\n\n"
+            error_code = "provider_timeout" if isinstance(err, ProviderTimeoutError) else "provider_error"
+            yield f"data: {json.dumps({'error': 'The provider could not complete the stream.', 'code': error_code, 'done': True, 'task_id': task_id})}\n\n"
 
     return StreamingResponse(
         token_event_generator(),
