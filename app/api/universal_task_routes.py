@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 import uuid
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.analytics.outcome_learning import DetailedOutcomeReport, outcome_learning_engine
 from app.inference_runtime.errors import RateLimitExceeded
+from app.inference_runtime.prompt_guard import inspect as inspect_prompt
 from app.inference_runtime.quotas import agent_quota_manager
 from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
 from app.security.prompt_isolation import (
@@ -50,6 +52,53 @@ class TaskResultModel(BaseModel):
     error: str | None = None
     execution_time_ms: int = 0
     receipt: dict[str, Any] | None = None
+
+
+class BatchTaskEnvelopeModel(BaseModel):
+    """Batch execution payload for multiple Universal Task envelopes."""
+
+    batch_id: str = Field(default_factory=lambda: f"batch_{uuid.uuid4().hex[:12]}")
+    source_agent: str = Field(default="friday")
+    tasks: list[TaskEnvelopeModel] = Field(..., min_length=1, max_length=50, description="Tasks to execute")
+    concurrency_limit: int = Field(default=5, ge=1, le=20, description="Max concurrent executions")
+    fail_fast: bool = Field(default=False, description="Abort remaining tasks upon first failure")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BatchTaskResultModel(BaseModel):
+    """Aggregated batch execution result."""
+
+    batch_id: str
+    target_agent: str = "inference"
+    total_tasks: int
+    succeeded_tasks: int
+    failed_tasks: int
+    degraded_tasks: int
+    execution_time_ms: int
+    results: list[TaskResultModel]
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskValidateRequest(BaseModel):
+    """Pre-flight validation request for Universal Task Envelope."""
+
+    source_agent: str = Field(default="friday")
+    action: str = Field(default="reason")
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskValidateResponse(BaseModel):
+    """Validation report without executing LLM inference."""
+
+    valid: bool
+    source_agent: str
+    action: str
+    estimated_tokens: int
+    quota_available: bool
+    prompt_safe: bool
+    findings: list[str] = Field(default_factory=list)
+    risk_level: str = "SAFE"
+    recommended_model: str = "auto"
 
 
 class AstraReasonRequest(BaseModel):
@@ -133,13 +182,15 @@ def _format_intelx_result(content: str, payload: dict[str, Any]) -> dict[str, An
     idx = 1
     for line in lines:
         cleaned_line = line.lstrip("-*1234567890. ")
-        if cleaned_line.endswith(":") or any(cleaned_line.lower().startswith(h) for h in ("executive briefing", "briefing", "summary", "key findings", "findings")):
+        if cleaned_line.endswith(":") or any(
+            cleaned_line.lower().startswith(h)
+            for h in ("executive briefing", "briefing", "summary", "key findings", "findings")
+        ):
             continue
         if len(cleaned_line) > 15 and not cleaned_line.startswith("#"):
             claims.append({
                 "claim_id": f"claim_{idx}",
                 "statement": cleaned_line,
-                # Extracting a sentence from model output does not independently verify it.
                 "confidence": None,
                 "verification_status": "unverified",
                 "evidence_markers": [],
@@ -149,7 +200,6 @@ def _format_intelx_result(content: str, payload: dict[str, Any]) -> dict[str, An
         if len(claims) >= 10:
             break
     if not claims and content.strip():
-        # Preserve a non-empty response as an extracted candidate, never as a verified claim.
         claims.append({
             "claim_id": "claim_1",
             "statement": content[:200].strip(),
@@ -163,7 +213,6 @@ def _format_intelx_result(content: str, payload: dict[str, Any]) -> dict[str, An
         "total_claims": len(claims),
         "summary": content[:300].strip(),
         "contradictions": [],
-        # Uncertainty has not been calibrated from independent evidence here.
         "uncertainty_score": None,
     }
 
@@ -210,17 +259,25 @@ async def execute_task(
     # 3. Detect specialist agent requirements
     is_forge = source in ("forge", "code_generator") or action in ("code_generation", "generate_code", "refactor")
     is_vyralx = source in ("vyralx", "scriptwriter") or action in ("scriptwriting", "script", "generate_script")
-    is_intelx = source in ("intelx", "claim_extractor") or action in ("claim_extraction", "extract_claims", "research", "verify")
+    is_intelx = source in ("intelx", "claim_extractor") or action in (
+        "claim_extraction", "extract_claims", "research", "verify"
+    )
 
     if is_forge:
         role = "software_architect"
-        augmented_prompt = f"[FORGE CODE GENERATION PROTOCOL]\nProduce robust, modular production code and unit tests for:\n{clean_prompt}"
+        augmented_prompt = (
+            f"[FORGE CODE GENERATION PROTOCOL]\nProduce robust, modular production code and unit tests for:\n{clean_prompt}"
+        )
     elif is_vyralx:
         role = "viral_scriptwriter"
-        augmented_prompt = f"[VYRALX SCRIPTWRITING PROTOCOL]\nProduce a high-retention, engaging script with hook, retention beats, and CTA for:\n{clean_prompt}"
+        augmented_prompt = (
+            f"[VYRALX SCRIPTWRITING PROTOCOL]\nProduce a high-retention, engaging script with hook, retention beats, and CTA for:\n{clean_prompt}"
+        )
     elif is_intelx:
         role = "intelligence_analyst"
-        augmented_prompt = f"[INTELX CLAIM EXTRACTION PROTOCOL]\nExtract atomic factual claims, verification status, and evidence markers for:\n{clean_prompt}"
+        augmented_prompt = (
+            f"[INTELX CLAIM EXTRACTION PROTOCOL]\nExtract atomic factual claims, verification status, and evidence markers for:\n{clean_prompt}"
+        )
     else:
         role = "system_architect"
         augmented_prompt = clean_prompt
@@ -249,54 +306,58 @@ async def execute_task(
                     "response": "",
                     "model_used": resp.model_used,
                     "provider_used": resp.provider_used,
-                    "token_usage": {},
+                    "confidence": DEGRADED_CONFIDENCE,
+                    "degraded": True,
                 },
-                summary="No model provider produced output; no answer fabricated.",
+                summary=f"Task degraded: {clean_error}",
                 execution_time_ms=lat,
             )
 
-        # 5. Format Specialist Task Deliverables (Objective 2)
+        content = resp.content
+
+        # 5. Format structured response per consumer contract
         if is_forge:
-            structured_data = _format_forge_result(resp.content, clean_payload if isinstance(clean_payload, dict) else {})
-            task_type = "code_generation"
+            structured_data = _format_forge_result(content, envelope.payload)
+            summary_text = f"Forge code generated ({len(structured_data['code'])} chars, {len(structured_data['files'])} files)"
         elif is_vyralx:
-            structured_data = _format_vyralx_result(resp.content, clean_payload if isinstance(clean_payload, dict) else {})
-            task_type = "scriptwriting"
+            structured_data = _format_vyralx_result(content, envelope.payload)
+            summary_text = f"VyralX script generated ({len(structured_data['retention_beats'])} beats)"
         elif is_intelx:
-            structured_data = _format_intelx_result(resp.content, clean_payload if isinstance(clean_payload, dict) else {})
-            task_type = "claim_extraction"
+            structured_data = _format_intelx_result(content, envelope.payload)
+            summary_text = f"IntelX research extracted {structured_data['total_claims']} factual claims"
         else:
-            structured_data = {"response": resp.content}
-            task_type = "general_reasoning"
+            structured_data = {
+                "response": content,
+                "confidence": UNVERIFIED_MODEL_CONFIDENCE,
+                "model_used": resp.model_used,
+                "provider_used": resp.provider_used,
+            }
+            summary_text = f"Execution completed via {resp.provider_used}/{resp.model_used}"
 
-        structured_data["model_used"] = resp.model_used
-        structured_data["provider_used"] = resp.provider_used
-        structured_data["token_usage"] = resp.token_usage
-
-        summary_text = (
-            structured_data.get("summary")
-            or structured_data.get("hook")
-            or structured_data.get("architecture_notes")
-            or resp.content[:250]
-        )
-
-        # 6. Outcome Learning & Database Persistence (Objective 3)
-        outcome_report = DetailedOutcomeReport(
-            consumer=source if source in ("trading_bot", "forge", "nexus", "sentinel", "intelx", "futuris", "friday", "human") else "friday",
-            request_id=envelope.task_id,
-            outcome="success",
-            detail=f"{task_type}_completed",
-            measured_metrics={
-                "latency_ms": lat,
-                "latency_s": lat / 1000.0,
-                "prompt_tokens": resp.token_usage.get("prompt_tokens", estimated_tokens),
-                "completion_tokens": resp.token_usage.get("completion_tokens", len(resp.content) // 4),
-                "model": resp.model_used,
-            },
-            task_type=task_type,
-            provider_used=resp.provider_used,
-        )
-        outcome_learning_engine.record_outcome(outcome_report)
+        # 6. Record outcome and persist to runs & strategies
+        try:
+            tokens_dict = resp.token_usage or {}
+            outcome_report = DetailedOutcomeReport(
+                consumer=source if source in ("trading_bot", "forge", "nexus", "sentinel", "intelx", "futuris", "friday", "human") else "friday",
+                request_id=envelope.task_id,
+                outcome="success",
+                detail=summary_text,
+                task_type=action,
+                provider_used=resp.provider_used,
+                agent_composition=[source, "inference"],
+                stated_confidence=UNVERIFIED_MODEL_CONFIDENCE,
+                measured_metrics={
+                    "latency_ms": lat,
+                    "latency_seconds": lat / 1000.0,
+                    "prompt_tokens": tokens_dict.get("prompt_tokens", estimated_tokens),
+                    "completion_tokens": tokens_dict.get("completion_tokens", len(content) // 4),
+                    "total_tokens": tokens_dict.get("total_tokens", estimated_tokens + len(content) // 4),
+                    "model": resp.model_used,
+                },
+            )
+            outcome_learning_engine.record_outcome(outcome_report)
+        except Exception as o_err:
+            logger.debug(f"[TASK_EXECUTE] Telemetry recording skipped: {o_err}")
 
         return TaskResultModel(
             task_id=envelope.task_id,
@@ -318,6 +379,138 @@ async def execute_task(
             error=scrub_credentials(detail),
             execution_time_ms=lat,
         )
+
+
+@task_router.post("/v1/task/batch", response_model=BatchTaskResultModel, status_code=status.HTTP_200_OK)
+async def execute_task_batch(batch_envelope: BatchTaskEnvelopeModel) -> BatchTaskResultModel:
+    """Executes a batch of Universal Tasks in parallel with bounded concurrency and per-agent quota enforcement."""
+    t0 = time.time()
+    source = batch_envelope.source_agent.lower().strip()
+    tasks = batch_envelope.tasks
+    logger.info(
+        f"[TASK_BATCH] Starting batch '{batch_envelope.batch_id}' with {len(tasks)} tasks from '{source}' "
+        f"(concurrency: {batch_envelope.concurrency_limit}, fail_fast: {batch_envelope.fail_fast})"
+    )
+
+    sem = asyncio.Semaphore(batch_envelope.concurrency_limit)
+    aborted = False
+
+    async def _run_single(task_item: TaskEnvelopeModel) -> TaskResultModel:
+        nonlocal aborted
+        if aborted and batch_envelope.fail_fast:
+            return TaskResultModel(
+                task_id=task_item.task_id,
+                target_agent="inference",
+                status="ABORTED",
+                error="Batch aborted due to fail_fast policy on prior failure",
+                execution_time_ms=0,
+            )
+
+        async with sem:
+            if aborted and batch_envelope.fail_fast:
+                return TaskResultModel(
+                    task_id=task_item.task_id,
+                    target_agent="inference",
+                    status="ABORTED",
+                    error="Batch aborted due to fail_fast policy on prior failure",
+                    execution_time_ms=0,
+                )
+            try:
+                if not task_item.source_agent or task_item.source_agent == "friday":
+                    task_item.source_agent = source
+                res = await execute_task(task_item)
+                if batch_envelope.fail_fast and res.status in ("ERROR", "DEGRADED"):
+                    aborted = True
+                return res
+            except Exception as exc:
+                if batch_envelope.fail_fast:
+                    aborted = True
+                return TaskResultModel(
+                    task_id=task_item.task_id,
+                    target_agent="inference",
+                    status="ERROR",
+                    error=scrub_credentials(str(exc)),
+                    execution_time_ms=0,
+                )
+
+    results = await asyncio.gather(*[_run_single(t) for t in tasks])
+
+    lat = int((time.time() - t0) * 1000)
+    succeeded = sum(1 for r in results if r.status == "SUCCESS")
+    failed = sum(1 for r in results if r.status in ("ERROR", "ABORTED"))
+    degraded = sum(1 for r in results if r.status == "DEGRADED")
+
+    summary = {
+        "success_rate": round(succeeded / max(1, len(tasks)), 3),
+        "avg_task_latency_ms": round(lat / max(1, len(tasks)), 1),
+        "aborted_count": sum(1 for r in results if r.status == "ABORTED"),
+    }
+
+    return BatchTaskResultModel(
+        batch_id=batch_envelope.batch_id,
+        target_agent="inference",
+        total_tasks=len(tasks),
+        succeeded_tasks=succeeded,
+        failed_tasks=failed,
+        degraded_tasks=degraded,
+        execution_time_ms=lat,
+        results=results,
+        summary=summary,
+    )
+
+
+@task_router.post("/v1/task/validate", response_model=TaskValidateResponse, status_code=status.HTTP_200_OK)
+async def validate_task(req: TaskValidateRequest) -> TaskValidateResponse:
+    """Pre-flight check for a task payload without executing model generation."""
+    source = req.source_agent.lower().strip()
+    raw_prompt = (
+        req.payload.get("prompt")
+        or req.payload.get("question")
+        or req.payload.get("query")
+        or req.payload.get("task")
+        or str(req.payload)
+    )
+    guard = inspect_prompt(raw_prompt)
+    est_tokens = max(50, len(raw_prompt) // 4)
+
+    quota_info = agent_quota_manager.get_status(source)
+    quota_available = (quota_info["tokens_used"] + est_tokens <= quota_info["tpm_limit"]) and (
+        quota_info["requests_used"] + 1 <= quota_info["rpm_limit"]
+    )
+
+    is_valid = guard.allowed and (guard.risk_level in ("SAFE", "LOW")) and quota_available
+
+    return TaskValidateResponse(
+        valid=is_valid,
+        source_agent=source,
+        action=req.action,
+        estimated_tokens=est_tokens,
+        quota_available=quota_available,
+        prompt_safe=guard.allowed,
+        findings=list(guard.findings),
+        risk_level=guard.risk_level,
+        recommended_model="openai/gpt-oss-120b" if source in ("forge", "cortex") else "auto",
+    )
+
+
+@task_router.get("/v1/task/quotas/{agent_id}", status_code=status.HTTP_200_OK)
+async def get_agent_quotas(agent_id: str) -> dict[str, Any]:
+    """Retrieves current quota consumption, bucket capacity, and time to reset for an agent."""
+    clean_id = agent_id.lower().strip()
+    status_data = agent_quota_manager.get_status(clean_id)
+    tokens_remaining = max(0, status_data["tpm_limit"] - status_data["tokens_used"])
+    requests_remaining = max(0, status_data["rpm_limit"] - status_data["requests_used"])
+    return {
+        "agent_id": clean_id,
+        "token_capacity": status_data["tpm_limit"],
+        "tokens_used": status_data["tokens_used"],
+        "tokens_remaining": tokens_remaining,
+        "request_capacity": status_data["rpm_limit"],
+        "requests_used": status_data["requests_used"],
+        "requests_remaining": requests_remaining,
+        "window_remaining_seconds": status_data["window_remaining_seconds"],
+        "status": "HEALTHY" if tokens_remaining > 5000 else "CONGESTED",
+    }
 
 
 @task_router.post("/v1/astra/reason", response_model=AstraReasonResponse, status_code=status.HTTP_200_OK)

@@ -4,9 +4,21 @@ import re
 from dataclasses import dataclass
 
 from .contracts import Capability, CompletionRequest, ProviderEndpoint
+from .prompt_guard import inspect as inspect_prompt
 
 _KEY_LEAK_PATTERN = re.compile(
-    r"\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{16,}|gsk_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35})\b"
+    r"\b(?:"
+    r"sk-(?:proj-|or-v1-|live-|test-)?[A-Za-z0-9_\-]{16,}"
+    r"|gsk_[A-Za-z0-9_\-]{16,}"
+    r"|hf_[A-Za-z0-9_\-]{16,}"
+    r"|nvapi-[A-Za-z0-9_\-]{16,}"
+    r"|xai-[A-Za-z0-9_\-]{16,}"
+    r"|pplx-[A-Za-z0-9_\-]{16,}"
+    r"|cohere-[A-Za-z0-9_\-]{16,}"
+    r"|AIza[0-9A-Za-z_\-]{35}"
+    r"|r8_[A-Za-z0-9_\-]{16,}"
+    r"|mistral-[A-Za-z0-9_\-]{16,}"
+    r")\b"
 )
 
 
@@ -53,4 +65,7 @@ class ModelPolicy:
             content_str = msg.content if isinstance(msg.content, str) else str(msg.content)
             if _KEY_LEAK_PATTERN.search(content_str):
                 return PolicyResult(False, "request contains unredacted provider credential")
+            guard = inspect_prompt(content_str)
+            if not guard.allowed and guard.risk_level in ("HIGH", "CRITICAL"):
+                return PolicyResult(False, f"request flagged by prompt guard ({guard.risk_level})")
         return PolicyResult(True, "ok")
