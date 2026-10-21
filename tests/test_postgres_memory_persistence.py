@@ -129,3 +129,14 @@ async def test_postgres_memory_saves_and_retrieves_records_mocked():
 
     await mem.close()
     mock_pool.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_injected_pool_works_when_asyncpg_is_not_installed(monkeypatch):
+    """A supplied compatible pool must be usable without the optional asyncpg import."""
+    mem = PostgresMemory()
+    injected_pool = MagicMock()
+    mem._pool = injected_pool
+    monkeypatch.setattr("app.memory.postgres.HAS_ASYNCPG", False)
+
+    assert await mem._get_pool() is injected_pool
