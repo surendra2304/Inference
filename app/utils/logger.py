@@ -17,11 +17,13 @@ _REDACTED = "[REDACTED]"
 # Recognise common credential field names in assignment-style logs, including JSON
 # keys, environment variable names, HTTP headers, and compact key=value diagnostics.
 _SECRET_FIELD_NAMES = (
+    r"(?:[A-Za-z0-9]+[-_])*(?:"
     r"authorization|proxy[-_]?authorization|x[-_]?api[-_]?key|"
     r"api[-_ ]?(?:key|secret)|access[-_ ]?token|refresh[-_ ]?token|"
     r"auth[-_ ]?token|client[-_ ]?secret|private[-_ ]?key|"
     r"password|passwd|passphrase|secret|session[-_ ]?(?:id|token)|"
     r"cookie|set[-_ ]?cookie|api[-_ ]?token|bearer|key|token"
+    r")"
 )
 _SECRET_PREFIX = rf"""(?P<prefix>["']?\b(?:{_SECRET_FIELD_NAMES})\b["']?\s*[:=]\s*(?!\[REDACTED\]))"""
 _QUOTED_SECRET_FIELD = re.compile(
