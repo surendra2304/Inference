@@ -110,7 +110,10 @@ class PredictionTrackingEngine:
                 raise ValueError(f"{label} must not contain control characters")
         if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
             raise ValueError("confidence must be a finite number between 0 and 1")
-        confidence_value = float(confidence)
+        try:
+            confidence_value = float(confidence)
+        except (OverflowError, ValueError):
+            raise ValueError("confidence must be a finite number between 0 and 1") from None
         if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
             raise ValueError("confidence must be a finite number between 0 and 1")
         if horizon_hours is not None and (
