@@ -35,6 +35,9 @@ def _record(message: str, args: tuple[object, ...] = (), exc_info=None) -> loggi
         ("provider returned gsk_abcdefghijklmnopqrstuvwxyz01", ["gsk_abcdefghijklmnopqrstuvwxyz01"]),
         ("provider returned nvapi-AbCdEfGhIjKlMnOpQrStUvWx", ["nvapi-AbCdEfGhIjKlMnOpQrStUvWx"]),
         ("provider returned AKIAIOSFODNN7EXAMPLE", ["AKIAIOSFODNN7EXAMPLE"]),
+        ("POSTGRES_PASSWORD=database-secret-marker", ["database-secret-marker"]),
+        ("AWS_SECRET_ACCESS_KEY=aws-secret-marker", ["aws-secret-marker"]),
+        ("smtp_password='smtp with spaces secret'", ["smtp with spaces secret"]),
         (
             "private key: -----BEGIN PRIVATE KEY-----FAKE_PRIVATE_KEY_MATERIAL"
             "-----END PRIVATE KEY-----",
