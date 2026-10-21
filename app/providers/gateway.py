@@ -56,6 +56,20 @@ def provider_has_credentials(prov_name: str) -> bool:
         return False
 
 
+def _request_timeout_budget(request: ProviderRequest) -> float:
+    """Validate the finite positive deadline shared by primary and fallback work."""
+    value = request.extra_params.get("timeout", settings.REQUEST_TIMEOUT or 60.0)
+    if isinstance(value, bool):
+        raise ValueError("request timeout must be a finite positive number")
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("request timeout must be a finite positive number") from exc
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("request timeout must be a finite positive number")
+    return timeout
+
+
 class KeyPool:
     """Manages round-robin key rotation and 60-second quarantines for a provider."""
 
@@ -259,13 +273,7 @@ class ModelGateway:
         5. If all keys exhausted/quarantined, routes through capability-matched fallback.
         6. Updates health metrics and records provenance.
         """
-        timeout_value = request.extra_params.get("timeout", settings.REQUEST_TIMEOUT or 60.0)
-        try:
-            timeout_budget = float(timeout_value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("request timeout must be a finite positive number") from exc
-        if not math.isfinite(timeout_budget) or timeout_budget <= 0:
-            raise ValueError("request timeout must be a finite positive number")
+        timeout_budget = _request_timeout_budget(request)
         deadline = time.monotonic() + timeout_budget
         # Reserve the tail of the budget for the fallback ladder. Without this, a
         # primary provider that times out (the single most common provider failure)
@@ -919,9 +927,7 @@ class ModelGateway:
     ) -> AsyncIterator[str]:
         """Stream from one provider while enforcing the request deadline and limits."""
         prov_name = provider.lower().strip()
-        timeout_budget = float(request.extra_params.get("timeout", settings.REQUEST_TIMEOUT or 60.0))
-        if not math.isfinite(timeout_budget) or timeout_budget <= 0:
-            raise ValueError("stream timeout must be a finite positive number")
+        timeout_budget = _request_timeout_budget(request)
         deadline = time.monotonic() + timeout_budget
 
         if not provider_has_credentials(prov_name):
