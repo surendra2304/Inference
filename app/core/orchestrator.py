@@ -126,6 +126,8 @@ class Orchestrator(BaseOrchestrator):
         known registered agents. Unknown/non-string candidates are ignored so malformed
         optional context cannot crash the task before its failure record exists.
         """
+        if max_agents <= 0:
+            return []
         if not value:
             return None
         if isinstance(value, str):
