@@ -10,7 +10,7 @@ class HighAvailabilityManager:
     """Manages Provider Failover Chains, Disaster Recovery health checks, and Node Redundancy."""
 
     def __init__(self) -> None:
-        self.provider_chain = ["groq", "gemini", "openai", "anthropic", "ollama"]
+        self.provider_chain = ["groq", "openrouter", "gemini", "nvidia"]
         self.provider_health: dict[str, dict[str, Any]] = {
             p: {"status": "HEALTHY", "consecutive_failures": 0, "last_failure_ts": 0.0}
             for p in self.provider_chain
