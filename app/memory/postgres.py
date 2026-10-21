@@ -58,11 +58,14 @@ CREATE TABLE IF NOT EXISTS deliberations (
     participating_agents TEXT NOT NULL,
     consensus_strategy TEXT NOT NULL,
     final_decision TEXT NOT NULL,
-    confidence DOUBLE PRECISION NOT NULL,
+    confidence DOUBLE PRECISION,
     rounds INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
     metadata_json TEXT NOT NULL DEFAULT '{}'
 );
+
+-- Older deployments declared confidence NOT NULL; allow unknown measurements without inventing a score.
+ALTER TABLE deliberations ALTER COLUMN confidence DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs (task_id);
 CREATE INDEX IF NOT EXISTS idx_runs_provider ON runs (provider);
@@ -97,11 +100,20 @@ class PostgresMemory:
         return pool is not None
 
     async def _get_pool(self) -> Any:
-        if not HAS_ASYNCPG:
-            return None
+        # Respect an explicitly injected pool before checking the optional driver.
+        # This keeps adapter-level tests and externally supplied compatible pools
+        # usable even when asyncpg is not installed in the current environment.
         if self._pool is not None:
             return self._pool
         if self._is_available is False:
+            return None
+        if not self.password:
+            # Never attempt database authentication with a baked-in, empty, or
+            # missing credential. Operators must provide the secret explicitly.
+            self._is_available = False
+            logger.debug("PostgreSQL persistence disabled: POSTGRES_PASSWORD is not configured.")
+            return None
+        if not HAS_ASYNCPG:
             return None
 
         try:
@@ -239,7 +251,7 @@ class PostgresMemory:
                     agents_str,
                     deliberation.consensus_strategy,
                     deliberation.final_decision,
-                    float(deliberation.confidence),
+                    deliberation.confidence,
                     deliberation.rounds,
                     deliberation.created_at,
                     meta_json,

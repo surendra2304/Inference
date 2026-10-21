@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.core.config import Settings
 from app.memory.base import DeliberationRecord, RunRecord, StrategyRecord
 from app.memory.postgres import SCHEMA_DDL, PostgresMemory
 
@@ -13,6 +14,8 @@ def test_schema_ddl_contains_required_tables():
     assert "CREATE TABLE IF NOT EXISTS strategies" in SCHEMA_DDL
     assert "CREATE TABLE IF NOT EXISTS deliberations" in SCHEMA_DDL
     assert "CREATE INDEX IF NOT EXISTS idx_deliberations_session_id" in SCHEMA_DDL
+    assert "confidence DOUBLE PRECISION," in SCHEMA_DDL
+    assert "ALTER TABLE deliberations ALTER COLUMN confidence DROP NOT NULL" in SCHEMA_DDL
 
 
 @pytest.mark.asyncio
@@ -129,3 +132,59 @@ async def test_postgres_memory_saves_and_retrieves_records_mocked():
 
     await mem.close()
     mock_pool.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_injected_pool_works_when_asyncpg_is_not_installed(monkeypatch):
+    """A supplied compatible pool must be usable without the optional asyncpg import."""
+    mem = PostgresMemory()
+    injected_pool = MagicMock()
+    mem._pool = injected_pool
+    monkeypatch.setattr("app.memory.postgres.HAS_ASYNCPG", False)
+
+    assert await mem._get_pool() is injected_pool
+
+
+@pytest.mark.asyncio
+async def test_deliberation_without_observed_confidence_is_persisted_as_null():
+    """Unknown confidence is stored as NULL, never coerced or fabricated to a number."""
+    mem = PostgresMemory()
+    mock_conn = MagicMock()
+    mock_conn.execute = AsyncMock()
+
+    acquire_cm = MagicMock()
+    acquire_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+    acquire_cm.__aexit__ = AsyncMock(return_value=None)
+
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value = acquire_cm
+    mem._pool = mock_pool
+    mem._is_available = True
+
+    record = DeliberationRecord(
+        id="delib_unknown_confidence",
+        session_id="session_unknown_confidence",
+        topic="Unknown confidence persistence",
+        participating_agents=["friday"],
+        final_decision="Insufficient evidence",
+        confidence=None,
+    )
+
+    assert await mem.save_deliberation(record) is True
+    assert mock_conn.execute.await_args.args[7] is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_pool_is_not_created_without_explicit_password(monkeypatch):
+    """PostgreSQL must not use an embedded or implicit credential."""
+    mem = PostgresMemory()
+    mem.password = None
+    monkeypatch.setattr("app.memory.postgres.HAS_ASYNCPG", True)
+
+    assert await mem.initialize() is False
+    assert mem._pool is None
+    assert mem._is_available is False
+
+
+def test_postgres_password_has_no_hardcoded_default():
+    assert Settings.model_fields["POSTGRES_PASSWORD"].default is None

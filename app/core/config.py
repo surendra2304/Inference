@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int = Field(default=5432, description="PostgreSQL port")
     POSTGRES_DB: str = Field(default="inference_db", description="PostgreSQL database name")
     POSTGRES_USER: str = Field(default="inference_user", description="PostgreSQL user")
-    POSTGRES_PASSWORD: str = Field(default="wzhDNA2iRBDAq1kDZ94OlchO", description="PostgreSQL password")
+    POSTGRES_PASSWORD: str | None = Field(default=None, description="PostgreSQL password; configure via environment or secret store")
 
     #: Ceiling for the per-tenant request-id deduplication window. Each entry retains a
     #: full response payload; a deduplicated response is an optimisation (a miss is
