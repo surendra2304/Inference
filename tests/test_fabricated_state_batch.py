@@ -442,3 +442,48 @@ def test_temporal_result_serialises_with_null_confidence_for_multimodal_consumer
     temporal = temporal_reasoning_engine.analyze_temporal_series([]).model_dump()
     assert temporal["confidence"] is None
     assert temporal["trend"] == "NO_DATA"
+
+
+
+def test_intelx_formatter_does_not_mark_model_extracted_claims_as_verified():
+    from app.api.universal_task_routes import _format_intelx_result
+
+    content = "\\n".join([
+        "Executive briefing:",
+        "The service launched in 2024.",
+        "A second sentence with detail.",
+    ])
+    result = _format_intelx_result(content, {"source": "operator-supplied-document"})
+    assert result["claims"]
+    assert all(claim["verification_status"] == "unverified" for claim in result["claims"])
+    assert all(claim["confidence"] is None for claim in result["claims"])
+    assert all(claim["evidence_markers"] == [] for claim in result["claims"])
+    assert all(claim["source"] == "operator-supplied-document" for claim in result["claims"])
+    assert result["uncertainty_score"] is None
+
+
+def test_intelx_formatter_does_not_create_a_claim_from_empty_model_output():
+    from app.api.universal_task_routes import _format_intelx_result
+
+    result = _format_intelx_result("", {})
+    assert result["claims"] == []
+    assert result["total_claims"] == 0
+
+
+def test_record_outcome_failure_initializes_measured_rate(monkeypatch):
+    from app.analytics.outcome_learning import DetailedOutcomeReport, OutcomeLearningEngine
+
+    engine = OutcomeLearningEngine()
+    persisted = []
+    monkeypatch.setattr(engine, "_persist_to_db", lambda report, measured_rate=None: persisted.append(measured_rate))
+    # The global router is best-effort and may adapt its own weights; the regression is that
+    # failure outcomes must reach persistence with an explicitly missing measured rate.
+    engine.record_outcome(
+        DetailedOutcomeReport(
+            consumer="forge",
+            request_id="failure-without-rate",
+            outcome="failure",
+            source="observed",
+        )
+    )
+    assert persisted == [None]

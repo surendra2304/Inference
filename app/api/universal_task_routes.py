@@ -139,21 +139,23 @@ def _format_intelx_result(content: str, payload: dict[str, Any]) -> dict[str, An
             claims.append({
                 "claim_id": f"claim_{idx}",
                 "statement": cleaned_line,
-                "confidence": 0.95,
-                "verification_status": "verified",
-                "evidence_markers": ["source_text_analysis"],
-                "source": payload.get("source") or "intelligence_feed",
+                # Extracting a sentence from model output does not independently verify it.
+                "confidence": None,
+                "verification_status": "unverified",
+                "evidence_markers": [],
+                "source": payload.get("source"),
             })
             idx += 1
         if len(claims) >= 10:
             break
-    if not claims:
+    if not claims and content.strip():
+        # Preserve a non-empty response as an extracted candidate, never as a verified claim.
         claims.append({
             "claim_id": "claim_1",
             "statement": content[:200].strip(),
-            "confidence": 0.90,
+            "confidence": None,
             "verification_status": "unverified",
-            "evidence_markers": ["preliminary_extraction"],
+            "evidence_markers": [],
             "source": payload.get("source"),
         })
     return {
@@ -161,7 +163,8 @@ def _format_intelx_result(content: str, payload: dict[str, Any]) -> dict[str, An
         "total_claims": len(claims),
         "summary": content[:300].strip(),
         "contradictions": [],
-        "uncertainty_score": 0.05,
+        # Uncertainty has not been calibrated from independent evidence here.
+        "uncertainty_score": None,
     }
 
 
@@ -292,7 +295,6 @@ async def execute_task(
             },
             task_type=task_type,
             provider_used=resp.provider_used,
-            stated_confidence=0.95,
         )
         outcome_learning_engine.record_outcome(outcome_report)
 
