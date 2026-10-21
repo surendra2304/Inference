@@ -78,17 +78,32 @@ def test_prediction_endpoint_accepts_maximum_return_observation_count(auth):
 
 
 @pytest.mark.parametrize(
-    "params",
+    ("params", "input_source", "synthetic_leg", "observed_leg"),
     [
-        {"current_price": "65000"},
-        {"recent_returns": "0.01,0.02"},
+        (
+            {"current_price": "65000"},
+            "caller_supplied_price_with_placeholder_returns",
+            "return_series (no recent_returns supplied)",
+            "price_series (no current_price supplied)",
+        ),
+        (
+            {"recent_returns": "0.01,0.02"},
+            "placeholder_price_with_caller_supplied_returns",
+            "price_series (no current_price supplied)",
+            "return_series (no recent_returns supplied)",
+        ),
     ],
 )
-def test_prediction_endpoint_labels_partial_inputs_as_simulated(auth, params):
+def test_prediction_endpoint_labels_partial_inputs_as_simulated(
+    auth, params, input_source, synthetic_leg, observed_leg
+):
     response = _client().get("/v1/predict/btc", headers=auth, params=params)
 
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["inputs_simulated"] is True
     assert body["unified_confidence"] is None
-    assert body["evidence_class"] == "synthetic_fixture_inputs"
+    assert body["evidence_class"] == "partially_synthetic_inputs"
+    assert body["input_source"] == input_source
+    assert synthetic_leg in body["synthetic_legs"]
+    assert observed_leg not in body["synthetic_legs"]
