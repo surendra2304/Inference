@@ -116,7 +116,8 @@ class SensitiveDataFilter(logging.Filter):
                     rendered_exception = "".join(traceback.format_exception(*record.exc_info))
                 except Exception:  # noqa: BLE001 - preserve a safe failure description
                     exc_type, exc_value, _ = record.exc_info
-                    rendered_exception = f"{exc_type.__name__}: {exc_value}"
+                    exception_name = exc_type.__name__ if exc_type is not None else "Exception"
+                    rendered_exception = f"{exception_name}: {exc_value}"
                 record.exc_text = _redact_text(rendered_exception)
                 # Do not let later handlers or formatters re-render the raw exception.
                 record.exc_info = None
@@ -165,9 +166,9 @@ def setup_logger(
 
     # The logger-level filter covers its own records; handler-level filters also
     # cover records propagated from child loggers, which skip ancestor logger filters.
-    for handler in logger.handlers:
-        if not any(isinstance(item, SensitiveDataFilter) for item in handler.filters):
-            handler.addFilter(sensitive_filter)
+    for registered_handler in logger.handlers:
+        if not any(isinstance(item, SensitiveDataFilter) for item in registered_handler.filters):
+            registered_handler.addFilter(sensitive_filter)
 
     return logger
 
