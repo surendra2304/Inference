@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Callable
 import json
 import os
 import signal
@@ -125,9 +126,15 @@ async def lifespan(app: FastAPI):
     def _on_signal(sig_name: str) -> None:
         logger.info("Received %s signal, initiating clean shutdown sequence...", sig_name)
 
+    def _signal_callback(signal_name: str) -> Callable[[], None]:
+        def callback() -> None:
+            _on_signal(signal_name)
+
+        return callback
+
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
-            loop.add_signal_handler(sig, lambda s=sig: _on_signal(s.name))
+            loop.add_signal_handler(sig, _signal_callback(sig.name))
         except (NotImplementedError, RuntimeError, AttributeError):
             pass
 
@@ -233,7 +240,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         error_code = STATUS_TO_ERROR_CODE.get(exc.status_code, f"HTTP_{exc.status_code}")
         message = str(detail) if detail is not None else "HTTP exception occurred."
 
-    response_headers = dict(exc.headers) if getattr(exc, "headers", None) else {}
+    response_headers = dict(exc.headers or {})
     response_headers["X-Correlation-ID"] = correlation_id
 
     return JSONResponse(
