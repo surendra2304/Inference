@@ -1,7 +1,6 @@
 # Task 1 next-run — Inference — 2026-10-22
 
-1. Poll https://github.com/surendra2304/Inference/actions/runs/39673218580 for commit `32957964472c1026a784cc97a11e1546e6d7f62c` / PR #31. It was queued when last checked.
-2. PR #31 fixes `_resolve_forced_agents` honoring `max_agents <= 0`: early return `[]` before candidate lookup. Files are `app/core/orchestrator.py` and `tests/test_forced_agent_selection.py`; commits `919835b90fd405674d784f985abc69151279aa50`, `32957964472c1026a784cc97a11e1546e6d7f62c`.
-3. If CI fails, inspect logs and make a focused correction; if green, check review comments and leave open (do not auto-merge).
-4. Open PR list was empty immediately before PR #31, so the older master-plan/schema PR #30 was no longer open. Verify its disposition through closed/merged PR list before deciding whether to revive any migrations. Review fresh/existing DB behavior for `deliberations.confidence` nullable DDL.
-5. Laptop/local test endpoint returned HTTP 404; no local checks were run. Record new current-head CI only; do not claim unmeasured active minutes.
+1. PR #31 head `32957964472c1026a784cc97a11e1546e6d7f62c` passed run `39673218580` (lint, pytest, Docker). Verify it remains current.
+2. Current main run `39672821899` passed. PR #32's latest observed head is `bb5dfb46764319384fd0767752f6714c6b1fc069`; inspect its most recent CI run/logs before touching code.
+3. Do not duplicate the `max_agents <= 0` fix. If PR #32 shows a concrete failing test, address only its root cause with a focused regression.
+4. Local runner unavailable (HTTP 404); use exact GitHub CI evidence; update all three state files. No merge/force push.
