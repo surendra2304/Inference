@@ -47,7 +47,13 @@ async def service_ready(response: Response):
     journal_mode = "unknown"
     try:
         from app.core.orchestrator import orchestrator
-        async with orchestrator.memory.connect() as db:
+        # BaseMemory is adapter-neutral; a low-level connect() context is an optional
+        # capability implemented by the SQLite backend. Check it explicitly so the
+        # readiness probe remains valid for adapters with different interfaces.
+        memory_connect = getattr(orchestrator.memory, "connect", None)
+        if not callable(memory_connect):
+            raise RuntimeError("Configured memory backend does not expose a connection health probe")
+        async with memory_connect() as db:
             cursor = await db.execute("SELECT 1;")
             await cursor.fetchone()
             try:
