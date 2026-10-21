@@ -73,13 +73,10 @@ class HardenedGateway:
         if request.stream:
             raise ValueError("Use stream() for streaming requests")
 
-        decision = self.router.choose(request)
-        ep = decision.endpoint
         cache_key = self._cache_key(request)
-
-        # A cache hit does not spend provider budget and therefore must not reserve
-        # money. Validate cached values just as strictly as fresh provider responses:
-        # stale or malformed entries are evicted and recomputed rather than trusted.
+        # Cache hits must remain available while providers are unhealthy and must not
+        # reserve budget. Validate cached values just as strictly as fresh responses;
+        # evict malformed entries and recompute rather than trusting stale payloads.
         if cache_key:
             hit = self.cache.get(cache_key)
             if hit is not None:
@@ -87,14 +84,21 @@ class HardenedGateway:
                     cached_fields = dict(hit)
                     cached_fields["cached"] = True
                     cached_result = CompletionResult(**cached_fields)
-                    if request.response_schema:
+                    if request.response_schema is not None:
                         validate_json(cached_result.text, dict(request.response_schema))
                 except (TypeError, ValueError, SchemaViolation):
                     self.cache.delete(cache_key)
                 else:
-                    self.trace.emit("cache_hit", request.request_id, ep.provider, ep.model)
+                    self.trace.emit(
+                        "cache_hit",
+                        request.request_id,
+                        cached_result.provider,
+                        cached_result.model,
+                    )
                     return cached_result
 
+        decision = self.router.choose(request)
+        ep = decision.endpoint
         estimate = self._estimate_cost(request, ep)
         self.budget.reserve(request.tenant_id, estimate)
         reservation_held = True
@@ -110,10 +114,15 @@ class HardenedGateway:
             )
             result = await self.dedupe.run(dedupe_key, lambda: self._execute(request, ep))
 
-            # Never persist a result or finalize spend until the response contract has
-            # been validated. A malformed answer must not poison subsequent cache hits.
-            if request.response_schema:
-                validate_json(result.text, dict(request.response_schema))
+            # Validation gates caching, not billing: even malformed provider output
+            # can incur real token charges, so reconcile that actual cost exactly once.
+            if request.response_schema is not None:
+                try:
+                    validate_json(result.text, dict(request.response_schema))
+                except BaseException:
+                    self.budget.reconcile(request.tenant_id, estimate, result.cost_usd)
+                    reservation_held = False
+                    raise
 
             self.budget.reconcile(request.tenant_id, estimate, result.cost_usd)
             reservation_held = False
