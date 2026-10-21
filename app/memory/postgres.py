@@ -58,11 +58,14 @@ CREATE TABLE IF NOT EXISTS deliberations (
     participating_agents TEXT NOT NULL,
     consensus_strategy TEXT NOT NULL,
     final_decision TEXT NOT NULL,
-    confidence DOUBLE PRECISION NOT NULL,
+    confidence DOUBLE PRECISION,
     rounds INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
     metadata_json TEXT NOT NULL DEFAULT '{}'
 );
+
+-- Older deployments declared confidence NOT NULL; allow unknown measurements without inventing a score.
+ALTER TABLE deliberations ALTER COLUMN confidence DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs (task_id);
 CREATE INDEX IF NOT EXISTS idx_runs_provider ON runs (provider);
@@ -242,7 +245,7 @@ class PostgresMemory:
                     agents_str,
                     deliberation.consensus_strategy,
                     deliberation.final_decision,
-                    float(deliberation.confidence),
+                    deliberation.confidence,
                     deliberation.rounds,
                     deliberation.created_at,
                     meta_json,
