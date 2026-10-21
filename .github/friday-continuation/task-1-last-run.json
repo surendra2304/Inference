@@ -2,7 +2,7 @@
   "task": 1,
   "repository": "Inference",
   "updated_at": "2026-10-22",
-  "status": "pr31_green_pr34_open_ci_green_mergeability_blocked",
+  "status": "pr31_green_pr34_open_green_ci_mergeable_divergence",
   "pr31": {
     "url": "https://github.com/surendra2304/Inference/pull/31",
     "head": "32957964472c1026a784cc97a11e1546e6d7f62c",
@@ -20,9 +20,6 @@
     "url": "https://github.com/surendra2304/Inference/pull/34",
     "branch": "fix/prediction-api-input-bounds-20261022",
     "head": "491eb9c31e645a0db3cba80a85bc133c15cbbc7e",
-    "files_changed": [
-      "tests/test_prediction_endpoint_input_bounds.py"
-    ],
     "ci": {
       "id": 39674879487,
       "url": "https://github.com/surendra2304/Inference/actions/runs/39674879487",
@@ -33,7 +30,19 @@
         "Docker"
       ]
     },
-    "mergeable": false
+    "state": "open",
+    "mergeable": true,
+    "compare": {
+      "status": "diverged",
+      "ahead_by": 8,
+      "behind_by": 1,
+      "changed_files": [
+        "MASTER_PLAN.md",
+        "app/ml/prediction_aggregator.py",
+        "app/routers/predictions.py",
+        "tests/test_prediction_endpoint_input_bounds.py"
+      ]
+    }
   },
   "main": {
     "sha": "a9059633aa0bc515e585b009353d7c2bb6d1f88f",
@@ -50,8 +59,8 @@
   "merged": false,
   "blockers": [
     "Laptop MCP HTTP 404",
-    "PR34 mergeable=false, reason not yet inspected"
+    "PR34 has one-behind/diverged history requiring safe review"
   ],
   "active_duration_seconds": "not measured",
-  "next": "Inspect PR34 base/mergeability; verify PR31 and resolve divergence additively."
+  "next": "Inspect PR34 ancestry safely, then verify PR31."
 }
