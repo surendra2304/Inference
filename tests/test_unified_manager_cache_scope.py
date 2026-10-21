@@ -127,3 +127,9 @@ async def test_unified_cache_does_not_cross_agent_roles(fake_gateway):
     assert researcher.agent_role == "researcher"
     assert trader.agent_role == "trading_analyst"
     assert len(fake_gateway) == 2
+
+
+def test_unified_execution_request_accepts_registered_cerebras_provider():
+    request = _request(provider="cerebras")
+
+    assert request.provider == "cerebras"
