@@ -966,7 +966,11 @@ class ModelGateway:
                 raw_error=exc,
             )
             self.health_tracker.record_failure(
-                prov_name, str(typed_error), is_503=True, latency_seconds=time.perf_counter() - started
+                prov_name,
+                str(typed_error),
+                is_429=False,
+                is_503=True,
+                latency_seconds=time.perf_counter() - started,
             )
             raise typed_error from exc
         except Exception as exc:

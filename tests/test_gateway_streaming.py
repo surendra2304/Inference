@@ -167,3 +167,29 @@ async def test_stream_normalizes_provider_failure(monkeypatch):
     assert caught.value.provider == "test-provider"
     assert gateway.rate_limiters["test-provider"].released == 1
     assert gateway.health_tracker.failures[0][2]["is_503"] is True
+
+@pytest.mark.asyncio
+async def test_stream_timeout_records_service_unavailable_not_rate_limit(monkeypatch):
+    gateway = _gateway()
+    closed = asyncio.Event()
+
+    class _Provider:
+        async def stream(self, _request):
+            try:
+                await asyncio.sleep(1)
+                yield "never"
+            finally:
+                closed.set()
+
+    _patch_provider(monkeypatch, _Provider())
+
+    with pytest.raises(TimeoutError, match="Stream deadline exceeded"):
+        async for _chunk in gateway.stream("test-provider", _request(timeout=0.02)):
+            pass
+
+    assert closed.is_set()
+    assert gateway.health_tracker.failures
+    _, _, flags = gateway.health_tracker.failures[0]
+    assert flags["is_503"] is True
+    assert flags["is_429"] is False
+    assert gateway.rate_limiters["test-provider"].released == 1
