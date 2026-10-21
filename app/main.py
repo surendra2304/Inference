@@ -16,6 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.agents.software_specialists import register_software_specialists
 from app.api.agent_routes import agent_router
+from app.api.deliberate_stream_routes import deliberate_stream_router
 from app.api.friday_routes import friday_router
 from app.api.instant_routes import instant_router
 from app.api.routes import router as api_router
@@ -335,6 +336,7 @@ app.include_router(experiment_router, dependencies=[Depends(require_inference_ap
 app.include_router(sentinel_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(intelx_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(futuris_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(deliberate_stream_router)
 
 
 @app.get("/ui", response_class=HTMLResponse)
