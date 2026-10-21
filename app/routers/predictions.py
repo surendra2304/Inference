@@ -12,6 +12,7 @@ from app.ml.prediction_tracking import prediction_tracker
 predictions_router = APIRouter(tags=["Deep Learning Predictions & Alternative Data"])
 
 MAX_RECENT_RETURN_OBSERVATIONS = 256
+MAX_RECENT_RETURN_CHARS = 8192
 
 
 @predictions_router.get("/v1/predict/{asset}", status_code=status.HTTP_200_OK)
@@ -64,6 +65,11 @@ async def get_asset_prediction(
                 detail="recent_returns must contain at least one numeric observation.",
             )
 
+        if len(recent_returns) > MAX_RECENT_RETURN_CHARS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"recent_returns must not exceed {MAX_RECENT_RETURN_CHARS} characters.",
+            )
         parts = recent_returns.split(",")
         if len(parts) > MAX_RECENT_RETURN_OBSERVATIONS:
             raise HTTPException(
