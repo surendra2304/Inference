@@ -6,12 +6,12 @@ import asyncio
 import re
 import time
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.analytics.outcome_learning import DetailedOutcomeReport, outcome_learning_engine
+from app.analytics.outcome_learning import ConsumerName, DetailedOutcomeReport, outcome_learning_engine
 from app.inference_runtime.errors import RateLimitExceeded
 from app.inference_runtime.prompt_guard import inspect as inspect_prompt
 from app.inference_runtime.quotas import agent_quota_manager
@@ -178,7 +178,7 @@ def _format_vyralx_result(content: str, payload: dict[str, Any]) -> dict[str, An
 def _format_intelx_result(content: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Structures intelligence research and claim extraction outputs for IntelX."""
     lines = [line.strip() for line in content.split("\n") if line.strip()]
-    claims = []
+    claims: list[dict[str, Any]] = []
     idx = 1
     for line in lines:
         cleaned_line = line.lstrip("-*1234567890. ")
@@ -340,7 +340,7 @@ async def execute_task(
         try:
             tokens_dict = resp.token_usage or {}
             outcome_report = DetailedOutcomeReport(
-                consumer=source if source in ("trading_bot", "forge", "nexus", "sentinel", "intelx", "futuris", "friday", "human") else "friday",
+                consumer=cast(ConsumerName, source) if source in ("trading_bot", "forge", "nexus", "sentinel", "intelx", "futuris", "friday", "human") else "friday",
                 request_id=envelope.task_id,
                 outcome="success",
                 detail=summary_text,
