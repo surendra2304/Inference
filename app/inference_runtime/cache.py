@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import threading
 import time
 from dataclasses import dataclass
@@ -17,8 +18,8 @@ class Entry:
 
 class TenantCache:
     def __init__(self, max_items: int = 1000) -> None:
-        if max_items < 1:
-            raise ValueError("max_items must be at least 1")
+        if isinstance(max_items, bool) or not isinstance(max_items, int) or max_items < 1:
+            raise ValueError("max_items must be a positive integer")
         self.max_items = max_items
         self._data: dict[str, Entry] = {}
         self._lock = threading.RLock()
@@ -38,6 +39,8 @@ class TenantCache:
             return e.value
 
     def put(self, key: str, value: Any, tenant: str, ttl: float) -> None:
+        if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not math.isfinite(ttl):
+            raise ValueError("ttl must be a finite number")
         if ttl <= 0:
             self.delete(key)
             return
