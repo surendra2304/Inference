@@ -400,3 +400,17 @@ def test_prediction_ingestion_bounds_labels_and_rejects_control_characters(symbo
     with pytest.raises(ValueError):
         engine.record_prediction(symbol, direction, 0.7, source=source)
     assert engine.get_source_accuracy_report()["observed_predictions_recorded"] == 0
+
+
+def test_small_resolved_sample_explains_why_calibration_is_withheld():
+    engine = PredictionTrackingEngine()
+    for _ in range(3):
+        entry = engine.record_prediction("BTCUSDT", "BULLISH", 0.7)
+        engine.resolve_prediction(entry["id"], "CORRECT")
+
+    report = engine.get_source_accuracy_report()
+    assert report["total_predictions_evaluated"] == 3
+    assert report["overall_directional_accuracy_pct"] is None
+    assert report["calibration_score_0_to_1"] is None
+    assert "3 scoreable resolved observations" in report["calibration_basis"]
+    assert f"{MIN_OBSERVATIONS_FOR_SCORE} required" in report["calibration_basis"]
