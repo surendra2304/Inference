@@ -1,4 +1,4 @@
-"""Unified API Provider Manager for centralized execution across all 7 verified free providers."""
+"""Unified API Provider Manager for centralized execution across supported providers."""
 
 import time
 from typing import Any, Literal
@@ -16,7 +16,7 @@ from app.utils.logger import logger
 class UnifiedExecutionRequest(BaseModel):
     """Universal execution request across all models and agents."""
 
-    provider: Literal["auto", "gemini", "groq", "mistral", "openai", "openrouter", "nvidia", "cohere", "huggingface"] = Field(
+    provider: Literal["auto", "gemini", "groq", "cerebras", "mistral", "openai", "openrouter", "nvidia", "cohere", "huggingface"] = Field(
         default="auto", description="Target provider name or 'auto' for intelligent capability matching"
     )
     agent_role: str | None = Field(
@@ -63,7 +63,7 @@ class UnifiedExecutionResponse(BaseModel):
 
 
 class UnifiedProviderManager:
-    """Central manager routing, balancing, and executing requests across all 7 cloud providers."""
+    """Central manager routing, balancing, and executing requests across supported cloud providers."""
 
     # Default fallback mapping from agent roles to best provider & model
     ROLE_PROVIDER_MAPPING = {
