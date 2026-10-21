@@ -13,10 +13,13 @@ from app.utils.errors import provider_failure_reason
 from app.utils.logger import logger
 
 
+ProviderName = Literal["auto", "gemini", "groq", "cerebras", "mistral", "openai", "openrouter", "nvidia", "cohere", "huggingface"]
+
+
 class UnifiedExecutionRequest(BaseModel):
     """Universal execution request across all models and agents."""
 
-    provider: Literal["auto", "gemini", "groq", "cerebras", "mistral", "openai", "openrouter", "nvidia", "cohere", "huggingface"] = Field(
+    provider: ProviderName = Field(
         default="auto", description="Target provider name or 'auto' for intelligent capability matching"
     )
     agent_role: str | None = Field(
