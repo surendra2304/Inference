@@ -22,7 +22,7 @@ import json
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -38,7 +38,7 @@ from app.memory.base import TaskRecord
 from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.errors import TimeoutError as ProviderTimeoutError
 from app.providers.gateway import model_gateway
-from app.providers.unified_manager import ProviderName, UnifiedExecutionRequest, unified_provider_manager
+from app.providers.unified_manager import UnifiedExecutionRequest, unified_provider_manager
 from app.schemas.v1_models import (
     DebateRequest,
     InferenceAskRequest,
@@ -946,7 +946,7 @@ async def chat_completions(req: ChatCompletionRequest):
     elif "cerebras" in norm_model:
         exec_provider = "cerebras"
     else:
-        exec_provider: ProviderName = "groq"
+        exec_provider: Literal["auto", "gemini", "groq", "cerebras", "mistral", "openai", "openrouter", "nvidia", "cohere", "huggingface"] = "groq"
 
     exec_req = UnifiedExecutionRequest(
         provider=exec_provider,
