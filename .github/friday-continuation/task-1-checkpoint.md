@@ -1,18 +1,15 @@
 # Task 1 checkpoint — Inference — 2026-10-22
 
-## Current repository state
-- Connected GitHub permission check returned admin, maintain, push.
-- Open PR list endpoint now returns no open PRs for Inference. The former PR #30 (`fix/ci-import-order-and-master-plan-20261022`) is not present in the current open PR list; do not assume it remains open. Its prior commits/runs are still in history.
-- PR branch run `39671970764` at `daf519d8f401446838017fb9bb7dcff5db0ab2fa`, `39671973274` at `6a5bfce696533898098fe3bae8ccb5130d87f9ab`, `39672100004` at `87364537a1c4cfeaf6da5c2da3ab9ec4f97b0d31`, `39672126118` at `5eef4c53b4bd28f71e6adb2d3945c586140150b8`, `39672140595` at `43a08b4a1e4df7c23bd1c0a0c6f43a491c4f62d8`, `39672178281` at `1cc8e711d92c293437a9d9866a76644f8314b40a`, `39672285579` at `3cc30c08c0e0f3bcb906e765be113065da9d96a9`, and run `39671970764` all completed success in recent API output; current `main` run `39672821899` on `6becc799667e02e1830a90cd5710888e64278d32` passed; latest cancellation branch run `39672605944` at `637b7fa8b82cd600b186dfa07da446edfedddf81` also passed.
-- Previous CI root cause on main run `39666816838`: Ruff `I001` in `app/monitoring.py`, missing blank separator after `from collections import defaultdict`. Later checks went green.
+## Engineering work this run
+- Verified GitHub connection writes work. Current open PR list was empty at first check; existing Inference branches and latest CI reviewed.
+- Created PR #31: https://github.com/surendra2304/Inference/pull/31, branch `fix/task1-forced-agent-max-bound-20261022`. The resolver in `app/core/orchestrator.py` previously added a registered agent before checking `len(resolved) >= max_agents`, so max_agents of zero or negative could still resolve one forced agent. Added early return `[]` for `max_agents <= 0` before registry lookup, and `tests/test_forced_agent_selection.py` covers 0 and -1 and asserts no registry lookup.
+- Implementation commit `919835b90fd405674d784f985abc69151279aa50`; test commit / PR head `32957964472c1026a784cc97a11e1546e6d7f62c`.
+- CI run `39673218580` for that exact head is queued: https://github.com/surendra2304/Inference/actions/runs/39673218580. No test result claimed yet.
+- Latest `main` CI run `39672821899` succeeded at `6becc799667e02e1830a90cd5710888e64278d32`; cancellation cleanup run `39672605944` succeeded at `637b7fa8b82cd600b186dfa07da446edfedddf81`. Other master-plan/schema change branch runs have succeeded at their respective historical SHAs; current open PR list should be rechecked next invocation.
 
-## This invocation source changes
-- No Inference source commits made this invocation. Reviewed `app/core/orchestrator.py` and `tests/test_forced_agent_selection.py`: forced selection candidate scan is bounded by `MAX_FORCED_AGENT_CANDIDATES`, IDs are deduplicated and malformed/unknown candidates skipped, and `max_agents` is enforced after successful lookup.
+## Validation and blockers
+- No local test execution: laptop tool returned HTTP 404. Only queued CI for PR #31 is current evidence for its change.
+- No merge performed; duration not reliably measured, don't claim 30 minutes.
 
-## Verification / limitations
-- Current observed CI: `39672821899` main succeeded; `39672605944` cancellation branch succeeded; prior migration/nullable-confidence PR branch runs listed above succeeded on their exact SHAs.
-- Local tests unavailable: laptop MCP execution endpoint returns HTTP 404. No local test command was run.
-- Active engineering minutes are not reliably measured; do not claim the 30-minute target.
-
-## Next coding step
-Inspect the branch `fix/ci-import-order-and-master-plan-20261022` and its master-plan/schema migration changes before creating a replacement or PR. Current open PR list says none open, so first confirm whether the PR was closed/merged and inspect `main` before any duplicate work. Then add a bounded regression for forced agent selection with `max_agents <= 0` only after confirming intended API contract; write to a new, focused branch based on the current main, and verify with GitHub CI.
+## Next concrete action
+Poll run `39673218580`. If green, review PR #31 and resolve any feedback. Then inspect `app/memory/postgres.py` migration behavior around nullable `deliberations.confidence` from the prior master-plan branch, but first verify whether its PR is closed/merged; don't create duplicate work.
