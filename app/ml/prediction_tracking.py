@@ -24,6 +24,7 @@ the reason, never as a plausible constant.
 
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from typing import Any
@@ -86,13 +87,51 @@ class PredictionTrackingEngine:
         engine had no ingestion path, so its published per-model accuracies could only have
         come from constants.
         """
+        # Validate at ingestion so invalid observations cannot poison accuracy or
+        # Brier-style calibration results later. Do not silently coerce strings/bools
+        # into numeric confidence values.
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ValueError("symbol must be a non-empty string")
+        if not isinstance(direction, str) or not direction.strip():
+            raise ValueError("direction must be a non-empty string")
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError("source must be a non-empty string")
+        symbol_value = symbol.strip()
+        direction_value = direction.strip()
+        source_value = source.strip()
+        for label, raw_value, value, max_length in (
+            ("symbol", symbol, symbol_value, 64),
+            ("direction", direction, direction_value, 32),
+            ("source", source, source_value, 128),
+        ):
+            # Inspect the original input before strip(), since strip() would erase
+            # a trailing newline/tab and make an unsafe label look valid.
+            if any(ord(char) < 32 or ord(char) == 127 for char in raw_value):
+                raise ValueError(f"{label} must not contain control characters")
+            if len(value) > max_length:
+                raise ValueError(f"{label} must not exceed {max_length} characters")
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+            raise ValueError("confidence must be a finite number between 0 and 1")
+        try:
+            confidence_value = float(confidence)
+        except (OverflowError, ValueError):
+            raise ValueError("confidence must be a finite number between 0 and 1") from None
+        if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
+            raise ValueError("confidence must be a finite number between 0 and 1")
+        if horizon_hours is not None and (
+            isinstance(horizon_hours, bool)
+            or not isinstance(horizon_hours, int)
+            or horizon_hours <= 0
+        ):
+            raise ValueError("horizon_hours must be a positive integer when provided")
+
         entry = {
             "id": f"pred_{uuid.uuid4().hex[:12]}",
             "timestamp": time.time(),
-            "symbol": symbol.upper(),
-            "direction": direction.upper(),
-            "confidence": float(confidence),
-            "source": source,
+            "symbol": symbol_value.upper(),
+            "direction": direction_value.upper(),
+            "confidence": confidence_value,
+            "source": source_value,
             "horizon_hours": horizon_hours,
             "evidence_class": "observed_prediction",
             "actual_outcome": None,
@@ -102,15 +141,30 @@ class PredictionTrackingEngine:
         return entry
 
     def resolve_prediction(self, prediction_id: str, actual_outcome: str) -> dict[str, Any] | None:
-        """Attach the realised outcome (``CORRECT`` / ``INCORRECT`` / ``FLAT``) to a call."""
-        outcome = actual_outcome.upper()
+        """Record one outcome for an observed prediction; demo fixtures stay immutable.
+
+        FLAT is a terminal observation but is deliberately excluded from directional
+        accuracy/Brier scoring. Unknown ids and demonstration fixtures return None;
+        attempting to resolve a previously resolved observed prediction raises ValueError
+        instead of silently rewriting its audit history.
+        """
+        if not isinstance(prediction_id, str) or not prediction_id.strip():
+            raise ValueError("prediction_id must be a non-empty string")
+        if not isinstance(actual_outcome, str):
+            raise ValueError("actual_outcome must be CORRECT, INCORRECT or FLAT")
+        outcome = actual_outcome.strip().upper()
         if outcome not in ("CORRECT", "INCORRECT", "FLAT"):
             raise ValueError("actual_outcome must be CORRECT, INCORRECT or FLAT")
         for entry in self.history:
-            if entry.get("id") == prediction_id:
-                entry["actual_outcome"] = outcome
-                entry["resolved_at"] = time.time()
-                return entry
+            if entry.get("id") != prediction_id:
+                continue
+            if entry.get("evidence_class") != "observed_prediction":
+                return None
+            if entry.get("actual_outcome") is not None:
+                raise ValueError(f"prediction '{prediction_id}' has already been resolved")
+            entry["actual_outcome"] = outcome
+            entry["resolved_at"] = time.time()
+            return entry
         return None
 
     # -- reporting -----------------------------------------------------------
@@ -139,30 +193,55 @@ class PredictionTrackingEngine:
         observed_all = [e for e in self.history if e.get("evidence_class") == "observed_prediction"]
         resolved = self._observed_resolved()
 
+        pending = sum(1 for entry in observed_all if entry.get("actual_outcome") is None)
+        flat = sum(1 for entry in observed_all if entry.get("actual_outcome") == "FLAT")
+        if not observed_all:
+            evidence_class = "no_observations"
+        elif resolved:
+            evidence_class = "observed_resolved_predictions"
+        elif flat and not pending:
+            evidence_class = "observed_predictions_without_scoreable_outcomes"
+        else:
+            evidence_class = "observed_predictions_pending_resolution"
+
+        calibration_basis = (
+            "withheld: no scoreable resolved observations to calibrate against"
+            if not resolved
+            else (
+                f"withheld: {len(resolved)} scoreable resolved observations; "
+                f"{MIN_OBSERVATIONS_FOR_SCORE} required before publishing a calibration score"
+            )
+        )
+
         report: dict[str, Any] = {
             "total_predictions_evaluated": len(resolved),
             "observed_predictions_recorded": len(observed_all),
-            "pending_resolution": len(observed_all) - len(resolved),
+            "pending_resolution": pending,
+            "flat_outcomes_excluded_from_directional_accuracy": flat,
             "fixture_rows_excluded": fixtures,
             "overall_directional_accuracy_pct": None,
             "sub_model_accuracies": {},
             "calibration_score_0_to_1": None,
-            "calibration_basis": "withheld: no resolved observations to calibrate against",
+            "calibration_basis": calibration_basis,
             "accuracy_status": "INSUFFICIENT_DATA",
             "min_observations_required": MIN_OBSERVATIONS_FOR_SCORE,
             "baseline_accuracy_pct": BASELINE_ACCURACY_PCT,
-            "evidence_class": "no_observations" if not resolved else "observed_resolved_predictions",
+            "evidence_class": evidence_class,
             "basis": (
-                f"computed from {len(resolved)} resolved observed predictions; "
+                f"computed from {len(resolved)} scoreable resolved observed predictions; "
+                f"{flat} flat outcomes excluded from directional scoring; "
+                f"{pending} predictions await resolution; "
                 f"{fixtures} demonstration rows excluded; "
-                f"{MIN_OBSERVATIONS_FOR_SCORE} resolved predictions are required before an "
-                "accuracy figure is published"
+                f"{MIN_OBSERVATIONS_FOR_SCORE} scoreable resolved predictions are required "
+                "before an accuracy figure is published"
             ),
         }
 
         if len(resolved) < MIN_OBSERVATIONS_FOR_SCORE:
             return report
 
+        # The scoreable set contains only CORRECT / INCORRECT. FLAT is explicitly counted
+        # and reported above but is not a directional hit or miss.
         correct = sum(1 for e in resolved if e["actual_outcome"] == "CORRECT")
         accuracy = round(correct / len(resolved) * 100.0, 1)
         report["overall_directional_accuracy_pct"] = accuracy

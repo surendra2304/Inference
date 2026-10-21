@@ -295,3 +295,122 @@ def test_dedup_cache_is_registered_and_ceiling_is_honoured():
     # A miss after eviction is described as evicted, not as never recorded.
     detail = manager.dedup_cache_miss_detail("req-0")
     assert "expired from the retention window" in detail or "evicted" in detail
+
+
+@pytest.mark.parametrize(
+    "confidence",
+    [-0.01, 1.01, float("nan"), float("inf"), float("-inf"), True, "0.7", None, 10**1000],
+)
+def test_prediction_ingestion_rejects_invalid_confidence(confidence):
+    engine = PredictionTrackingEngine()
+    with pytest.raises(ValueError, match="confidence"):
+        engine.record_prediction("BTCUSDT", "BULLISH", confidence)
+    assert engine.get_source_accuracy_report()["observed_predictions_recorded"] == 0
+
+
+@pytest.mark.parametrize(
+    ("symbol", "direction", "source"),
+    [
+        ("", "BULLISH", "primary"),
+        ("BTCUSDT", " ", "primary"),
+        ("BTCUSDT", "BULLISH", ""),
+        (None, "BULLISH", "primary"),
+        ("BTCUSDT", None, "primary"),
+        ("BTCUSDT", "BULLISH", None),
+    ],
+)
+def test_prediction_ingestion_rejects_empty_or_non_string_labels(symbol, direction, source):
+    engine = PredictionTrackingEngine()
+    with pytest.raises(ValueError):
+        engine.record_prediction(symbol, direction, 0.7, source=source)
+    assert engine.get_source_accuracy_report()["observed_predictions_recorded"] == 0
+
+
+@pytest.mark.parametrize("horizon", [0, -1, 1.5, True, "24"])
+def test_prediction_ingestion_rejects_invalid_horizon(horizon):
+    engine = PredictionTrackingEngine()
+    with pytest.raises(ValueError, match="horizon_hours"):
+        engine.record_prediction("BTCUSDT", "BULLISH", 0.7, horizon_hours=horizon)
+    assert engine.get_source_accuracy_report()["observed_predictions_recorded"] == 0
+
+
+def test_flat_outcome_is_resolved_but_excluded_from_directional_scoring():
+    engine = PredictionTrackingEngine()
+    entry = engine.record_prediction("BTCUSDT", "BULLISH", 0.7, source="momentum")
+    resolved = engine.resolve_prediction(entry["id"], " FLAT ")
+
+    assert resolved is not None
+    assert resolved["actual_outcome"] == "FLAT"
+    report = engine.get_source_accuracy_report()
+    assert report["observed_predictions_recorded"] == 1
+    assert report["total_predictions_evaluated"] == 0
+    assert report["pending_resolution"] == 0
+    assert report["flat_outcomes_excluded_from_directional_accuracy"] == 1
+    assert report["accuracy_status"] == "INSUFFICIENT_DATA"
+    assert report["evidence_class"] == "observed_predictions_without_scoreable_outcomes"
+
+
+def test_resolving_a_prediction_twice_cannot_rewrite_the_audit_outcome():
+    engine = PredictionTrackingEngine()
+    entry = engine.record_prediction("BTCUSDT", "BEARISH", 0.8)
+    first = engine.resolve_prediction(entry["id"], "CORRECT")
+    first_timestamp = first["resolved_at"]
+
+    with pytest.raises(ValueError, match="already been resolved"):
+        engine.resolve_prediction(entry["id"], "INCORRECT")
+
+    assert first["actual_outcome"] == "CORRECT"
+    assert first["resolved_at"] == first_timestamp
+
+
+def test_demonstration_fixtures_cannot_be_resolved_or_changed():
+    engine = PredictionTrackingEngine()
+    fixture = next(row for row in engine.history if row["id"] == "pred-fixture-001")
+    before = dict(fixture)
+
+    assert engine.resolve_prediction("pred-fixture-001", "INCORRECT") is None
+    assert fixture == before
+
+
+@pytest.mark.parametrize("outcome", [None, 1, True, "PROBABLY"])
+def test_resolve_rejects_invalid_outcome_types_and_values(outcome):
+    engine = PredictionTrackingEngine()
+    entry = engine.record_prediction("BTCUSDT", "BULLISH", 0.8)
+
+    with pytest.raises(ValueError, match="actual_outcome"):
+        engine.resolve_prediction(entry["id"], outcome)
+
+    assert entry["actual_outcome"] is None
+    assert engine.get_source_accuracy_report()["pending_resolution"] == 1
+
+
+@pytest.mark.parametrize(
+    ("symbol", "direction", "source"),
+    [
+        ("S" * 65, "BULLISH", "primary"),
+        ("BTCUSDT", "D" * 33, "primary"),
+        ("BTCUSDT", "BULLISH", "s" * 129),
+        ("BTC\nUSDT", "BULLISH", "primary"),
+        ("BTCUSDT", "BULLISH\n", "primary"),
+        ("BTCUSDT", "BULLISH", "primary\tworker"),
+    ],
+)
+def test_prediction_ingestion_bounds_labels_and_rejects_control_characters(symbol, direction, source):
+    engine = PredictionTrackingEngine()
+    with pytest.raises(ValueError):
+        engine.record_prediction(symbol, direction, 0.7, source=source)
+    assert engine.get_source_accuracy_report()["observed_predictions_recorded"] == 0
+
+
+def test_small_resolved_sample_explains_why_calibration_is_withheld():
+    engine = PredictionTrackingEngine()
+    for _ in range(3):
+        entry = engine.record_prediction("BTCUSDT", "BULLISH", 0.7)
+        engine.resolve_prediction(entry["id"], "CORRECT")
+
+    report = engine.get_source_accuracy_report()
+    assert report["total_predictions_evaluated"] == 3
+    assert report["overall_directional_accuracy_pct"] is None
+    assert report["calibration_score_0_to_1"] is None
+    assert "3 scoreable resolved observations" in report["calibration_basis"]
+    assert f"{MIN_OBSERVATIONS_FOR_SCORE} required" in report["calibration_basis"]
