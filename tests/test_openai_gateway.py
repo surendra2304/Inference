@@ -1127,6 +1127,75 @@ async def test_agent_stream_does_not_restart_fallback_after_partial_primary_outp
 
 
 @pytest.mark.asyncio
+async def test_agent_assist_cache_key_includes_prompt_context_and_generation_options(monkeypatch):
+    from app.api.agent_routes import AgentAssistRequest, agent_assist_endpoint
+    from app.performance_cache import perf_cache
+    from app.providers.unified_manager import UnifiedExecutionResponse, unified_provider_manager
+
+    perf_cache.clear()
+    observed_cache_writes = []
+    executions = []
+
+    original_set_query = perf_cache.set_query
+
+    def capture_set_query(**kwargs):
+        observed_cache_writes.append(kwargs)
+        return original_set_query(**kwargs)
+
+    async def mock_execute(req):
+        executions.append(req)
+        return UnifiedExecutionResponse(
+            content=f"answer-{len(executions)}",
+            provider_used="groq",
+            model_used="openai/gpt-oss-120b",
+            agent_role=req.agent_role or "general",
+            latency_ms=15.0,
+            timestamp=1729000000.0,
+            status="success",
+            degraded=False,
+        )
+
+    monkeypatch.setattr(perf_cache, "set_query", capture_set_query)
+    monkeypatch.setattr(unified_provider_manager, "execute", mock_execute)
+
+    response_a = await agent_assist_endpoint(
+        AgentAssistRequest(
+            caller_agent="forge",
+            task_type="code",
+            prompt="Review this function",
+            context={"tenant": "alpha", "files": ["a.py"]},
+            temperature=0.1,
+            max_tokens=256,
+        )
+    )
+    response_b = await agent_assist_endpoint(
+        AgentAssistRequest(
+            caller_agent="forge",
+            task_type="code",
+            prompt="Review this function",
+            context={"tenant": "beta", "files": ["b.py"]},
+            temperature=0.8,
+            max_tokens=512,
+        )
+    )
+
+    assert response_a.response == "answer-1"
+    assert response_b.response == "answer-2"
+    assert len(executions) == 2
+    assert len(observed_cache_writes) == 2
+    extras = [kwargs["extra"] for kwargs in observed_cache_writes]
+    assert extras[0] != extras[1]
+    assert extras[0]["context"] == {"tenant": "alpha", "files": ["a.py"]}
+    assert extras[1]["context"] == {"tenant": "beta", "files": ["b.py"]}
+    assert extras[0]["temperature"] == 0.1
+    assert extras[1]["temperature"] == 0.8
+    assert extras[0]["max_tokens"] == 75
+    assert extras[1]["max_tokens"] == 75
+
+    perf_cache.clear()
+
+
+@pytest.mark.asyncio
 async def test_agent_assist_no_cache_bypasses_cache_reads_and_writes(monkeypatch):
     from app.api.agent_routes import AgentAssistRequest, agent_assist_endpoint
     from app.performance_cache import perf_cache
