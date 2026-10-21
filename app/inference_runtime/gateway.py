@@ -12,7 +12,7 @@ from .circuit import CircuitBreaker
 from .config import RuntimeConfig
 from .contracts import CompletionRequest, CompletionResult, ProviderEndpoint
 from .dedupe import RequestDeduper
-from .errors import ProviderUnavailable
+from .errors import ProviderUnavailable, SchemaViolation
 from .health import ProviderHealth
 from .key_pool import SafeKeyPool
 from .retry import with_retries
@@ -52,39 +52,72 @@ class HardenedGateway:
         out = request.max_tokens or 512
         return (prompt / 1000) * endpoint.cost_per_1k_input + (out / 1000) * endpoint.cost_per_1k_output
 
+    def _cache_key(self, request: CompletionRequest) -> str | None:
+        if not request.cacheable or request.stream:
+            return None
+        return self.cache.key(
+            request.tenant_id,
+            {
+                "model": request.model,
+                "messages": [m.__dict__ for m in request.messages],
+                "temperature": request.temperature,
+                "max_tokens": request.max_tokens,
+                "schema": request.response_schema,
+                "capabilities": sorted(capability.value for capability in request.capabilities),
+                "extra": request.extra,
+            },
+        )
+
     async def complete(self, request: CompletionRequest) -> CompletionResult:
         self.trace.emit("admission", request.request_id, model=request.model, tenant=request.tenant_id)
+        if request.stream:
+            raise ValueError("Use stream() for streaming requests")
+
         decision = self.router.choose(request)
         ep = decision.endpoint
+        cache_key = self._cache_key(request)
+
+        # A cache hit does not spend provider budget and therefore must not reserve
+        # money. Validate cached values just as strictly as fresh provider responses:
+        # stale or malformed entries are evicted and recomputed rather than trusted.
+        if cache_key:
+            hit = self.cache.get(cache_key)
+            if hit is not None:
+                try:
+                    cached_fields = dict(hit)
+                    cached_fields["cached"] = True
+                    cached_result = CompletionResult(**cached_fields)
+                    if request.response_schema:
+                        validate_json(cached_result.text, dict(request.response_schema))
+                except (TypeError, ValueError, SchemaViolation):
+                    self.cache.delete(cache_key)
+                else:
+                    self.trace.emit("cache_hit", request.request_id, ep.provider, ep.model)
+                    return cached_result
+
         estimate = self._estimate_cost(request, ep)
         self.budget.reserve(request.tenant_id, estimate)
+        reservation_held = True
         try:
-            cache_key = (
-                self.cache.key(
-                    request.tenant_id,
-                    {
-                        "model": request.model,
-                        "messages": [m.__dict__ for m in request.messages],
-                        "temperature": request.temperature,
-                        "max_tokens": request.max_tokens,
-                        "schema": request.response_schema,
-                    },
-                )
-                if request.cacheable and not request.stream
-                else None
+            # Caller-supplied request IDs are not globally unique. Include the tenant
+            # and full request payload so a reused ID cannot make one tenant or prompt
+            # receive another request's in-flight result.
+            dedupe_key = self.dedupe.fingerprint(
+                {
+                    "tenant_id": request.tenant_id,
+                    "request": request.__dict__,
+                }
             )
-            if cache_key:
-                hit = self.cache.get(cache_key)
-                if hit is not None:
-                    self.trace.emit("cache_hit", request.request_id, ep.provider, ep.model)
-                    return CompletionResult(**hit, cached=True)
-            if request.stream:
-                raise ValueError("Use stream() for streaming requests")
-            result = await self.dedupe.run(
-                request.request_id or self.dedupe.fingerprint(request.__dict__), lambda: self._execute(request, ep)
-            )
-            actual = result.cost_usd
-            self.budget.reconcile(request.tenant_id, estimate, actual)
+            result = await self.dedupe.run(dedupe_key, lambda: self._execute(request, ep))
+
+            # Never persist a result or finalize spend until the response contract has
+            # been validated. A malformed answer must not poison subsequent cache hits.
+            if request.response_schema:
+                validate_json(result.text, dict(request.response_schema))
+
+            self.budget.reconcile(request.tenant_id, estimate, result.cost_usd)
+            reservation_held = False
+
             if cache_key:
                 self.cache.put(cache_key, result.__dict__, request.tenant_id, self.config.cache_ttl_seconds)
             self.trace.emit(
@@ -94,13 +127,14 @@ class HardenedGateway:
                 ep.model,
                 latency=result.latency_seconds,
                 tokens=result.total_tokens,
-                cost=actual,
+                cost=result.cost_usd,
             )
-            if request.response_schema:
-                validate_json(result.text, dict(request.response_schema))
             return result
-        except Exception:
-            self.budget.reconcile(request.tenant_id, estimate, 0.0)
+        except BaseException:
+            # Cancellation is a BaseException in supported Python versions. Refund a
+            # pending reservation for cancellation as well as ordinary failures.
+            if reservation_held:
+                self.budget.reconcile(request.tenant_id, estimate, 0.0)
             raise
 
     async def _execute(self, request: CompletionRequest, ep: ProviderEndpoint) -> CompletionResult:
