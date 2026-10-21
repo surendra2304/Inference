@@ -2,37 +2,31 @@
   "task": 1,
   "repository": "Inference",
   "updated_at": "2026-10-22",
-  "status": "ci_recently_green_no_open_prs_observed",
-  "files_changed_this_run": [],
-  "open_prs_observed": [],
-  "recent_ci": [
-    {
-      "id": 39672821899,
-      "branch": "main",
-      "sha": "6becc799667e02e1830a90cd5710888e64278d32",
-      "status": "success",
-      "url": "https://github.com/surendra2304/Inference/actions/runs/39672821899"
-    },
-    {
-      "id": 39672605944,
-      "branch": "fix/cancellation-token-cleanup-race-20261021",
-      "sha": "637b7fa8b82cd600b186dfa07da446edfedddf81",
-      "status": "success",
-      "url": "https://github.com/surendra2304/Inference/actions/runs/39672605944"
-    },
-    {
-      "id": 39672285579,
-      "branch": "fix/ci-import-order-and-master-plan-20261022",
-      "sha": "3cc30c08c0e0f3bcb906e765be113065da9d96a9",
-      "status": "success",
-      "url": "https://github.com/surendra2304/Inference/actions/runs/39672285579"
-    }
-  ],
+  "status": "pr_open_ci_queued",
+  "branch": "fix/task1-forced-agent-max-bound-20261022",
+  "pr": {
+    "number": 31,
+    "url": "https://github.com/surendra2304/Inference/pull/31",
+    "head": "32957964472c1026a784cc97a11e1546e6d7f62c",
+    "commits": [
+      "919835b90fd405674d784f985abc69151279aa50",
+      "32957964472c1026a784cc97a11e1546e6d7f62c"
+    ],
+    "files_changed": [
+      "app/core/orchestrator.py",
+      "tests/test_forced_agent_selection.py"
+    ]
+  },
+  "ci": {
+    "run": 39673218580,
+    "url": "https://github.com/surendra2304/Inference/actions/runs/39673218580",
+    "status": "queued"
+  },
   "local_tests_run": false,
   "merged": false,
   "blockers": [
-    "Laptop command execution endpoint returned HTTP 404"
+    "Laptop MCP returned HTTP 404"
   ],
   "active_duration_seconds": "not measured",
-  "next": "Confirm disposition of former PR30 and migration risk; then add max_agents boundary test if contract supports."
+  "next": "Poll PR31 CI, then inspect disposition of former master-plan/schema PR30 and review migration compatibility."
 }
