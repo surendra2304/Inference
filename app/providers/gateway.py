@@ -28,9 +28,7 @@ from app.providers.errors import (
     TemporaryUnavailableError,
     normalize_provider_exception,
 )
-from app.providers.errors import (
-    TimeoutError as ProviderTimeoutError,
-)
+from app.providers.errors import TimeoutError as ProviderTimeoutError
 from app.providers.health import provider_health_tracker
 from app.security.prompt_isolation import scrub_credentials
 from app.utils.logger import logger
