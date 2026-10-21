@@ -79,6 +79,25 @@ class UnifiedProviderManager:
         "critic": ("groq", "openai/gpt-oss-120b"),
     }
 
+    @staticmethod
+    def _cache_scope(req: UnifiedExecutionRequest) -> dict[str, Any]:
+        """Return every request attribute that can change the generated answer.
+
+        A prompt by itself is not a cache identity: context often contains private
+        tenant/domain facts, while output limits and sampling/routing flags alter
+        provider behavior. Include them in the cache fingerprint so only equivalent
+        executions can reuse a response.
+        """
+        return {
+            "provider": req.provider,
+            "agent_role": req.agent_role,
+            "context": req.context,
+            "max_tokens": req.max_tokens,
+            "temperature": req.temperature,
+            "fast_lane": req.fast_lane,
+            "speculative": req.speculative,
+        }
+
     async def execute(self, req: UnifiedExecutionRequest) -> UnifiedExecutionResponse:
         """Executes a unified prompt through designated/auto provider with L1 caching and speculative racing."""
         start_time = time.perf_counter()
@@ -86,9 +105,17 @@ class UnifiedProviderManager:
 
         # 1. High-Speed L1 Cache Check (< 0.05ms)
         cache_mode = f"unified_{req.provider}_{req.agent_role or 'general'}"
+        cache_scope = self._cache_scope(req)
         if not req.no_cache:
-            cached_pair = as_answer_pair(perf_cache.get_query(
-                req.prompt, mode=cache_mode, caller_id=req.agent_role or "unified", namespace="provider.unified"))
+            cached_pair = as_answer_pair(
+                perf_cache.get_query(
+                    req.prompt,
+                    mode=cache_mode,
+                    caller_id=req.agent_role or "unified",
+                    extra=cache_scope,
+                    namespace="provider.unified",
+                )
+            )
             if cached_pair:
                 cached_answer, cached_meta = cached_pair
                 cached_latency = round((time.perf_counter() - start_time) * 1000.0, 3)
@@ -193,7 +220,8 @@ class UnifiedProviderManager:
                             },
                         ),
                         caller_id=req.agent_role or "unified",
-                    namespace="provider.unified",
+                        extra=cache_scope,
+                        namespace="provider.unified",
                 )
                 return UnifiedExecutionResponse(
                     provider_used=spec_winner,
@@ -260,7 +288,8 @@ class UnifiedProviderManager:
                         },
                     ),
                     caller_id=req.agent_role or "unified",
-                namespace="provider.unified",
+                    extra=cache_scope,
+                    namespace="provider.unified",
             )
 
             return UnifiedExecutionResponse(
