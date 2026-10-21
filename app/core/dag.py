@@ -14,50 +14,86 @@ class TaskComplexity(str, Enum):
 
 class DAGNode(BaseModel):
     """Represents an agent execution stage in the Directed Acyclic Graph."""
+
     node_id: str
     agent_id: str
     agent_role: str
-    dependencies: list[str] = Field(default_factory=list, description="IDs of nodes that must finish before this node runs")
+    dependencies: list[str] = Field(
+        default_factory=list,
+        description="IDs of nodes that must finish before this node runs",
+    )
     stage_name: str = "analysis"
     complexity: TaskComplexity = TaskComplexity.SIMPLE
 
 
 class ExecutionDAG(BaseModel):
     """Directed Acyclic Graph defining parallel execution stages for multi-agent workflows."""
+
     nodes: dict[str, DAGNode] = Field(default_factory=dict)
-    layers: list[list[str]] = Field(default_factory=list, description="Topologically sorted execution layers for parallel asyncio.gather")
+    layers: list[list[str]] = Field(
+        default_factory=list,
+        description="Topologically sorted execution layers for parallel asyncio.gather",
+    )
 
     def add_node(self, node: DAGNode) -> None:
+        """Add a uniquely keyed node; silently replacing it would invalidate dependencies."""
+        if node.node_id in self.nodes:
+            raise ValueError(f"Duplicate DAG node id: {node.node_id}")
         self.nodes[node.node_id] = node
+        # A previously computed layer list is no longer a valid snapshot of this graph.
+        self.layers = []
 
     def build_layers(self) -> list[list[str]]:
+        """Build deterministic topological layers or reject an invalid graph.
+
+        Missing dependency references and cycles are configuration errors, not a reason
+        to run dependent nodes concurrently. The former implementation put all unresolved
+        nodes into one final layer, which violated the advertised dependency contract.
         """
-        Builds parallel execution layers using topological sort.
-        All nodes in layer N have all their dependencies satisfied by layers 0..N-1.
-        """
-        in_degree: dict[str, int] = {nid: len(n.dependencies) for nid, n in self.nodes.items()}
+        self.layers = []
+        for key, node in self.nodes.items():
+            if key != node.node_id:
+                raise ValueError(
+                    f"DAG mapping key '{key}' does not match node id '{node.node_id}'"
+                )
+            if len(node.dependencies) != len(set(node.dependencies)):
+                raise ValueError(f"DAG node '{key}' contains duplicate dependencies")
+            missing = [dep for dep in node.dependencies if dep not in self.nodes]
+            if missing:
+                raise ValueError(
+                    f"DAG node '{key}' references missing dependencies: {', '.join(missing)}"
+                )
+
+        in_degree: dict[str, int] = {
+            node_id: len(node.dependencies) for node_id, node in self.nodes.items()
+        }
+        dependents: dict[str, list[str]] = {node_id: [] for node_id in self.nodes}
+        for node_id, node in self.nodes.items():
+            for dependency in node.dependencies:
+                dependents[dependency].append(node_id)
+
         layers: list[list[str]] = []
         visited: set[str] = set()
-
         while len(visited) < len(self.nodes):
             current_layer = [
-                nid for nid, deg in in_degree.items()
-                if deg == 0 and nid not in visited
+                node_id
+                for node_id in self.nodes
+                if node_id not in visited and in_degree[node_id] == 0
             ]
             if not current_layer:
-                # Cycle or unresolved dependency safeguard: release all unvisited
-                current_layer = [nid for nid in self.nodes.keys() if nid not in visited]
+                blocked = [node_id for node_id in self.nodes if node_id not in visited]
+                raise ValueError(
+                    "Cycle detected in DAG; nodes cannot be scheduled: " + ", ".join(blocked)
+                )
 
             layers.append(current_layer)
-            for nid in current_layer:
-                visited.add(nid)
-                # Reduce in-degree for dependent nodes
-                for other_id, other_node in self.nodes.items():
-                    if nid in other_node.dependencies:
-                        in_degree[other_id] = max(0, in_degree[other_id] - 1)
+            for node_id in current_layer:
+                visited.add(node_id)
+                for dependent in dependents[node_id]:
+                    in_degree[dependent] -= 1
 
         self.layers = layers
-        return layers
+        return [layer.copy() for layer in layers]
 
 
 def classify_task_complexity(question: str, requested_mode: str = "auto") -> TaskComplexity:
@@ -89,7 +125,6 @@ def classify_task_complexity(question: str, requested_mode: str = "auto") -> Tas
     if any(re.search(rf"\b{re.escape(kw)}\b", q_lower) for kw in complex_keywords):
         return TaskComplexity.COMPLEX
 
-    # Short simple queries default to SIMPLE
     if len(question.split()) < 12:
         return TaskComplexity.SIMPLE
 
