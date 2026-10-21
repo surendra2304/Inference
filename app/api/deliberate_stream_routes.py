@@ -23,6 +23,8 @@ from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.core.security import _configured_keys, require_inference_api_key
 from app.inference_runtime.prompt_guard import inspect as inspect_prompt
+from app.memory.base import DeliberationRecord
+from app.memory.postgres import postgres_memory
 from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.gateway import model_gateway
 from app.security.prompt_isolation import scrub_credentials
@@ -292,18 +294,45 @@ async def websocket_deliberation_endpoint(websocket: WebSocket) -> None:
                     async for chunk in model_gateway.stream("groq", consensus_req, stage_name="consensus_stream"):
                         collected.append(chunk)
                 except Exception:
-                    consensus_req.model = "meta-llama/llama-3.3-70b-instruct"
-                    async for chunk in model_gateway.stream("openrouter", consensus_req, stage_name="consensus_stream"):
-                        collected.append(chunk)
+                    consensus_req.model = "deepseek/deepseek-r1"
+                    try:
+                        async for chunk in model_gateway.stream("openrouter", consensus_req, stage_name="consensus_stream"):
+                            collected.append(chunk)
+                    except Exception:
+                        consensus_req.model = "meta-llama/llama-3.3-70b-instruct"
+                        async for chunk in model_gateway.stream("openrouter", consensus_req, stage_name="consensus_fallback"):
+                            collected.append(chunk)
 
                 verdict_text = "".join(collected)
                 lat_ms = int((time.time() - t0) * 1000)
+                convergence_score = 0.92 if "consensus" in verdict_text.lower() else 0.85
+                delib_id = f"delib_{uuid.uuid4().hex[:12]}"
+                participating_agents = list({t.get("agent_id", "") for t in history if t.get("agent_id")} | {current_agent})
+
+                # Dual-persist deliberation audit to database
+                delib_rec = DeliberationRecord(
+                    id=delib_id,
+                    session_id=current_session,
+                    topic=str(msg.get("topic") or (history[0]["input_prompt"] if history else "Multi-agent Deliberation")),
+                    participating_agents=participating_agents,
+                    consensus_strategy=str(msg.get("strategy") or "adjudicator"),
+                    final_decision=verdict_text,
+                    confidence=convergence_score,
+                    rounds=len(history),
+                    metadata={"latency_ms": lat_ms, "caller": current_agent},
+                )
+                try:
+                    await postgres_memory.save_deliberation(delib_rec)
+                except Exception as db_exc:
+                    logger.debug("[WS_DELIBERATE] Deliberation persistence notice: %s", db_exc)
 
                 verdict_payload = {
                     "type": "consensus_verdict",
                     "session_id": current_session,
+                    "deliberation_id": delib_id,
                     "verdict": verdict_text,
-                    "convergence_score": 0.92 if "consensus" in verdict_text.lower() else 0.85,
+                    "convergence_score": convergence_score,
+                    "participating_agents": participating_agents,
                     "turns_evaluated": len(history),
                     "latency_ms": lat_ms,
                 }
