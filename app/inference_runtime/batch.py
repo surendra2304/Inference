@@ -156,4 +156,11 @@ class MicroBatcher(Generic[T]):
             self._closed = True
             self._cv.notify_all()
         if self._task:
-            await self._task
+            try:
+                await asyncio.shield(self._task)
+            except asyncio.CancelledError:
+                # A task that was cancelled by its owner has already resolved all
+                # submitter futures in _run()'s finally block. Make close idempotent
+                # in that state, while preserving cancellation of the close caller.
+                if not self._task.cancelled():
+                    raise
