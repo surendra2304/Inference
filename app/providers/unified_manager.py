@@ -1,7 +1,7 @@
 """Unified API Provider Manager for centralized execution across supported providers."""
 
 import time
-from typing import Any, Literal
+import typing
 
 from pydantic import BaseModel, Field
 
@@ -13,7 +13,7 @@ from app.utils.errors import provider_failure_reason
 from app.utils.logger import logger
 
 
-ProviderName = Literal["auto", "gemini", "groq", "cerebras", "mistral", "openai", "openrouter", "nvidia", "cohere", "huggingface"]
+ProviderName = typing.Literal["auto", "gemini", "groq", "cerebras", "mistral", "openai", "openrouter", "nvidia", "cohere", "huggingface"]
 
 
 class UnifiedExecutionRequest(BaseModel):
@@ -27,7 +27,7 @@ class UnifiedExecutionRequest(BaseModel):
         description="Specialist agent role or ID (e.g. trading_analyst, system_architect, code_generator, etc.)",
     )
     prompt: str = Field(..., description="Prompt or task instruction to execute")
-    context: dict[str, Any] = Field(default_factory=dict, description="Additional structured context or parameters")
+    context: dict[str, typing.Any] = Field(default_factory=dict, description="Additional structured context or parameters")
     max_tokens: int = Field(default=2000, ge=50, le=8192, description="Max output tokens")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
     no_cache: bool = Field(default=False, description="Bypass L1 cache when fresh inference is required")
@@ -83,7 +83,7 @@ class UnifiedProviderManager:
     }
 
     @staticmethod
-    def _cache_scope(req: UnifiedExecutionRequest) -> dict[str, Any]:
+    def _cache_scope(req: UnifiedExecutionRequest) -> dict[str, typing.Any]:
         """Return every request attribute that can change the generated answer.
 
         A prompt by itself is not a cache identity: context often contains private
@@ -158,7 +158,7 @@ class UnifiedProviderManager:
             target_model = "openai/gpt-oss-120b"
 
         # Fast-lane override for auto routing
-        extra_params: dict[str, Any] = {}
+        extra_params: dict[str, typing.Any] = {}
         if req.fast_lane and req.provider == "auto":
             target_provider = "groq"
             target_model = "openai/gpt-oss-20b"
