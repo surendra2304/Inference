@@ -1,5 +1,8 @@
+import asyncio
+
 import pytest
 
+import app.providers
 from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.errors import ProviderUnconfiguredError, TimeoutError
 from app.providers.gateway import KeyPool, ModelGateway
@@ -45,24 +48,27 @@ def _request(timeout=1.0):
     )
 
 
+def _patch_provider(monkeypatch, provider):
+    monkeypatch.setattr("app.providers.gateway.provider_has_credentials", lambda _provider: True)
+    monkeypatch.setattr(app.providers, "get_provider", lambda *_args, **_kwargs: provider)
+
+
 @pytest.mark.asyncio
 async def test_stream_completes_and_releases_limiter(monkeypatch):
     gateway = _gateway()
-    monkeypatch.setattr("app.providers.gateway.provider_has_credentials", lambda _provider: True)
-    supplied = []
+    started = []
 
     class _Provider:
         async def stream(self, _request):
-            supplied.append("started")
+            started.append(True)
             yield "hello"
             yield " world"
 
-    monkeypatch.setattr("app.providers", "get_provider", lambda *_args, **_kwargs: _Provider())
-
+    _patch_provider(monkeypatch, _Provider())
     chunks = [chunk async for chunk in gateway.stream("test-provider", _request())]
 
     assert chunks == ["hello", " world"]
-    assert supplied == ["started"]
+    assert started == [True]
     assert gateway.rate_limiters["test-provider"].acquired == 1
     assert gateway.rate_limiters["test-provider"].released == 1
     assert [item[0] for item in gateway.health_tracker.successes] == ["test-provider"]
@@ -72,16 +78,18 @@ async def test_stream_completes_and_releases_limiter(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_total_deadline_produces_typed_timeout_and_closes(monkeypatch):
     gateway = _gateway()
-    monkeypatch.setattr("app.providers.gateway.provider_has_credentials", lambda _provider: True)
+    closed = asyncio.Event()
 
     class _Provider:
         async def stream(self, _request):
-            yield "first"
-            import asyncio
-            await asyncio.sleep(1)
-            yield "never"
+            try:
+                yield "first"
+                await asyncio.sleep(1)
+                yield "never"
+            finally:
+                closed.set()
 
-    monkeypatch.setattr("app.providers", "get_provider", lambda *_args, **_kwargs: _Provider())
+    _patch_provider(monkeypatch, _Provider())
     chunks = []
 
     with pytest.raises(TimeoutError, match="Stream deadline exceeded"):
@@ -89,24 +97,27 @@ async def test_stream_total_deadline_produces_typed_timeout_and_closes(monkeypat
             chunks.append(chunk)
 
     assert chunks == ["first"]
+    assert closed.is_set()
     assert gateway.rate_limiters["test-provider"].released == 1
     assert gateway.health_tracker.failures[0][2]["is_503"] is True
 
 
 @pytest.mark.asyncio
 async def test_stream_cancellation_closes_iterator_and_releases_limiter(monkeypatch):
-    import asyncio
     gateway = _gateway()
-    monkeypatch.setattr("app.providers.gateway.provider_has_credentials", lambda _provider: True)
     started = asyncio.Event()
+    closed = asyncio.Event()
 
     class _Provider:
         async def stream(self, _request):
-            started.set()
-            await asyncio.sleep(10)
-            yield "never"
+            try:
+                started.set()
+                await asyncio.sleep(10)
+                yield "never"
+            finally:
+                closed.set()
 
-    monkeypatch.setattr("app.providers", "get_provider", lambda *_args, **_kwargs: _Provider())
+    _patch_provider(monkeypatch, _Provider())
 
     async def consume():
         async for _chunk in gateway.stream("test-provider", _request(timeout=20)):
@@ -119,6 +130,7 @@ async def test_stream_cancellation_closes_iterator_and_releases_limiter(monkeypa
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    assert closed.is_set()
     assert gateway.rate_limiters["test-provider"].released == 1
     assert gateway.health_tracker.failures == []
 
@@ -133,19 +145,20 @@ async def test_stream_rejects_unconfigured_provider_before_acquiring(monkeypatch
             pass
 
     assert gateway.rate_limiters["test-provider"].acquired == 0
+    assert gateway.rate_limiters["test-provider"].released == 0
+    assert gateway.health_tracker.failures == []
 
 
 @pytest.mark.asyncio
 async def test_stream_normalizes_provider_failure(monkeypatch):
     gateway = _gateway()
-    monkeypatch.setattr("app.providers.gateway.provider_has_credentials", lambda _provider: True)
 
     class _Provider:
         async def stream(self, _request):
             raise RuntimeError("503 service unavailable")
             yield "unreachable"
 
-    monkeypatch.setattr("app.providers", "get_provider", lambda *_args, **_kwargs: _Provider())
+    _patch_provider(monkeypatch, _Provider())
 
     with pytest.raises(Exception) as caught:
         async for _chunk in gateway.stream("test-provider", _request()):
@@ -158,10 +171,7 @@ async def test_stream_normalizes_provider_failure(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_deadline_includes_time_waiting_for_rate_limiter(monkeypatch):
-    import asyncio
-
     gateway = _gateway()
-    monkeypatch.setattr("app.providers.gateway.provider_has_credentials", lambda _provider: True)
 
     class _SlowLimiter(_Limiter):
         async def acquire(self):
@@ -174,11 +184,12 @@ async def test_stream_deadline_includes_time_waiting_for_rate_limiter(monkeypatc
         async def stream(self, _request):
             yield "should not happen"
 
-    monkeypatch.setattr("app.providers", "get_provider", lambda *_args, **_kwargs: _Provider())
+    _patch_provider(monkeypatch, _Provider())
 
     with pytest.raises(TimeoutError, match="Stream deadline exceeded"):
         async for _chunk in gateway.stream("test-provider", _request(timeout=0.03)):
             pass
 
+    assert gateway.rate_limiters["test-provider"].acquired == 1
     assert gateway.rate_limiters["test-provider"].released == 0
-    assert gateway.health_tracker.failures
+    assert gateway.health_tracker.failures[0][2]["is_503"] is True
