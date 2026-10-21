@@ -935,6 +935,7 @@ async def chat_completions(req: ChatCompletionRequest):
     exec_tokens = max(50, min(tokens, 8192))
     exec_temp = max(0.0, min(float(req.temperature if req.temperature is not None else 0.7), 2.0))
     norm_model = req.model.lower()
+    exec_provider: Literal["auto", "gemini", "groq", "cerebras", "mistral", "openai", "openrouter", "nvidia", "cohere", "huggingface"]
     if req.model == "auto":
         exec_provider = "auto"
     elif "gemini" in norm_model:
@@ -946,7 +947,7 @@ async def chat_completions(req: ChatCompletionRequest):
     elif "cerebras" in norm_model:
         exec_provider = "cerebras"
     else:
-        exec_provider: Literal["auto", "gemini", "groq", "cerebras", "mistral", "openai", "openrouter", "nvidia", "cohere", "huggingface"] = "groq"
+        exec_provider = "groq"
 
     exec_req = UnifiedExecutionRequest(
         provider=exec_provider,
