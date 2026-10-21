@@ -24,20 +24,22 @@ The first objective is a reproducible green baseline. New capabilities must foll
 - This workspace could not run a local clone/test cycle. GitHub Actions is the verification source for remote changes; only the latest matching commit's workflow is used as evidence.
 - PR [#33](https://github.com/surendra2304/Inference/pull/33) merged as `a9059633aa0bc515e585b009353d7c2bb6d1f88f`; its latest-head run [39674879487](https://github.com/surendra2304/Inference/actions/runs/39674879487) and post-merge main run [39675092616](https://github.com/surendra2304/Inference/actions/runs/39675092616) passed Ruff, the full pytest suite, and Docker build. The endpoint now validates finite positive prices, finite return observations, rejects malformed/oversized values, and tracks per-input synthetic provenance.
 - PR [#35](https://github.com/surendra2304/Inference/pull/35) replaced the no-op `SensitiveDataFilter` with standard-library redaction for structured/compound secret fields, provider token formats, logging arguments, and tracebacks. Its head CI [39676561681](https://github.com/surendra2304/Inference/actions/runs/39676561681) passed, and the merge commit is `e7376ea26feeac5c16cddbefb1761a3eaac093a6`; post-merge CI [39676772665](https://github.com/surendra2304/Inference/actions/runs/39676772665) passed Ruff, pytest, and Docker build.
-- A static deployment-helper review found `deploy_production.py::run_command` used `subprocess.run(..., shell=True)` with a string and has no in-repository callers. The current branch changes it to parse strings into argument arrays with `shlex.split`, uses `shell=False`, validates arguments, and covers failure paths; CI is the merge gate.
+- PR [#36](https://github.com/surendra2304/Inference/pull/36) removed shell interpretation from the unused-in-repo deployment helper by using `shlex.split` or explicit argument sequences with `shell=False`; it rejects malformed/empty input and handles subprocess failures. PR-head CI [39677066324](https://github.com/surendra2304/Inference/actions/runs/39677066324) passed; merge commit `c0981fbdcad63c2b1c8624549cf11b10db974566` has post-merge workflow [39677268134](https://github.com/surendra2304/Inference/actions/runs/39677268134) currently under verification.
+- The existing GitHub Actions workflow did not run mypy, even though the development history documented a prior successful `python -m mypy app`. The active branch adds mypy to the dev extras and CI before pytest, making type checking repeatable and preventing future regressions from bypassing the required workflow.
 
 ## Workstreams and acceptance gates
 
 ### P0 — Restore trustworthy CI
 
-**Status:** Complete for the verified `main` commit listed above; continue to enforce the gate on every PR.
+**Status:** Lint, tests, and Docker passed on verified main and every merged PR in this increment. A fourth, repeatable CI gate (`python -m mypy app`) is being added in this branch; it is not yet considered accepted until this PR's exact head passes.
 
 1. Fix the observed Ruff import-order regression with the smallest possible change.
 2. Re-run the complete workflow on the PR head.
 3. Confirm that lint, the full pytest suite, and the Docker build all run and pass; do not infer test health from a successful lint step.
+4. Run `python -m mypy app` in CI using the checked-in development extras; the historical standalone run is not a substitute for a required PR gate.
 4. If a new failure appears once the lint gate is clear, capture the specific log, reproduce the failure with a regression test, and fix the cause rather than skipping or weakening the test.
 
-**Acceptance:** latest PR-head CI is green for all three checks and the merged `main` head is green.
+**Acceptance:** latest PR-head CI is green for Ruff, mypy, the full pytest suite, and Docker; the merged `main` head is also green.
 
 ### P1 — Async lifecycle and cancellation safety
 
@@ -148,7 +150,7 @@ The repository contains several substantial modules whose production activation 
 
 ## Completion checklist
 
-- [x] Latest verified `main` lint passes at `e7376ea26feeac5c16cddbefb1761a3eaac093a6` (post-merge run [39676772665](https://github.com/surendra2304/Inference/actions/runs/39676772665)).
+- [x] Latest verified `main` lint passes at `e7376ea26feeac5c16cddbefb1761a3eaac093a6` (post-merge run [39676772665](https://github.com/surendra2304/Inference/actions/runs/39676772665)); PR #36's head also passed lint.
 - [x] Full pytest suite passes on the verified current `main` commit.
 - [x] Docker build passes on the verified current `main` commit.
 - [x] Cancellation-token race cleanup and pre-cancelled-token regressions are covered and merged; other queue/shutdown acceptance cases remain under P1.
@@ -156,4 +158,4 @@ The repository contains several substantial modules whose production activation 
 - [ ] Provider deadlines, fallback behavior, and credential isolation are verified.
 - [x] Confirmed fabricated Prometheus/accuracy/debate metrics on current tree have regression tests; continue the audit for other unmeasured claims.
 - [ ] Persistence and mesh contracts are validated.
-- [ ] No known failing CI checks or unreviewed release-blocking regressions remain.
+- [ ] New mypy CI gate and post-merge main checks are verified on current commits; no known failing CI checks or unreviewed release-blocking regressions remain.
