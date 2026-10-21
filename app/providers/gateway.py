@@ -982,7 +982,7 @@ class ModelGateway:
         except asyncio.CancelledError:
             raise
         except (asyncio.TimeoutError, ProviderTimeoutError) as exc:
-            typed_error = ProviderTimeoutError(
+            typed_error: Exception = ProviderTimeoutError(
                 f"Stream deadline exceeded for provider '{prov_name}' after "
                 f"{time.perf_counter() - started:.2f}s.",
                 provider=prov_name,
