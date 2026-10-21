@@ -91,7 +91,26 @@ async def test_cache_hit_is_returned_without_reserving_budget_twice():
 
 
 @pytest.mark.asyncio
-async def test_invalid_schema_response_is_not_cached_or_charged():
+async def test_cache_hit_remains_available_when_provider_is_unhealthy():
+    async def respond(_request, endpoint, _key):
+        return _result('{"ok": true}', endpoint)
+
+    transport = _Transport(respond)
+    gateway = _gateway(transport)
+    request = _request(cacheable=True, response_schema={"type": "object", "required": ["ok"]})
+
+    await gateway.complete(request)
+    for _ in range(3):
+        gateway.health.failure("test-provider", "provider unavailable")
+
+    cached = await gateway.complete(request)
+
+    assert cached.cached is True
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_schema_response_is_not_cached_but_provider_cost_is_reconciled():
     responses = iter(("not-json", '{"ok": true}'))
 
     async def respond(_request, endpoint, _key):
@@ -108,7 +127,8 @@ async def test_invalid_schema_response_is_not_cached_or_charged():
     with pytest.raises(SchemaViolation):
         await gateway.complete(request)
 
-    assert gateway.budget.remaining(request.tenant_id) == pytest.approx(starting_budget)
+    # The response cannot be cached, but real provider usage still costs money.
+    assert gateway.budget.remaining(request.tenant_id) == pytest.approx(starting_budget - 0.001)
 
     second = await gateway.complete(request)
     assert second.text == '{"ok": true}'
