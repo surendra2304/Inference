@@ -1,7 +1,9 @@
 """Production Deployment and Pre-flight Verification Script for Inference."""
 
+import shlex
 import subprocess
 import sys
+from collections.abc import Sequence
 from datetime import datetime
 
 from fastapi.testclient import TestClient
@@ -10,9 +12,37 @@ from app.config_production import production_config
 from app.main import app
 
 
-def run_command(cmd: str) -> bool:
-    print(f"\n[RUNNING] {cmd}")
-    res = subprocess.run(cmd, shell=True)
+def run_command(cmd: str | Sequence[str]) -> bool:
+    """Run one deployment command without invoking a shell.
+
+    A sequence is preferred because it preserves argument boundaries exactly. For
+    backwards-compatible string callers, POSIX-style quoting is parsed with
+    shlex.split; shell operators, substitutions, and redirections are not
+    evaluated. Split compound operations into separate calls and check each result.
+    """
+    if isinstance(cmd, str):
+        try:
+            args = shlex.split(cmd)
+        except ValueError as exc:
+            print(f"[ERROR] Invalid command syntax: {exc}")
+            return False
+    elif isinstance(cmd, Sequence) and not isinstance(cmd, (bytes, bytearray)):
+        args = list(cmd)
+    else:
+        print("[ERROR] Command must be a string or a sequence of arguments")
+        return False
+
+    if not args or any(not isinstance(arg, str) or not arg for arg in args):
+        print("[ERROR] Command arguments must be non-empty strings")
+        return False
+
+    print(f"\n[RUNNING] {shlex.join(args)}")
+    try:
+        res = subprocess.run(args, shell=False, check=False)
+    except OSError as exc:
+        print(f"[ERROR] Command could not be started: {type(exc).__name__}: {exc}")
+        return False
+
     if res.returncode != 0:
         print(f"[ERROR] Command failed with return code {res.returncode}")
         return False
