@@ -96,7 +96,6 @@ async def predict_price(req: PredictionRequest):
     onchain = onchain_engine.get_onchain_metrics(symbol=req.symbol[:3])
 
     prediction = ml_prediction_model.predict_price_trajectory(
-        current_price=curr_price,
         indicators=indicators,
         sentiment=sentiment,
         onchain=onchain
