@@ -109,3 +109,23 @@ def test_filter_sanitizes_malformed_log_arguments_without_raising():
     assert SensitiveDataFilter().filter(record) is True
     assert record.args == ()
     assert "[REDACTED: log formatting failed]" in record.getMessage()
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Authorization: Bearer repeated-secret-123",
+        "private key: -----BEGIN PRIVATE KEY-----FAKE_MATERIAL-----END PRIVATE KEY-----",
+    ],
+)
+def test_filter_is_idempotent_for_already_redacted_fields(message):
+    record = _record(message)
+    filter_ = SensitiveDataFilter()
+
+    filter_.filter(record)
+    once = record.getMessage()
+    filter_.filter(record)
+    twice = record.getMessage()
+
+    assert twice == once
+    assert "[REDACTED]]" not in twice
