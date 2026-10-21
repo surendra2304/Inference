@@ -88,8 +88,6 @@ async def predict_price(req: PredictionRequest):
             "prediction": None,
             "reason": "public market data is unavailable, so no forecast is produced",
         }
-    curr_price = req.current_price if req.current_price is not None else candles[-1]["close"]
-
     indicators = ta_engine.calculate_indicators(candles)
     news = await market_data_fetcher.get_news_and_social_feed(symbol=req.symbol[:3])
     sentiment = sentiment_engine.analyze_news(news)
