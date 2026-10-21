@@ -94,9 +94,10 @@ async def predict_price(req: PredictionRequest):
     onchain = onchain_engine.get_onchain_metrics(symbol=req.symbol[:3])
 
     prediction = ml_prediction_model.predict_price_trajectory(
+        current_price=candles[-1]["close"],
         indicators=indicators,
         sentiment=sentiment,
-        onchain=onchain
+        onchain=onchain,
     )
     return {
         "symbol": req.symbol.upper(),
@@ -119,7 +120,6 @@ async def get_market_alerts(symbol: str = Query(default="BTCUSDT", description="
             "alerts": [],
             "timestamp": time.time(),
         }
-    curr_price = candles[-1]["close"]
     indicators = ta_engine.calculate_indicators(candles)
     news = await market_data_fetcher.get_news_and_social_feed(symbol=symbol[:3])
     sentiment = sentiment_engine.analyze_news(news)
@@ -127,7 +127,6 @@ async def get_market_alerts(symbol: str = Query(default="BTCUSDT", description="
 
     alerts = market_monitor.evaluate_market_alerts(
         symbol=symbol,
-        current_price=curr_price,
         indicators=indicators,
         sentiment=sentiment,
         orderbook=orderbook
