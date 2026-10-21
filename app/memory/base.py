@@ -87,6 +87,20 @@ class ExperimentRecord(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class DeliberationRecord(BaseModel):
+    """Audit record for a multi-agent deliberation and consensus session."""
+    id: str
+    session_id: str
+    topic: str
+    participating_agents: list[str] = Field(default_factory=list)
+    consensus_strategy: str = "adjudicator"
+    final_decision: str
+    confidence: float = 0.85
+    rounds: int = 1
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class BaseMemory(ABC):
     """Abstract base class for persistent memory operations."""
 

@@ -27,6 +27,7 @@ from app.core.config import settings
 from app.core.orchestrator import orchestrator
 from app.core.security import require_inference_api_key
 from app.health import health_router
+from app.memory.postgres import postgres_memory
 from app.middleware.rate_limiter import EnhancedRateLimiterMiddleware
 from app.middleware.request_metrics import RequestMetricsMiddleware
 from app.providers.base import ProviderMessage, ProviderRequest
@@ -86,6 +87,10 @@ async def lifespan(app: FastAPI):
     register_software_specialists()
     # Initialize persistent SQLite memory database
     await orchestrator.memory.initialize()
+    try:
+        await postgres_memory.initialize()
+    except Exception as exc:
+        logger.debug("PostgreSQL initialization deferred: %s", exc)
     # An abrupt exit (crash, SIGKILL, OOM kill, container eviction) leaves whatever was
     # in flight marked ``running`` forever, so the audit trail keeps claiming work is in
     # progress long after it stopped. Reconcile before serving any traffic.
@@ -101,7 +106,7 @@ async def lifespan(app: FastAPI):
         http_client_pool.prewarm([
             "https://api.groq.com",
             "https://generativelanguage.googleapis.com",
-            "https://api.mistral.ai",
+            "https://integrate.api.nvidia.com",
             "https://openrouter.ai",
         ])
     )
@@ -137,6 +142,7 @@ async def lifespan(app: FastAPI):
                 pass
             # Cleanly close pooled HTTP connections and streaming clients
             await http_client_pool.close()
+            await postgres_memory.close()
     except Exception as exc:
         logger.warning("Shutdown cleanup encountered notice: %s", exc)
     logger.info("Shutdown of %s complete", production_config.APP_NAME)
