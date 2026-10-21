@@ -19,6 +19,7 @@ from app.api.agent_routes import agent_router
 from app.api.deliberate_stream_routes import deliberate_stream_router
 from app.api.friday_routes import friday_router
 from app.api.instant_routes import instant_router
+from app.api.mesh_routes import mesh_router
 from app.api.routes import router as api_router
 from app.api.universal_task_routes import task_router
 from app.api.v1_core_routes import v1_router
@@ -343,6 +344,7 @@ app.include_router(sentinel_router, dependencies=[Depends(require_inference_api_
 app.include_router(intelx_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(futuris_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(deliberate_stream_router)
+app.include_router(mesh_router)
 
 
 @app.get("/ui", response_class=HTMLResponse)
