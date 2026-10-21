@@ -13,8 +13,8 @@ The first objective is a reproducible green baseline. New capabilities must foll
 
 ## Baseline findings
 
-- The recursive Git tree currently contains **401 files**.
-- The repository has **60+ test modules** covering APIs, provider routing, cancellation, security, monitoring, persistence, batch work, and Docker configuration.
+- The recursive Git tree currently contains **403 files**.
+- The repository has **64 Python test modules** covering APIs, provider routing, cancellation, security, monitoring, persistence, batch work, and Docker configuration.
 - Initial baseline run [39666816838](https://github.com/surendra2304/Inference/actions/runs/39666816838) failed at `ruff check .` with one `I001` import-order error in `app/monitoring.py`, preventing pytest and Docker verification from running. PR [#30](https://github.com/surendra2304/Inference/pull/30) fixed the gate and also corrected PostgreSQL persistence/credential defects.
 - PR [#30](https://github.com/surendra2304/Inference/pull/30) merged as `5176b080ee4843a2ed392b76bc1530f99f22ba99`; its current-head CI [run 39672285579](https://github.com/surendra2304/Inference/actions/runs/39672285579) passed lint, the full pytest suite, and Docker build.
 - PR [#22](https://github.com/surendra2304/Inference/pull/22) fixed cancellation-token task cleanup and added a pre-cancelled-token regression test. It merged as `6becc799667e02e1830a90cd5710888e64278d32`; its current-head CI [run 39672605944](https://github.com/surendra2304/Inference/actions/runs/39672605944) passed lint, the full pytest suite, and Docker build.
@@ -22,6 +22,7 @@ The first objective is a reproducible green baseline. New capabilities must foll
 - Configuration review found and removed a hard-coded PostgreSQL password default. Because the prior value remains in public Git history, rotate it in the database and secret store if it was ever valid in a live environment; a source change cannot revoke a committed credential.
 - The PostgreSQL adapter's driver (`asyncpg`) is not installed by the base dependency set, and the production Compose file runs SQLite. Treat PostgreSQL persistence as opt-in until the driver and secret-managed connection settings are explicitly provisioned.
 - This workspace could not run a local clone/test cycle. GitHub Actions is the verification source for remote changes; only the latest matching commit's workflow is used as evidence.
+- PR [#32](https://github.com/surendra2304/Inference/pull/32) adds prediction-ingestion validation, one-time outcome resolution, and correct handling of terminal FLAT outcomes. Its first CI run passed Ruff but exposed a validator test that caught trailing-control-character normalization; a follow-up fix is on the same PR and must pass fresh full CI before merge.
 
 ## Workstreams and acceptance gates
 
