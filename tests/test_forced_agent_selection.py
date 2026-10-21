@@ -82,3 +82,14 @@ def test_forced_assignment_candidate_scan_is_bounded():
     assert selected == []
     assert len(orchestrator.registry.lookups) == MAX_FORCED_AGENT_CANDIDATES
     assert orchestrator.registry.lookups == candidates[:MAX_FORCED_AGENT_CANDIDATES]
+
+
+
+def test_forced_agent_selection_returns_empty_for_non_positive_max_agents():
+    researcher = _agent("researcher")
+    orchestrator = _orchestrator(researcher)
+
+    for max_agents in (0, -1):
+        assert orchestrator._resolve_forced_agents(["researcher"], max_agents=max_agents) == []
+
+    assert orchestrator.registry.lookups == []
