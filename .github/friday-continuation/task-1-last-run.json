@@ -2,7 +2,7 @@
   "task": 1,
   "repository": "Inference",
   "updated_at": "2026-10-22",
-  "status": "pr31_green_main_green_prediction_bounds_ci_running",
+  "status": "pr31_green_pr34_open_ci_green_mergeability_blocked",
   "pr31": {
     "url": "https://github.com/surendra2304/Inference/pull/31",
     "head": "32957964472c1026a784cc97a11e1546e6d7f62c",
@@ -16,38 +16,42 @@
       ]
     }
   },
+  "pr34": {
+    "url": "https://github.com/surendra2304/Inference/pull/34",
+    "branch": "fix/prediction-api-input-bounds-20261022",
+    "head": "491eb9c31e645a0db3cba80a85bc133c15cbbc7e",
+    "files_changed": [
+      "tests/test_prediction_endpoint_input_bounds.py"
+    ],
+    "ci": {
+      "id": 39674879487,
+      "url": "https://github.com/surendra2304/Inference/actions/runs/39674879487",
+      "status": "success",
+      "checks": [
+        "lint",
+        "pytest",
+        "Docker"
+      ]
+    },
+    "mergeable": false
+  },
   "main": {
-    "sha": "6540537bb68aa7b7ebec7ce13d909eca87596072",
-    "ci_run": 39674354552,
+    "sha": "a9059633aa0bc515e585b009353d7c2bb6d1f88f",
+    "ci_run": 39675092616,
     "status": "success"
   },
   "pr32": {
-    "url": "https://github.com/surendra2304/Inference/pull/32",
     "state": "closed",
     "head": "bb5dfb46764319384fd0767752f6714c6b1fc069",
     "ci_run": 39674147330,
     "status": "success"
   },
-  "prediction_api_bounds": {
-    "branch": "fix/prediction-api-input-bounds-20261022",
-    "runs": [
-      {
-        "id": 39674800949,
-        "sha": "a9fc836b384f21847448084728c6a1e849f12840",
-        "status": "in_progress"
-      },
-      {
-        "id": 39674867308,
-        "sha": "1c89fb87af6fa24b24b538828a0ef14759853a67",
-        "status": "queued"
-      }
-    ]
-  },
   "local_tests_run": false,
   "merged": false,
   "blockers": [
-    "Laptop MCP HTTP 404"
+    "Laptop MCP HTTP 404",
+    "PR34 mergeable=false, reason not yet inspected"
   ],
   "active_duration_seconds": "not measured",
-  "next": "Verify PR31 and check prediction API bounds branch/PR status."
+  "next": "Inspect PR34 base/mergeability; verify PR31 and resolve divergence additively."
 }
