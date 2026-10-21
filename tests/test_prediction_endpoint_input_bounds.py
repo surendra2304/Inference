@@ -50,6 +50,18 @@ def test_prediction_endpoint_rejects_empty_malformed_or_non_finite_returns(auth,
     assert "recent_returns" in response.json()["detail"]
 
 
+def test_prediction_endpoint_rejects_oversized_raw_return_string(auth):
+    oversized = "0.001," * 1400
+    response = _client().get(
+        "/v1/predict/btc",
+        headers=auth,
+        params={"current_price": "65000", "recent_returns": oversized},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "8192 characters" in response.json()["detail"]
+
+
 def test_prediction_endpoint_bounds_return_observation_count(auth):
     too_many_returns = ",".join("0.001" for _ in range(257))
     response = _client().get(
