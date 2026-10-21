@@ -1057,6 +1057,76 @@ async def test_agent_stream_forwards_request_and_streams_tokens(auth, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_agent_stream_falls_back_before_first_chunk(auth, monkeypatch):
+    from app.providers.errors import GatewayError
+    from app.providers.gateway import ModelGateway
+
+    stream_calls = []
+
+    async def mock_stream(_gateway, provider, request, *, stage_name):
+        stream_calls.append((provider, request.model, request.messages[0].content, request.temperature, request.max_tokens, stage_name))
+        if provider == "groq":
+            raise GatewayError("private provider transport detail", provider="groq", model=request.model)
+        yield "fallback answer"
+        yield " continues"
+
+    monkeypatch.setattr(ModelGateway, "stream", mock_stream)
+    prompt = "Summarize the deployment failure"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver", headers=auth) as client:
+        response = await client.post(
+            "/v1/agent/stream",
+            json={
+                "caller_agent": "forge",
+                "task_type": "code",
+                "prompt": prompt,
+                "temperature": 0.4,
+                "max_tokens": 222,
+            },
+        )
+
+    assert response.status_code == 200
+    assert 'fallback answer' in response.text
+    assert ' continues' in response.text
+    assert response.text.endswith('data: {"token": "", "done": true}\\n\\n')
+    assert "private provider transport detail" not in response.text
+    assert stream_calls == [
+        ("groq", "openai/gpt-oss-120b", prompt, 0.4, 222, "agent_stream_forge"),
+        ("gemini", "gemini-3.6-flash", prompt, 0.4, 222, "agent_stream_forge_fb"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_stream_does_not_restart_fallback_after_partial_primary_output(auth, monkeypatch):
+    from app.providers.errors import GatewayError
+    from app.providers.gateway import ModelGateway
+
+    stream_calls = []
+
+    async def mock_stream(_gateway, provider, request, *, stage_name):
+        stream_calls.append(provider)
+        if provider == "groq":
+            yield "partial primary"
+            raise GatewayError("private mid-stream failure", provider="groq", model=request.model)
+        yield "unexpected fallback"
+
+    monkeypatch.setattr(ModelGateway, "stream", mock_stream)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver", headers=auth) as client:
+        response = await client.post(
+            "/v1/agent/stream",
+            json={"caller_agent": "forge", "prompt": "Test partial stream failure"},
+        )
+
+    assert response.status_code == 200
+    assert "partial primary" in response.text
+    assert "provider_error" in response.text
+    assert "private mid-stream failure" not in response.text
+    assert "unexpected fallback" not in response.text
+    assert stream_calls == ["groq"]
+
+
+@pytest.mark.asyncio
 async def test_agent_assist_no_cache_bypasses_cache_reads_and_writes(monkeypatch):
     from app.api.agent_routes import AgentAssistRequest, agent_assist_endpoint
     from app.performance_cache import perf_cache
