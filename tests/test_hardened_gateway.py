@@ -238,3 +238,72 @@ async def test_cache_key_includes_extra_generation_parameters():
 def test_budget_ledger_starts_with_no_reserved_or_spent_amount():
     ledger = BudgetLedger(default_budget=2.0)
     assert ledger.remaining("tenant-a") == pytest.approx(2.0)
+
+
+
+@pytest.mark.asyncio
+async def test_singleflight_reconciles_provider_cost_once_for_concurrent_waiters():
+    async def respond(_request, endpoint, _key):
+        await asyncio.sleep(0.03)
+        return _result("shared answer", endpoint)
+
+    transport = _Transport(respond)
+    gateway = _gateway(transport)
+    request = _request(cacheable=False)
+    starting_budget = gateway.budget.remaining(request.tenant_id)
+
+    first, second = await asyncio.gather(
+        gateway.complete(request),
+        gateway.complete(request),
+    )
+
+    assert first.text == second.text == "shared answer"
+    assert len(transport.calls) == 1
+    assert gateway.budget.remaining(request.tenant_id) == pytest.approx(
+        starting_budget - first.cost_usd
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancelled_singleflight_waiter_does_not_double_charge_remaining_waiter():
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def respond(_request, endpoint, _key):
+        started.set()
+        await release.wait()
+        return _result("surviving waiter answer", endpoint)
+
+    transport = _Transport(respond)
+    gateway = _gateway(transport)
+    request = _request(cacheable=False)
+    starting_budget = gateway.budget.remaining(request.tenant_id)
+
+    cancelled_waiter = asyncio.create_task(gateway.complete(request))
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    surviving_waiter = asyncio.create_task(gateway.complete(request))
+
+    for _ in range(100):
+        entry = gateway.dedupe._tasks.get(
+            gateway.dedupe.fingerprint(
+                {"tenant_id": request.tenant_id, "request": request.__dict__}
+            )
+        )
+        if entry is not None and entry.waiters == 2:
+            break
+        await asyncio.sleep(0)
+    else:
+        pytest.fail("second waiter never joined the shared request")
+
+    cancelled_waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled_waiter
+
+    release.set()
+    result = await asyncio.wait_for(surviving_waiter, timeout=1.0)
+
+    assert result.text == "surviving waiter answer"
+    assert len(transport.calls) == 1
+    assert gateway.budget.remaining(request.tenant_id) == pytest.approx(
+        starting_budget - result.cost_usd
+    )
