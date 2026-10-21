@@ -106,3 +106,19 @@ async def test_race_accepts_future_awaitables():
 
     assert await token.race(future) == 42
     assert _pending_token_waiters() == []
+
+
+@pytest.mark.asyncio
+async def test_pre_cancelled_token_cancels_race_and_cleans_waiter():
+    token = CancellationToken()
+    token.cancel()
+
+    async def operation():
+        await asyncio.sleep(1)
+        return "should not win"
+
+    with pytest.raises(asyncio.CancelledError, match="cancellation token was set"):
+        await token.race(operation())
+
+    await asyncio.sleep(0)
+    assert _pending_token_waiters() == []
