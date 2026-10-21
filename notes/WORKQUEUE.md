@@ -488,3 +488,18 @@ growth stops when the ceilings are reached. The difference here is that the mixe
 fills `usage_analytics.records` (10,000) and `sentinel.provenance_store` (2,048) slowly enough
 that a 30-minute soak does not reach saturation, so the honest verdict for a run this short is
 "filling", not "plateau".
+
+### Increment 32 — request, persistence, credential, and command-boundary hardening
+
+Remote GitHub Actions is the verification source in this workspace; no local clone/test run was possible. Each evidence link below points at the exact PR-head CI run used before merge.
+
+- [x] CI import gate restored: PR #30 separates the guarded datetime import group in app/monitoring.py. The formerly blocked workflow now proceeds through lint, full pytest, and Docker build. Evidence: PR #30 and run 39672285579.
+- [x] PostgreSQL injected-pool handling corrected: _get_pool() returns a compatible injected pool before checking whether optional asyncpg is installed. A regression test covers that configuration.
+- [x] PostgreSQL unknown confidence remains unknown: nullable confidence plus migration, with None persisted as SQL NULL rather than converted to float(None).
+- [x] Removed the hard-coded PostgreSQL password default; connection setup fails closed without an explicit password. Follow-up operator action remains: rotate the former value in the live database/secret store if it was ever valid, because a source commit cannot revoke public Git history.
+- [x] Cancellation race cleanup merged in PR #22, including the pre-cancelled-token edge case. Evidence: run 39672605944.
+- [x] Prediction tracking validates finite/ranged confidence, bounded labels, positive horizons, and well-formed outcomes. FLAT is terminal but excluded from directional scoring; demo fixtures cannot be changed and duplicate resolutions cannot overwrite the audit trail. Evidence: PR #32 run 39674163591 and post-merge run 39674354552.
+- [x] Prediction endpoint rejects invalid prices, malformed/non-finite/oversized return series and inputs above the raw 8192-character or 256-observation limits. Partially synthetic data is labelled accurately and confidence is withheld. Evidence: PR #33 run 39674879487 and post-merge run 39675092616.
+- [x] The no-op SensitiveDataFilter was implemented in PR #35. The standard-library filter redacts common labeled secrets, compound environment names, provider token formats, logging interpolation arguments, JWT/private-key material, and exception tracebacks. Tests cover idempotency, benign prose, malformed format strings, and handlers that existed before logger setup. Evidence: run 39676561681 and post-merge main run 39676772665.
+- [ ] Deployment command helper hardening is in progress in PR #36: remove shell interpretation from deploy_production.py::run_command, reject empty/malformed input, keep existing string callers safe with shlex.split, and test subprocess/OS error behavior. Do not close until current-head Ruff, full pytest, and Docker checks pass.
+- [ ] Known follow-up debt: docs/openapi.yaml contains only 11 paths and omits live routes; the production call path builds but discards an execution DAG before running CollaborationEngine; HardenedGateway has no confirmed production-path activation. Resolve via generated schema/reachability evidence and behavior-parity tests rather than speculative rewrites.
