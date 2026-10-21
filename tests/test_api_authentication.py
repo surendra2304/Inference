@@ -210,7 +210,13 @@ async def test_governance_tenant_read_requires_auth(anon_client, auth_client):
 
     ok = await auth_client.get("/v1/governance/tenants/tenant_trading")
     assert ok.status_code == 200
-    assert "active_keys" in ok.json()
+    payload = ok.json()
+    policy = tenant_manager.tenants["tenant_trading"]
+    assert "active_keys" not in payload
+    assert payload["active_key_count"] == len(policy.active_keys)
+    assert payload["keys_configured"] is bool(policy.active_keys)
+    for secret in policy.active_keys:
+        assert secret not in ok.text, "tenant policy must never return a raw credential"
 
 
 async def test_rotate_key_rejects_wrong_old_key(auth_client, clean_tenants):
