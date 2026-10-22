@@ -1,0 +1,41 @@
+# Environments and Secrets
+.env
+.env.production
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Logs
+*.log
+
+
+# Python & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Database and Local Data
+data/*
+!data/.gitkeep
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Agent Squad Temp Files
+.agents/
+ORIGINAL_REQUEST.md

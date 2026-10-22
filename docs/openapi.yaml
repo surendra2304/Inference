@@ -1,0 +1,266 @@
+openapi: 3.1.0
+info:
+  title: Inference Intelligence Platform API
+  version: 2.5.0
+  description: Local-first, provider-agnostic multi-agent intelligence platform serving Trading Bot, FORGE, Nexus, Sentinel, and FRIDAY.
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+  - url: https://api.Inference.internal
+    description: Production internal cluster
+
+paths:
+  /v1/trading/consult:
+    post:
+      summary: Trading Consultation Advisory
+      description: Returns bounded trading parameter advisory for autonomous trading bots. Inference NEVER touches private keys or executes trades directly.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, current_regime]
+              properties:
+                symbol: { type: string, example: "BTC/USDT" }
+                current_regime: { type: string, example: "high_volatility" }
+                drawdown_pct: { type: number, example: 3.5 }
+      responses:
+        '200':
+          description: Advisory parameter bounds
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recommendation: { type: string }
+                  confidence: { type: number }
+                  bounded_parameters: { type: object }
+
+  /v1/futuris/enhance:
+    post:
+      summary: Futuris Statistical Forecast Enhancement
+      description: Enhances raw statistical forecasts with qualitative intelligence, driver analysis, and confidence calibration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id, statistical_forecast]
+              properties:
+                request_id: { type: string, example: "futuris-req-001" }
+                statistical_forecast:
+                  type: object
+                  required: [point_estimate, confidence_interval, model_used]
+                  properties:
+                    metric_name: { type: string }
+                    point_estimate: { type: number }
+                    confidence_interval: { type: array, items: { type: number } }
+                    probability: { type: number }
+                    model_used: { type: string }
+                target_context: { type: object }
+                contextual_factors: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Qualitatively enhanced forecast assessment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request_id: { type: string }
+                  enhanced_assessment: { type: object }
+                  confidence_adjustment: { type: number }
+                  grounded_forecast_summary: { type: string }
+
+  /v1/intelx/research:
+    post:
+      summary: IntelX Deep Research Intelligence
+      description: Process role-specific deep research, verbatim claim verification, and analysis.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id, role, context]
+              properties:
+                request_id: { type: string, example: "intelx-req-001" }
+                role:
+                  type: string
+                  enum: [planner, extractor, verifier, analyst, critic, synthesizer]
+                context: { type: object }
+                evidence_with_spans: { type: array, items: { type: object } }
+      responses:
+        '200':
+          description: Research role response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request_id: { type: string }
+                  role: { type: string }
+                  response: { type: object }
+                  confidence: { type: number }
+
+  /v1/sentinel/analyze:
+    post:
+      summary: Sentinel Cybersecurity Posture Analysis
+      description: Evaluates vulnerabilities, attack path reasoning, remediation prioritization, and threat intelligence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id, analysis_type, target_context]
+              properties:
+                request_id: { type: string, example: "sent-req-001" }
+                analysis_type:
+                  type: string
+                  enum: [vulnerability_assessment, attack_path_reasoning, remediation_prioritization, threat_intel_correlation, risk_scoring]
+                target_context:
+                  type: object
+                  properties:
+                    asset_type: { type: string }
+                    technologies_detected: { type: array, items: { type: string } }
+                    exposure_level: { type: string, enum: [public_internet, dmz, internal_network, isolated, air_gapped] }
+                findings: { type: array, items: { type: object } }
+      responses:
+        '200':
+          description: Security posture and risk assessment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request_id: { type: string }
+                  analysis: { type: object }
+                  evidence_references: { type: object }
+
+  /v1/nexus/intelligence:
+    post:
+      summary: Nexus Decision Intelligence
+      description: Process structured decision intelligence requests with calibrated confidence, evidence scoring, and adversarial review.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id, task_type, goal]
+              properties:
+                request_id: { type: string, example: "nex-req-101" }
+                task_type:
+                  type: string
+                  enum: [lead_qualification, conversion_diagnosis, incident_analysis, strategic_decision, intervention_planning, copy_optimization, churn_analysis]
+                goal: { type: string, example: "Evaluate inbound lead enterprise qualification" }
+                context: { type: object }
+                evidence:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      claim: { type: string }
+                      trust_label: { type: string, enum: [system_fact, verified_telemetry, untrusted_user_input, inferred_profile] }
+                mode: { type: string, enum: [fast, review, debate], default: fast }
+      responses:
+        '200':
+          description: Successful intelligence response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request_id: { type: string }
+                  decision: { type: string }
+                  confidence: { type: number }
+                  summary: { type: string }
+
+  /v1/forge/generate-code:
+    post:
+      summary: Code Generation Service
+      description: Generates syntax-aware code with language-specific rules for FORGE.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_type, filename, context]
+              properties:
+                file_type: { type: string, enum: [python, html, css, js, json, markdown, sql] }
+                filename: { type: string, example: "app/main.py" }
+                context: { type: object }
+                requirements: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Generated code artifact
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string }
+                  confidence: { type: number }
+
+  /v1/forge/plan-architecture:
+    post:
+      summary: Architecture Planning Service
+      description: Designs file manifests, dependency graphs, and tech stack specs for FORGE.
+      responses:
+        '200':
+          description: Architecture plan
+
+  /v1/forge/review-code:
+    post:
+      summary: Multi-Agent Code Review
+      description: Adversarial review panel (Coder, Security Analyst, Critic, Data Analyst).
+      responses:
+        '200':
+          description: Review verdict and issues
+
+  /v1/forge/debug:
+    post:
+      summary: Debugging Intelligence
+      description: Ingests tracebacks and context to generate root cause analysis and patch code.
+      responses:
+        '200':
+          description: Debugging patch
+
+  /v1/forge/generate-tests:
+    post:
+      summary: Automated Test Generation
+      description: Generates framework-specific unit and integration tests.
+      responses:
+        '200':
+          description: Generated test code
+
+  /v1/analytics/outcome:
+    post:
+      summary: Universal Outcome Ingestion
+      description: Record downstream real-world execution outcomes from all consumers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [consumer, request_id, outcome]
+              properties:
+                consumer: { type: string, enum: [forge, trading_bot, nexus, sentinel, friday, human] }
+                request_id: { type: string }
+                outcome: { type: string, enum: [success, partial, failure] }
+                detail: { type: string }
+                measured_metrics: { type: object }
+      responses:
+        '200':
+          description: Outcome logged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "RECORDED" }

@@ -1,0 +1,46 @@
+{
+  "keys": [
+    {
+      "provider": "anthropic",
+      "key": "anthropic_key_1",
+      "status": "active",
+      "last_used": "2026-09-15T10:00:00Z",
+      "score": 0.95
+    },
+    {
+      "provider": "anthropic",
+      "key": "anthropic_key_2",
+      "status": "active",
+      "last_used": "2026-09-15T09:45:00Z",
+      "score": 0.92
+    },
+    {
+      "provider": "mistral",
+      "key": "mistral_key_1",
+      "status": "active",
+      "last_used": "2026-09-15T10:15:00Z",
+      "score": 0.88
+    },
+    {
+      "provider": "cohere",
+      "key": "cohere_key_1",
+      "status": "active",
+      "last_used": "2026-09-15T09:30:00Z",
+      "score": 0.85
+    },
+    {
+      "provider": "google",
+      "key": "google_key_1",
+      "status": "active",
+      "last_used": "2026-09-15T10:30:00Z",
+      "score": 0.87
+    },
+    {
+      "provider": "openai",
+      "key": "openai_key_1",
+      "status": "active",
+      "last_used": "2026-09-15T10:45:00Z",
+      "score": 0.90
+    }
+  ]
+}
