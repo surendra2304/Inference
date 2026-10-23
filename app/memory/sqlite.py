@@ -487,6 +487,11 @@ class SQLiteMemory(BaseMemory):
             self.db_path = raw_path[len("sqlite+aiosqlite:///"):]
         elif raw_path.startswith("sqlite:///"):
             self.db_path = raw_path[len("sqlite:///"):]
+        elif "oracle" in raw_path or "postgres" in raw_path or not raw_path:
+            if os.path.exists("/dev/shm"):
+                self.db_path = "/dev/shm/inference.db"
+            else:
+                self.db_path = ":memory:"
         else:
             self.db_path = raw_path
 
