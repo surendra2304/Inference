@@ -81,7 +81,7 @@ def _configured_keys() -> list[str]:
     import os
     peer_keys = [
         os.getenv(k) for k in (
-            "INFERENCE_API_KEY", "FRIDAY_API_KEY", "STRATEX_API_KEY",
+            "FRIDAY_API_KEY", "STRATEX_API_KEY",
             "FUTURIS_API_KEY", "INTELX_API_KEY", "FORGE_API_KEY",
             "SENTINEL_API_KEY", "CORTEX_API_KEY", "VYRALX_API_KEY",
             "MEMORA_API_KEY", "FRIDAY_UNIVERSE_API_KEY"
