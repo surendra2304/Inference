@@ -228,10 +228,32 @@ async def consult_trading_bot(request: Request) -> AIUniverseDecision:
     try:
         req = TradingConsultRequest.model_validate(raw_json)
     except Exception as val_err:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Schema validation error: {val_err!s}"
-        )
+        # Peer-agent fallback adapter (e.g. Stratex or FRIDAY sending opportunity signals)
+        try:
+            adapted = {
+                "bot_id": str(raw_json.get("bot_id") or raw_json.get("symbol") or "stratex-bot-1"),
+                "trading_mode": raw_json.get("trading_mode", "PAPER"),
+                "consultation_reason": raw_json.get("consultation_reason", "SCHEDULED"),
+                "telemetry": raw_json.get("telemetry") or {
+                    "equity": float(raw_json.get("current_price", 10000.0)),
+                    "unrealized_pnl": 0.0,
+                    "realized_pnl": 0.0,
+                    "win_rate": 0.60,
+                    "profit_factor": 1.5,
+                    "max_drawdown_pct": 2.0,
+                    "consecutive_losses": 0,
+                    "total_trades": 10,
+                },
+                "strategy_performance": raw_json.get("strategy_performance", []),
+                "current_parameters": raw_json.get("current_parameters", {}),
+                "regime_data": raw_json.get("regime_data") or raw_json.get("indicators"),
+            }
+            req = TradingConsultRequest.model_validate(adapted)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Schema validation error: {val_err!s}"
+            )
 
     # 4. Rate limiting per bot_id
     _check_rate_limit(req.bot_id)
