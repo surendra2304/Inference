@@ -53,6 +53,8 @@ from app.routers.multimodal import multimodal_router
 from app.routers.nexus import nexus_router
 from app.routers.operational import operational_router
 from app.routers.predictions import predictions_router
+from app.routers.argument_evaluator import router as argument_evaluator_router
+from app.routers.belief_updater import router as belief_updater_router
 from app.routers.providers import providers_router
 from app.routers.sentinel import sentinel_router
 from app.routers.trading import router as trading_router
@@ -337,6 +339,8 @@ app.include_router(live_router, dependencies=[Depends(require_inference_api_key)
 app.include_router(multi_market_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(evolution_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(predictions_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(argument_evaluator_router, dependencies=[Depends(require_inference_api_key)])
+app.include_router(belief_updater_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(ecosystem_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(providers_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(forge_router, dependencies=[Depends(require_inference_api_key)])
@@ -421,3 +425,66 @@ if __name__ == "__main__":
     uvicorn.run("app.main:app", host=host, port=port, workers=int(os.environ.get("WEB_CONCURRENCY", 1)))
 
 
+
+
+# --- Multi-Model Deliberation Engine Integration ---
+
+@app.post("/v1/deliberation", dependencies=[Depends(require_inference_api_key)])
+async def multi_model_deliberation(
+    question: str,
+    strategy: str = "multi_model_consensus",
+    risk_level: str = "low",
+    require_evidence: bool = False,
+):
+    """Deliberate on a question using multiple model families."""
+    from app.agents.deliberation_engine import deliberation_engine, DeliberationStrategy, RiskLevel
+    from app.agents.deliberation_engine import DeliberationStrategy as DS, RiskLevel as RL
+    try:
+        strat = DS(strategy) if strategy in [s.value for s in DS] else DS.MULTI_MODEL_CONSENSUS
+        risk = RL(risk_level) if risk_level in [r.value for r in RL] else RL.LOW
+        result = await deliberation_engine.deliberate(
+            question=question,
+            strategy=strat,
+            risk_level=risk,
+            require_evidence=require_evidence,
+        )
+        return {
+            "decision": result.decision,
+            "consensus_reached": result.consensus_reached,
+            "agreeing_models": result.agreeing_models,
+            "dissenting_models": result.dissenting_models,
+            "confidence": result.confidence,
+            "evidence": result.evidence,
+            "requires_human_review": result.requires_human_review,
+            "strategy": result.strategy.value,
+        }
+    except Exception as exc:
+        raise HTTPException(500, f"Deliberation failed: {exc}")
+
+
+@app.get("/v1/deliberation/models/rankings", dependencies=[Depends(require_inference_api_key)])
+async def get_model_rankings():
+    """Get model rankings by accuracy from deliberation history."""
+    from app.agents.deliberation_engine import deliberation_engine
+    rankings = deliberation_engine.get_model_rankings()
+    return {"rankings": [{"model": m, "accuracy": a} for m, a in rankings]}
+
+
+@app.get("/v1/deliberation/history", dependencies=[Depends(require_inference_api_key)])
+async def get_deliberation_history(limit: int = 10):
+    """Get recent deliberation history."""
+    from app.agents.deliberation_engine import deliberation_engine
+    history = deliberation_engine.deliberation_history[-limit:]
+    return {
+        "history": [
+            {
+                "decision": h.decision,
+                "consensus": h.consensus_reached,
+                "confidence": h.confidence,
+                "agreeing": h.agreeing_models,
+                "dissenting": h.dissenting_models,
+            }
+            for h in history
+        ],
+        "total": len(history),
+    }
