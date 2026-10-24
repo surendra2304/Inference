@@ -395,6 +395,10 @@ app.include_router(temporal_reasoning_router, prefix="/api/v1/inference")
 from services.commonsense_reasoning_engine import router as commonsense_router
 app.include_router(commonsense_router, prefix="/api/v1/inference")
 
+# --- Multi-Agent Argumentation Engine Integration ---
+from services.multi_agent_argumentation_engine import router as argumentation_router
+app.include_router(argumentation_router, prefix="/api/v1/inference")
+
 
 @app.get("/ui", response_class=HTMLResponse)
 async def ui_dashboard():
