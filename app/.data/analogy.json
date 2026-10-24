@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "case_id": "case_b57a57d7f8d7",
+      "problem": "Market crash 2020",
+      "solution": "Buy dips",
+      "outcome": "success"
+    },
+    {
+      "case_id": "case_f4e309f54ca1",
+      "problem": "Market crash 2020",
+      "solution": "Buy dips",
+      "outcome": "success"
+    },
+    {
+      "case_id": "case_a1e468e58b3e",
+      "problem": "Market crash 2020",
+      "solution": "Buy dips",
+      "outcome": "success"
+    },
+    {
+      "case_id": "case_f50fde4313a5",
+      "problem": "Market crash 2020",
+      "solution": "Buy dips",
+      "outcome": "success"
+    }
+  ]
+}
