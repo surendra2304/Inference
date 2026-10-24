@@ -36,6 +36,11 @@ from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.gateway import model_gateway
 from app.providers.http_client import http_client_pool
 from app.routers.admin_analytics import analytics_router
+from app.routers.multi_model_deliberation import router as deliberation_router
+from app.routers.self_evolving_reasoning import router as evolving_reasoning_router
+from services.reasoning_chain_optimizer import router as reasoning_optimizer_router
+from services.multi_hypothesis_reasoner import router as multi_reasoner_router
+from services.belief_revision_engine import router as belief_revision_router
 from app.routers.batch import batch_router
 from app.routers.debate_trace import debate_router
 from app.routers.ecosystem import ecosystem_router
@@ -329,6 +334,11 @@ app.include_router(forge_health_router)
 app.include_router(operational_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(api_router)  # per-route auth applied in app/api/routes.py
 app.include_router(friday_router)  # already carries its own verify_friday_api_key
+app.include_router(deliberation_router, prefix="/api/v1/inference")
+app.include_router(evolving_reasoning_router, prefix="/api/v1/inference")
+app.include_router(reasoning_optimizer_router, prefix="/api/v1/inference")
+app.include_router(multi_reasoner_router, prefix="/api/v1/inference")
+app.include_router(belief_revision_router, prefix="/api/v1/inference")
 app.include_router(task_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(agent_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(instant_router, dependencies=[Depends(require_inference_api_key)])
@@ -356,6 +366,26 @@ app.include_router(intelx_router, dependencies=[Depends(require_inference_api_ke
 app.include_router(futuris_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(deliberate_stream_router)
 app.include_router(mesh_router)
+
+# --- Multi-Model Deliberation Engine Integration ---
+from services.multi_model_deliberation_engine import router as multi_model_delim_router
+app.include_router(multi_model_delim_router, prefix="/api/v1/inference")
+
+# --- Argument Analysis Engine Integration ---
+from services.argument_analysis_engine import router as argument_analysis_router
+app.include_router(argument_analysis_router, prefix="/api/v1/inference")
+
+# --- Causal Inference Engine Integration ---
+from services.causal_inference_engine import router as causal_inference_router
+app.include_router(causal_inference_router, prefix="/api/v1/inference")
+
+# --- Reasoning Path Explorer Integration ---
+from services.reasoning_path_explorer import router as reasoning_path_router
+app.include_router(reasoning_path_router, prefix="/api/v1/inference")
+
+# --- Knowledge Conflict Resolver Integration ---
+from services.knowledge_conflict_resolver import router as knowledge_conflict_router
+app.include_router(knowledge_conflict_router, prefix="/api/v1/inference")
 
 
 @app.get("/ui", response_class=HTMLResponse)
