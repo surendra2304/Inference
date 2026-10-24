@@ -387,6 +387,14 @@ app.include_router(reasoning_path_router, prefix="/api/v1/inference")
 from services.knowledge_conflict_resolver import router as knowledge_conflict_router
 app.include_router(knowledge_conflict_router, prefix="/api/v1/inference")
 
+# --- Temporal Reasoning Engine Integration ---
+from services.temporal_reasoning_engine import router as temporal_reasoning_router
+app.include_router(temporal_reasoning_router, prefix="/api/v1/inference")
+
+# --- Commonsense Reasoning Engine Integration ---
+from services.commonsense_reasoning_engine import router as commonsense_router
+app.include_router(commonsense_router, prefix="/api/v1/inference")
+
 
 @app.get("/ui", response_class=HTMLResponse)
 async def ui_dashboard():
