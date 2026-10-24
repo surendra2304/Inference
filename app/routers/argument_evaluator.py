@@ -17,6 +17,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from fastapi import APIRouter, HTTPException
+
+router = APIRouter()
+
 
 @dataclass
 class ArgumentClaim:
@@ -507,3 +511,42 @@ class ArgumentEvaluator:
             "valid_arguments": sum(1 for a in self._arguments.values() if a.validity),
             "sound_arguments": sum(1 for a in self._arguments.values() if a.soundness),
         }
+
+
+# ── Router Endpoints ──────────────────────────────────────────────────────────
+
+argument_evaluator = ArgumentEvaluator()
+
+
+@router.post("/api/v1/inference/arguments/analyze")
+async def analyze_argument_structure(payload: dict):
+    """Analyze argument structure from text."""
+    topic = payload.get("topic", "general")
+    text = payload.get("text", "")
+    if not text:
+        raise HTTPException(status_code=400, detail="Missing required 'text' field")
+    arg = argument_evaluator.analyze_structure(topic=topic, text=text)
+    return {
+        "argument_id": arg.argument_id,
+        "topic": arg.topic,
+        "structure": arg.structure,
+        "strength": arg.strength,
+        "validity": arg.validity,
+        "soundness": arg.soundness,
+        "fallacies": [f.__dict__ if hasattr(f, "__dict__") else str(f) for f in arg.fallacies],
+        "claims": [c.__dict__ for c in arg.claims],
+    }
+
+
+@router.post("/api/v1/inference/arguments/fallacies")
+async def detect_fallacies_endpoint(payload: dict):
+    """Detect logical fallacies."""
+    text = payload.get("text", "")
+    fallacies = argument_evaluator.detect_fallacies(text)
+    return [f.__dict__ for f in fallacies]
+
+
+@router.get("/api/v1/inference/arguments/report")
+async def get_argument_report():
+    """Get argument evaluation summary report."""
+    return argument_evaluator.get_evaluation_report()
