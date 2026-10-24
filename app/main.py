@@ -36,6 +36,7 @@ from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.gateway import model_gateway
 from app.providers.http_client import http_client_pool
 from app.routers.admin_analytics import analytics_router
+from app.routers.multi_model_deliberation import router as deliberation_router
 from app.routers.batch import batch_router
 from app.routers.debate_trace import debate_router
 from app.routers.ecosystem import ecosystem_router
@@ -329,6 +330,7 @@ app.include_router(forge_health_router)
 app.include_router(operational_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(api_router)  # per-route auth applied in app/api/routes.py
 app.include_router(friday_router)  # already carries its own verify_friday_api_key
+app.include_router(deliberation_router, prefix="/api/v1/inference")
 app.include_router(task_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(agent_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(instant_router, dependencies=[Depends(require_inference_api_key)])
