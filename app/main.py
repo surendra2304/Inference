@@ -407,6 +407,10 @@ app.include_router(moral_router, prefix="/api/v1/inference")
 from services.analogical_reasoning_engine import router as analogy_router
 app.include_router(analogy_router, prefix="/api/v1/inference")
 
+# --- Probabilistic Logic Engine Integration ---
+from services.probabilistic_logic_engine import router as problog_router
+app.include_router(problog_router, prefix="/api/v1/inference")
+
 
 @app.get("/ui", response_class=HTMLResponse)
 async def ui_dashboard():
