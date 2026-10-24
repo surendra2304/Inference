@@ -399,6 +399,10 @@ app.include_router(commonsense_router, prefix="/api/v1/inference")
 from services.multi_agent_argumentation_engine import router as argumentation_router
 app.include_router(argumentation_router, prefix="/api/v1/inference")
 
+# --- Moral Reasoning Engine Integration ---
+from services.moral_reasoning_engine import router as moral_router
+app.include_router(moral_router, prefix="/api/v1/inference")
+
 
 @app.get("/ui", response_class=HTMLResponse)
 async def ui_dashboard():
