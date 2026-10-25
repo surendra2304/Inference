@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.agents.software_specialists import register_software_specialists
 from app.api.agent_routes import agent_router
+from app.scientific_service import router as scientific_router
 from app.api.deliberate_stream_routes import deliberate_stream_router
 from app.api.friday_routes import friday_router
 from app.api.instant_routes import instant_router
@@ -330,6 +331,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Health probes and the dashboard's read-only routes stay unauthenticated so
 # liveness checks and /ui keep working without a credential.
 app.include_router(health_router)
+app.include_router(scientific_router)  # research skills, stats, power, evidence audit
 app.include_router(forge_health_router)
 app.include_router(operational_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(api_router)  # per-route auth applied in app/api/routes.py

@@ -123,6 +123,31 @@ _ROLE_MAP: dict[tuple[str, str], str] = {
 }
 
 
+class ResearchPlanRequest(BaseModel):
+    """Ask Inference which scientific skills a research task needs."""
+
+    caller_agent: CallerAgent = Field(default="general")
+    task: str = Field(..., min_length=3)
+    limit: int = Field(default=3, ge=1, le=8)
+
+
+@agent_router.post("/research-plan", status_code=status.HTTP_200_OK)
+async def research_plan_endpoint(req: ResearchPlanRequest) -> dict[str, Any]:
+    """Research-skill routing for peer agents before they spend model tokens.
+
+    FRIDAY, IntelX, Cortex and Sentinel call this to learn which procedures,
+    databases and validation checks a research task requires.
+    """
+    from app.scientific_service import get_service
+
+    started = time.perf_counter()
+    plan = get_service().plan(req.task, limit=req.limit)
+    plan["caller_agent"] = req.caller_agent
+    plan["latency_ms"] = round((time.perf_counter() - started) * 1000, 3)
+    _record_telemetry(req.caller_agent, plan["latency_ms"], False)
+    return plan
+
+
 @agent_router.post("/assist", response_model=AgentAssistResponse, status_code=status.HTTP_200_OK)
 async def agent_assist_endpoint(req: AgentAssistRequest):
     """Run an inter-agent assistance request through the configured inference path.
