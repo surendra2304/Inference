@@ -101,12 +101,22 @@ class ScientificResearchService:
         result = self.engine.analyse_groups(clean, alpha)
         return result
 
-    def power(self, effect_size: float, alpha: float = 0.05, power: float = 0.8) -> dict[str, Any]:
+    def power(self, effect_size: float, alpha: float = 0.05, power: float = 0.8,
+              sample_size: int | None = None) -> dict[str, Any]:
         if effect_size <= 0:
             raise ValueError("effect_size must be positive")
         if not 0 < alpha < 1 or not 0 < power < 1:
             raise ValueError("alpha and power must be in (0, 1)")
-        return self.engine.designer.power_plan(effect_size, alpha, power)
+        plan = self.engine.designer.power_plan(effect_size, alpha, power)
+        if sample_size is not None and sample_size >= 2:
+            n_per_group = max(2, sample_size // 2)
+            achieved = self.engine.designer.power.power_two_sample(effect_size, n_per_group, alpha)
+            plan["actual_sample_size"] = sample_size
+            plan["n_per_group"] = n_per_group
+            plan["total_units"] = sample_size
+            plan["power"] = round(achieved, 4)
+            plan["achieved_power"] = round(achieved, 4)
+        return plan
 
     def hypotheses(self, measurement: str, mechanism: str,
                    observations: Iterable[dict[str, Any]],
@@ -147,6 +157,13 @@ class ScientificResearchService:
         ]
         report = writer.audit(prepared)
         report["rendered"] = writer.render("Evidence audit", prepared)
+        unsupported = report.get("unsupported") or []
+        unsupported_count = len(unsupported) if isinstance(unsupported, list) else int(unsupported)
+        report["verdict"] = "pass" if unsupported_count == 0 else "warn"
+        warnings = []
+        if unsupported_count > 0:
+            warnings.append(f"{unsupported_count} claim(s) lack citation evidence")
+        report["warnings"] = warnings
         return report
 
     # -- capability card --------------------------------------------------
@@ -200,6 +217,7 @@ if _ROUTER_AVAILABLE:
         effect_size: float = Field(gt=0.0)
         alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
         power: float = Field(default=0.8, gt=0.0, lt=1.0)
+        sample_size: int | None = Field(default=None, ge=2)
 
     class ObservationModel(BaseModel):  # type: ignore[misc]
         id: str = "o1"
@@ -253,7 +271,7 @@ if _ROUTER_AVAILABLE:
     @router.post("/power")
     def power(request: PowerRequest) -> dict[str, Any]:
         try:
-            return get_service().power(request.effect_size, request.alpha, request.power)
+            return get_service().power(request.effect_size, request.alpha, request.power, request.sample_size)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -273,8 +291,14 @@ if _ROUTER_AVAILABLE:
                 [claim.model_dump() for claim in request.claims],
                 [record.model_dump() for record in request.evidence],
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            return {
+                "verdict": "fail",
+                "warnings": [f"Evidence audit exception: {exc}"],
+                "claims": len(request.claims),
+                "unsupported": len(request.claims),
+                "supported": 0,
+            }
 
 else:  # pragma: no cover
     router = None

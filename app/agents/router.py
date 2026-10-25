@@ -24,6 +24,7 @@ DOMAIN_KEYWORD_MAP = {
     "strategist": ["strategy", "strategies", "strategic", "priority", "priorities", "roadmap", "decision", "decisions", "trade-off", "tradeoffs", "trade-offs", "cost-benefit", "plan", "planning"],
     "critic": ["critique", "critiques", "red team", "weakness", "weaknesses", "fallacy", "fallacies", "counterexample", "counterexamples", "challenge"],
     "trading_analyst": ["trading", "trade", "trades", "trader", "pnl", "drawdown", "drawdowns", "win rate", "profit factor", "stop loss", "take profit", "bot", "bots", "futures", "scalper", "scalping", "sharpe", "sortino", "orderbook"],
+    "scientific_analyst": ["experiment", "clinical trial", "hypothesis", "hypotheses", "genomics", "bioinformatics", "crispr", "pharmacokinetics", "biomarker", "statistical power", "power analysis", "rct"],
 }
 
 
@@ -45,6 +46,17 @@ class TaskRouter:
         for agent_id, keywords in DOMAIN_KEYWORD_MAP.items():
             if any(re.search(rf"\b{re.escape(kw)}\b", q_lower) for kw in keywords):
                 return agent_id
+        # Consult scientific skill matcher via lazy import
+        try:
+            try:
+                from app.agents.real_scientific_skills import SkillMatcher
+            except Exception:
+                from .real_scientific_skills import SkillMatcher
+            best_match = SkillMatcher().best(question)
+            if best_match and best_match.score >= 0.15:
+                return "scientific_analyst"
+        except Exception:
+            pass
         return "researcher"
 
     def select_review_pair(self, question: str) -> list[str]:
@@ -62,6 +74,8 @@ class TaskRouter:
             return ["data_analyst", "fact_checker"]
         elif primary == "trading_analyst":
             return ["trading_analyst", "strategist"]
+        elif primary == "scientific_analyst":
+            return ["scientific_analyst", "data_analyst"]
         else:
             return [primary, "critic"]
 
@@ -74,7 +88,7 @@ class TaskRouter:
         panel.append(primary)
 
         # Candidate specialists for debate
-        candidates = ["trading_analyst", "strategist", "critic", "data_analyst", "architect", "security_analyst", "coder", "fact_checker"]
+        candidates = ["scientific_analyst", "trading_analyst", "strategist", "critic", "data_analyst", "architect", "security_analyst", "coder", "fact_checker"]
         for cand in candidates:
             if cand not in panel and len(panel) < max_agents:
                 panel.append(cand)
