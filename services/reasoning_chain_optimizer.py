@@ -115,7 +115,7 @@ class ReasoningChainOptimizer:
         ]
         for sid, name, desc, problem_types in strategies:
             self._strategies[sid] = ReasoningStrategy(
-                strategy_id=hashlib.md5(f"strategy:{sid}").hexdigest()[:12],
+                strategy_id=hashlib.md5(f"strategy:{sid}".encode()).hexdigest()[:12],
                 strategy_name=name,
                 description=desc,
                 estimated_steps=5 + len(problem_types) * 3,

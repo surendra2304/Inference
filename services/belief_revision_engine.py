@@ -159,7 +159,7 @@ class BeliefRevisionEngine:
             src = self._sources.get(source)
             if not src:
                 src = SourceReliability(
-                    source_id=hashlib.md5(f"source:{source}").hexdigest()[:12],
+                    source_id=hashlib.md5(f"source:{source}".encode()).hexdigest()[:12],
                     source_name=source,
                     reliability_score=source_reliability,
                 )
@@ -311,7 +311,7 @@ class BeliefRevisionEngine:
         src = self._sources.get(source_name)
         if not src:
             src = SourceReliability(
-                source_id=hashlib.md5(f"source:{source_name}").hexdigest()[:12],
+                source_id=hashlib.md5(f"source:{source_name}".encode()).hexdigest()[:12],
                 source_name=source_name,
             )
             self._sources[source_name] = src
