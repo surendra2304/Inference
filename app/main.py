@@ -335,8 +335,6 @@ app.include_router(scientific_router)  # research skills, stats, power, evidence
 app.include_router(forge_health_router)
 app.include_router(operational_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(api_router)  # per-route auth applied in app/api/routes.py
-from app.api.real_engines_routes import real_engines_router
-app.include_router(real_engines_router)
 app.include_router(friday_router)  # already carries its own verify_friday_api_key
 app.include_router(deliberation_router, prefix="/api/v1/inference")
 app.include_router(evolving_reasoning_router, prefix="/api/v1/inference")
