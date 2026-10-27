@@ -336,11 +336,12 @@ app.include_router(forge_health_router)
 app.include_router(operational_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(api_router)  # per-route auth applied in app/api/routes.py
 app.include_router(friday_router)  # already carries its own verify_friday_api_key
-app.include_router(deliberation_router, prefix="/api/v1/inference")
-app.include_router(evolving_reasoning_router, prefix="/api/v1/inference")
-app.include_router(reasoning_optimizer_router, prefix="/api/v1/inference")
-app.include_router(multi_reasoner_router, prefix="/api/v1/inference")
-app.include_router(belief_revision_router, prefix="/api/v1/inference")
+# These routers declare absolute /api/v1/inference/... paths; mount at root.
+app.include_router(deliberation_router)
+app.include_router(evolving_reasoning_router)
+app.include_router(reasoning_optimizer_router)
+app.include_router(multi_reasoner_router)
+app.include_router(belief_revision_router)
 app.include_router(task_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(agent_router, dependencies=[Depends(require_inference_api_key)])
 app.include_router(instant_router, dependencies=[Depends(require_inference_api_key)])
@@ -371,47 +372,47 @@ app.include_router(mesh_router)
 
 # --- Multi-Model Deliberation Engine Integration ---
 from services.multi_model_deliberation_engine import router as multi_model_delim_router
-app.include_router(multi_model_delim_router, prefix="/api/v1/inference")
+app.include_router(multi_model_delim_router, prefix="/api/v1")
 
 # --- Argument Analysis Engine Integration ---
 from services.argument_analysis_engine import router as argument_analysis_router
-app.include_router(argument_analysis_router, prefix="/api/v1/inference")
+app.include_router(argument_analysis_router, prefix="/api/v1")
 
 # --- Causal Inference Engine Integration ---
 from services.causal_inference_engine import router as causal_inference_router
-app.include_router(causal_inference_router, prefix="/api/v1/inference")
+app.include_router(causal_inference_router, prefix="/api/v1")
 
 # --- Reasoning Path Explorer Integration ---
 from services.reasoning_path_explorer import router as reasoning_path_router
-app.include_router(reasoning_path_router, prefix="/api/v1/inference")
+app.include_router(reasoning_path_router, prefix="/api/v1")
 
 # --- Knowledge Conflict Resolver Integration ---
 from services.knowledge_conflict_resolver import router as knowledge_conflict_router
-app.include_router(knowledge_conflict_router, prefix="/api/v1/inference")
+app.include_router(knowledge_conflict_router, prefix="/api/v1")
 
 # --- Temporal Reasoning Engine Integration ---
 from services.temporal_reasoning_engine import router as temporal_reasoning_router
-app.include_router(temporal_reasoning_router, prefix="/api/v1/inference")
+app.include_router(temporal_reasoning_router, prefix="/api/v1")
 
 # --- Commonsense Reasoning Engine Integration ---
 from services.commonsense_reasoning_engine import router as commonsense_router
-app.include_router(commonsense_router, prefix="/api/v1/inference")
+app.include_router(commonsense_router, prefix="/api/v1")
 
 # --- Multi-Agent Argumentation Engine Integration ---
 from services.multi_agent_argumentation_engine import router as argumentation_router
-app.include_router(argumentation_router, prefix="/api/v1/inference")
+app.include_router(argumentation_router, prefix="/api/v1")
 
 # --- Moral Reasoning Engine Integration ---
 from services.moral_reasoning_engine import router as moral_router
-app.include_router(moral_router, prefix="/api/v1/inference")
+app.include_router(moral_router, prefix="/api/v1")
 
 # --- Analogical Reasoning Engine Integration ---
 from services.analogical_reasoning_engine import router as analogy_router
-app.include_router(analogy_router, prefix="/api/v1/inference")
+app.include_router(analogy_router, prefix="/api/v1")
 
 # --- Probabilistic Logic Engine Integration ---
 from services.probabilistic_logic_engine import router as problog_router
-app.include_router(problog_router, prefix="/api/v1/inference")
+app.include_router(problog_router, prefix="/api/v1")
 
 
 @app.get("/ui", response_class=HTMLResponse)
