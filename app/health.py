@@ -149,6 +149,21 @@ async def service_ready(response: Response):
 
 
 
+    from app.core.config import settings
+    db_backend = "unconfigured"
+    try:
+        backend_prop = getattr(settings, "database_backend", None)
+        if backend_prop:
+            db_backend = str(backend_prop)
+        else:
+            from app.core.orchestrator import orchestrator
+            mem = getattr(orchestrator, "memory", None)
+            engine = getattr(mem, "engine", None) or getattr(mem, "_engine", None)
+            if engine is not None:
+                db_backend = str(getattr(engine.dialect, "name", "unconfigured"))
+    except Exception:
+        pass
+
     return {
 
         "status": "ready" if is_ready else "not_ready",
@@ -162,6 +177,8 @@ async def service_ready(response: Response):
         "evidence_class": "service_readiness",
 
         "ready": is_ready,
+
+        "database_backend": db_backend,
 
         "database": {
 

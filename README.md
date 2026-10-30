@@ -264,7 +264,7 @@ All configuration is loaded from environment variables and `.env`. Keys support 
 | `THIRD_PARTY_*_KEYS` | `string` | `""` | Dedicated fallback key pools for tertiary redundancy |
 | `PORT` | `int` | `8000` | Application server port |
 | `HOST` | `string` | `0.0.0.0` | Bind interface |
-| `DATABASE_URL` | `string` | `sqlite:///data/universe.db` | Persistent consultation & task memory database |
+| `DATABASE_URL` | `string` | *required in production* | Oracle Autonomous Database DSN for persistent consultation & task memory (PostgreSQL/SQLite are not supported) |
 | `WEB_CONCURRENCY` | `int` | `1` | Uvicorn worker process count |
 | `MEMORY_TRIM_ENABLED`| `bool` | `true` | Proactive glibc memory trim to prevent container OOM |
 | `MEMORY_TRIM_THRESHOLD_MB`| `float` | `400.0` | RSS high-water trigger for idle memory reclamation |

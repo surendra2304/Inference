@@ -3,7 +3,7 @@
 from pydantic import BaseModel, Field
 
 from app.memory.base import BaseMemory, StrategyRecord
-from app.memory.sqlite import SQLiteMemory
+from app.memory.factory import create_memory_store
 from app.utils.ids import generate_id
 from app.utils.logger import logger
 
@@ -25,7 +25,7 @@ class StrategyStore:
     """Saves, updates, and retrieves learned orchestration patterns and agent compositions."""
 
     def __init__(self, memory: BaseMemory | None = None) -> None:
-        self.memory = memory or SQLiteMemory()
+        self.memory = memory or create_memory_store()
 
     async def save_learned_pattern(
         self,

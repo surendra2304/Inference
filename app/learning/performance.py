@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.memory.base import BaseMemory
-from app.memory.sqlite import SQLiteMemory
+from app.memory.factory import create_memory_store
 from app.utils.bounded_store import BoundedList
 from app.utils.logger import logger
 
@@ -40,7 +40,7 @@ class PerformanceTracker:
     """
 
     def __init__(self, memory: BaseMemory | None = None) -> None:
-        self.memory = memory or SQLiteMemory()
+        self.memory = memory or create_memory_store()
         self._outcomes: BoundedList[dict[str, Any]] = BoundedList(
             "performance_outcomes", max_entries=MAX_RECORDED_OUTCOMES
         )

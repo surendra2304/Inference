@@ -29,7 +29,7 @@ from app.agents.registry import agent_registry
 from app.core.config import settings
 from app.core.dag import TaskComplexity
 from app.memory.base import BaseMemory, MessageRecord, RunRecord
-from app.memory.sqlite import SQLiteMemory
+from app.memory.factory import create_memory_store
 from app.providers.base import ProviderMessage, ProviderRequest, ProviderResponse
 from app.providers.gateway import model_gateway
 from app.providers.health import provider_health_tracker
@@ -138,7 +138,7 @@ class CollaborationEngine:
         memory: BaseMemory | None = None,
         registry: BaseAgentRegistry | None = None
     ) -> None:
-        self.memory = memory or SQLiteMemory()
+        self.memory = memory or create_memory_store()
         self.registry = registry or agent_registry
 
     def _resolve_gate_provider(self, model_cfg: AgentModelConfig) -> str:

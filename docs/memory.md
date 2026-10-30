@@ -7,5 +7,5 @@
 4. **Knowledge & Evidence Cache**: Validated factual assertions, benchmark references, reusable research notes.
 
 ## Storage Architecture
-- Single SQLite database file (`data/universe.db`).
+- Oracle Autonomous Database (`INFERENCE` login/schema on the FRIDAY Universe DB). PostgreSQL and SQLite are not supported.
 - Tables: `agents`, `memories`, `relationships`, `tasks`, `runs`, `messages`, `evaluations`, `experiments`, `strategies`.

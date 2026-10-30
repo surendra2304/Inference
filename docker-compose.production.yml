@@ -8,14 +8,11 @@
 #     with nginx unstartable the stack exposed nothing;
 #   * `env_file: .env` is hard-required while the repository ships
 #     .env.example, so `docker compose up` failed before building anything;
-#   * redis and postgres were provisioned but nothing in app/ connects to
-#     them - the service reads SQLite (settings.DATABASE_URL defaults to
-#     sqlite:///data/universe.db) and no Redis/Postgres driver is even
-#     declared in requirements.txt.
+#   * redis and postgres were provisioned but nothing in app/ connects to them.
 #
-# The application is a single uvicorn process with a SQLite store, so that is
-# what this file now provisions: one API container with a published port and a
-# persistent data volume.
+# The application is a single uvicorn process; this file provisions one API
+# container with a published port. Persistence is Oracle Autonomous Database,
+# supplied through the required DATABASE_URL.
 
 services:
   api:
@@ -25,8 +22,8 @@ services:
     environment:
       APP_ENV: production
       PORT: "8000"
-      # Matches settings.DATABASE_URL's default so state lands in the volume.
-      DATABASE_URL: sqlite:///data/universe.db
+      # Oracle Autonomous Database DSN; no local database is provisioned.
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be an Oracle DSN}
       WEB_CONCURRENCY: "1"
     # Optional so `docker compose up` works on a fresh clone. Copy
     # .env.example to .env to supply provider keys - without them the service

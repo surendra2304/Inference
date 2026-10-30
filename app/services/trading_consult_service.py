@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, NamedTuple, cast
+from typing import Any, Literal, NamedTuple
 from uuid import uuid4
 
 from app.agents.base import Agent
@@ -19,7 +19,7 @@ from app.memory.base import (
     RunRecord,
     TaskRecord,
 )
-from app.memory.sqlite import SQLiteMemory
+from app.memory.factory import create_memory_store, task_mode_column
 from app.monitoring import monitor
 from app.optimization import circuit_breaker, concurrency_controller, telemetry_cache
 from app.providers.base import ProviderMessage, ProviderRequest
@@ -79,7 +79,7 @@ class TradingConsultService:
     """
 
     def __init__(self, memory: BaseMemory | None = None) -> None:
-        self.memory: SQLiteMemory = cast(SQLiteMemory, memory) if memory is not None else SQLiteMemory()
+        self.memory: BaseMemory = memory if memory is not None else create_memory_store()
         self.registry = agent_registry
 
     def _format_context(self, req: TradingConsultRequest) -> str:
@@ -926,9 +926,13 @@ class TradingConsultService:
 
     async def get_decision_by_id(self, decision_id: str) -> AIUniverseDecision | None:
         """Retrieves a past advisory decision from memory."""
+        # ``MODE`` is reserved in Oracle, so the Oracle schema stores that column as TASK_MODE.
+        # Ask the store for the identifier rather than hardcoding the SQLite name.
+        mode_column = task_mode_column(self.memory)
         async with self.memory.connect() as db:
             async with db.execute(
-                "SELECT * FROM tasks WHERE mode = 'trading_consult' AND result IS NOT NULL ORDER BY created_at DESC"
+                f"SELECT * FROM tasks WHERE {mode_column} = 'trading_consult' AND result IS NOT NULL "
+                "ORDER BY created_at DESC"
             ) as cursor:
                 rows = await cursor.fetchall()
                 for row in rows:
@@ -946,8 +950,9 @@ class TradingConsultService:
         testnet_entries: list[dict[str, Any]] = []
         paper_entries: list[dict[str, Any]] = []
 
+        mode_column = task_mode_column(self.memory)
         async with self.memory.connect() as db, db.execute(
-            "SELECT * FROM tasks WHERE mode = 'trading_consult' AND result IS NOT NULL"
+            f"SELECT * FROM tasks WHERE {mode_column} = 'trading_consult' AND result IS NOT NULL"
         ) as cursor:
             rows = await cursor.fetchall()
             for r in rows:

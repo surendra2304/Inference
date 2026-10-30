@@ -16,7 +16,7 @@ from app.core.dag import DAGNode, ExecutionDAG, TaskComplexity, classify_task_co
 from app.learning.performance import PerformanceTracker
 from app.learning.strategy_store import StrategyStore
 from app.memory.base import BaseMemory, TaskRecord
-from app.memory.sqlite import SQLiteMemory
+from app.memory.factory import create_memory_store
 from app.monitoring import monitor
 from app.security.prompt_isolation import scrub_credentials
 from app.utils.bounded_store import BoundedStore, missing_entry_detail
@@ -99,7 +99,7 @@ class Orchestrator(BaseOrchestrator):
         self,
         memory: BaseMemory | None = None,
     ) -> None:
-        self.memory = memory or SQLiteMemory()
+        self.memory = memory or create_memory_store()
         self.router = task_router
         self.registry = agent_registry
         self.debate_engine = CollaborationEngine(memory=self.memory, registry=self.registry)

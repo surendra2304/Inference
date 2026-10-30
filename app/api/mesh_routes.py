@@ -341,7 +341,9 @@ async def get_mesh_status() -> MeshStatusResponse:
 
             "oracle_23ai": f"Oracle ATP 23ai (friday_universe_db on {settings.ORACLE_HOST}:{settings.ORACLE_PORT})",
 
-            "fallback": f"SQLite ({settings.DATABASE_URL} with WAL mode)",
+            "active_backend": settings.database_backend,
+
+            "fallback": settings.memory_backend_description(),
 
             "ephemeral_shm": "/dev/shm/inference.db" if os.path.exists("/dev/shm") else ":memory:",
 

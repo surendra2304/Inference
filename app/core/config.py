@@ -97,8 +97,14 @@ from typing import Anyfrom pydantic import Field, field_validatorfrom pydanti
     # Security & Auth Configuration
     INSECURE_DEV_AUTH: bool = Field(default=False, description="Explicitly enable unauthenticated development mode (NEVER for production)")
 
-    # Database
-    DATABASE_URL: str = "sqlite:///data/universe.db"
+    # Database
+    #: No default on purpose. Configure ``DATABASE_URL`` explicitly — for example
+    #: ``oracle+oracledb://INFERENCE:password@host:1521?service_name=service`` or
+    #: ``sqlite:///data/universe.db`` — or provide the ``ORACLE_*`` settings below. The
+    #: application refuses to start when neither is configured; the old
+    #: ``sqlite:///data/universe.db`` default silently persisted audit records to a local
+    #: file that was lost on redeploy.
+    DATABASE_URL: str = ""
 
     # Oracle Autonomous Database 23ai (friday_universe_db) Configuration
     ORACLE_CORE_ASYNC_URL: str | None = Field(default=None, description="Oracle 23ai Async DSN (friday_universe_db)")
@@ -106,8 +112,73 @@ from typing import Anyfrom pydantic import Field, field_validatorfrom pydanti
     ORACLE_HOST: str = Field(default="adb.ap-hyderabad-1.oraclecloud.com", description="Oracle ATP Host")
     ORACLE_PORT: int = Field(default=1521, description="Oracle ATP TCPS Port")
     ORACLE_SERVICE: str = Field(default="g7e6177242670c3_fridaycore_medium.adb.oraclecloud.com", description="Oracle Service Name")
-    ORACLE_USER: str = Field(default="ADMIN", description="Oracle DB Username")
-    ORACLE_PASSWORD: str | None = Field(default=None, description="Oracle DB Password")
+    ORACLE_USER: str = Field(default="", description="Oracle DB Username (per-agent login, never ADMIN)")
+    ORACLE_PASSWORD: str | None = Field(default=None, description="Oracle DB Password")
+    ORACLE_PROTOCOL: str = Field(
+        default="tcps",
+        description=(
+            "Protocol for the Easy Connect DSN built from ORACLE_HOST/ORACLE_SERVICE. "
+            "Autonomous Database only accepts TCPS; use 'tcp' for an on-premise listener."
+        ),
+    )
+    ORACLE_POOL_SIZE: int = Field(
+        default=2,
+        ge=1,
+        le=32,
+        description="Connections per Oracle memory-store pool. Seven agents share one VM.",
+    )
+
+    @property
+    def oracle_configured(self) -> bool:
+        """True when the Oracle settings are complete enough to open a connection."""
+        if (self.ORACLE_CORE_URL or "").strip() or (self.ORACLE_CORE_ASYNC_URL or "").strip():
+            return True
+        return bool(
+            (self.ORACLE_HOST or "").strip()
+            and (self.ORACLE_SERVICE or "").strip()
+            and (self.ORACLE_USER or "").strip()
+            and self.ORACLE_PASSWORD
+        )
+
+    @property
+    def database_backend(self) -> str:
+        """Name of the configured memory backend: ``oracle``, ``sqlite`` or ``unconfigured``."""
+        url = (self.DATABASE_URL or "").strip().lower()
+        if url.startswith("oracle"):
+            return "oracle"
+        if url.startswith("sqlite"):
+            return "sqlite"
+        if not url and self.oracle_configured:
+            return "oracle"
+        return "unconfigured"
+
+    def memory_backend_description(self) -> str:
+        """Describe the configured memory backend for status endpoints and startup logs."""
+        backend = self.database_backend
+        if backend == "oracle":
+            url = (self.DATABASE_URL or "").strip()
+            if url:
+                target = url.split("@", 1)[1] if "@" in url else url
+                return f"Oracle Autonomous Database 26ai ({target})"
+            return (
+                "Oracle Autonomous Database 26ai "
+                f"({self.ORACLE_SERVICE} on {self.ORACLE_HOST}:{self.ORACLE_PORT})"
+            )
+        if backend == "sqlite":
+            return f"SQLite ({self.DATABASE_URL} with WAL mode)"
+        return "unconfigured (no DATABASE_URL and no Oracle settings)"
+
+    def validate_database_configuration(self) -> str:
+        """Fail closed unless a memory backend is configured; returns its name.
+
+        Called from the application lifespan. A deployment with neither ``DATABASE_URL`` nor
+        Oracle settings must stop at startup instead of serving from an implicit local SQLite
+        file that loses every audit record on the next redeploy.
+        """
+        backend = self.database_backend
+        if backend == "unconfigured":
+            raise RuntimeError(UNCONFIGURED_DATABASE_MESSAGE)
+        return backend
 
     # dokploy-postgres Database Configuration
     POSTGRES_HOST: str = Field(default="dokploy-postgres", description="PostgreSQL host for inference_db")
@@ -446,8 +517,9 @@ from typing import Anyfrom pydantic import Field, field_validatorfrom pydanti
         if self.LOCAL_ENABLED:
             configured_providers.append("local")
 
-        return {
-            "app_env": self.APP_ENV,
+        return {
+            "app_env": self.APP_ENV,
+            "database_backend": self.database_backend,
             "configured_providers": configured_providers,
             "local_enabled": self.LOCAL_ENABLED,
             "insecure_dev_auth": self.INSECURE_DEV_AUTH,
@@ -457,4 +529,15 @@ from typing import Anyfrom pydantic import Field, field_validatorfrom pydanti
 
 
 
+#: Shared by :meth:`Settings.validate_database_configuration` and the memory store factory, so
+#: the operator sees one message regardless of which entry point noticed the misconfiguration.
+UNCONFIGURED_DATABASE_MESSAGE = (
+    "No memory database is configured. Set DATABASE_URL to an "
+    "'oracle+oracledb://user:password@host:port?service_name=service' URL (or a sqlite:/// URL "
+    "for local development), or provide ORACLE_HOST, ORACLE_SERVICE, ORACLE_USER and "
+    "ORACLE_PASSWORD (alternatively ORACLE_CORE_URL). Refusing to start rather than implicitly "
+    "writing audit records to a local SQLite file."
+)
+
+
 settings = Settings()

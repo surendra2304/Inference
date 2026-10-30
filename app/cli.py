@@ -16,7 +16,7 @@ from rich.panel import Panel
 
 from app.core.orchestrator import OrchestrationRequest, Orchestrator
 from app.experiments.harness import BenchmarkHarness
-from app.memory.sqlite import SQLiteMemory
+from app.memory.factory import create_memory_store
 
 # Configure UTF-8 safe console for Windows terminal
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -48,7 +48,7 @@ async def _run_in_process_ask(
     if not verbose:
         _silence_internal_logs()
 
-    memory = SQLiteMemory()
+    memory = create_memory_store()
     await memory.initialize()
     orch = Orchestrator(memory=memory)
 
@@ -89,7 +89,7 @@ async def _run_in_process_debate(
     max_agents: int = 5
 ) -> None:
     """Instantiate orchestrator and run multi-agent debate directly in-process."""
-    memory = SQLiteMemory()
+    memory = create_memory_store()
     await memory.initialize()
     orch = Orchestrator(memory=memory)
 
@@ -137,7 +137,7 @@ async def _run_in_process_experiment(
     question: str | None = None
 ) -> None:
     """Run an automated experiment in-process."""
-    memory = SQLiteMemory()
+    memory = create_memory_store()
     await memory.initialize()
     orch = Orchestrator(memory=memory)
     harness = BenchmarkHarness(memory=memory, orchestrator=orch)

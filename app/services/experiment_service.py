@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from app.memory.base import BaseMemory
-from app.memory.sqlite import SQLiteMemory
+from app.memory.factory import create_memory_store
 from app.schemas.trading_consult import (
     ExperimentConfigResponse,
     ExperimentResultsResponse,
@@ -22,7 +22,7 @@ class ExperimentService:
     """
 
     def __init__(self, memory: BaseMemory | None = None) -> None:
-        self.memory = memory or SQLiteMemory()
+        self.memory = memory or create_memory_store()
         # In-memory fast cache of active experiments
         self._experiments: dict[str, dict[str, Any]] = {}
 

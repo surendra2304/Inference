@@ -87,15 +87,20 @@ async def lifespan(app: FastAPI):
         production_config.HOST,
         production_config.PORT
     )
+    # Fail closed: a memory backend must be configured explicitly. A process that cannot
+    # persist tasks and runs is worse than a process that refuses to start, and the previous
+    # default silently wrote audit records to a local SQLite file that was lost on redeploy.
+    settings.validate_database_configuration()
     env_info = settings.validate_environment()
     logger.info(
-        "Startup environment validated: env=%s, active_providers=%s",
+        "Startup environment validated: env=%s, database=%s, active_providers=%s",
         env_info["app_env"],
+        env_info["database_backend"],
         ", ".join(env_info["configured_providers"]) or "none (degraded)",
     )
     # Register software engineering specialists for FORGE
     register_software_specialists()
-    # Initialize persistent SQLite memory database
+    # Initialize the configured memory backend (Oracle Autonomous Database or SQLite)
     await orchestrator.memory.initialize()
     try:
         await postgres_memory.initialize()

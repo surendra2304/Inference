@@ -9,7 +9,7 @@ from app.core.orchestrator import OrchestrationRequest, Orchestrator
 from app.evaluation.benchmarks import GOLDEN_BENCHMARK_SUITE
 from app.evaluation.evaluator import Evaluator
 from app.memory.base import BaseMemory, ExperimentRecord
-from app.memory.sqlite import SQLiteMemory
+from app.memory.factory import create_memory_store
 from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.gateway import model_gateway
 from app.utils.ids import generate_id
@@ -33,7 +33,7 @@ class BenchmarkHarness:
         orchestrator: Orchestrator | None = None,
         evaluator: Evaluator | None = None
     ) -> None:
-        self.memory = memory or SQLiteMemory()
+        self.memory = memory or create_memory_store()
         self.orchestrator = orchestrator or Orchestrator(memory=self.memory)
         self.evaluator = evaluator or Evaluator()
 

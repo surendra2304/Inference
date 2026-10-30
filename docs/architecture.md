@@ -39,7 +39,7 @@ Inference is a local-first, multi-agent intelligence platform designed for deep 
                         │                      │
  ┌──────────────────────▼───────┐  ┌───────────▼────────────┐
  │       Provider Gateway       │  │   Memory Subsystem     │
- │  - Google Gemini Adapter     │  │  - SQLite (aiosqlite)  │
+ │  - Google Gemini Adapter     │  │  - Oracle ADB          │
  │  - Groq Adapter              │  │  - Agents & Tasks      │
  │  - NVIDIA NIM Adapter        │  │  - Runs & Messages     │
  │  - Mistral Adapter           │  │  - Memories (Scoped)   │
