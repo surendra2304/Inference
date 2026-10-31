@@ -1,7 +1,7 @@
 """Interactive Command-Line Interface (CLI) for Inference.
 
-Executes directly in-process using the Orchestrator and SQLiteMemory without
-requiring a running uvicorn background server.
+Executes directly in-process using the Orchestrator and the configured Oracle memory
+store without requiring a running uvicorn background server.
 """
 
 import asyncio

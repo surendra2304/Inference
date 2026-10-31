@@ -211,6 +211,24 @@ _TABLE_DDL: tuple[tuple[str, str], ...] = (
         )
         """,
     ),
+    (
+        "deliberations",
+        """
+        CREATE TABLE deliberations (
+            id VARCHAR2(512) NOT NULL,
+            session_id VARCHAR2(512) NOT NULL,
+            topic CLOB,
+            participating_agents CLOB,
+            consensus_strategy VARCHAR2(200),
+            final_decision CLOB,
+            confidence BINARY_DOUBLE,
+            rounds NUMBER(10) DEFAULT 1,
+            created_at TIMESTAMP(6),
+            metadata_json CLOB,
+            CONSTRAINT pk_deliberations PRIMARY KEY (id)
+        )
+        """,
+    ),
 )
 
 #: ``strategies(task_type)`` has no dedicated index: the ``uq_strategies_task_type`` unique
@@ -221,6 +239,7 @@ _INDEX_DDL: tuple[tuple[str, str], ...] = (
     ("idx_messages_task", "CREATE INDEX idx_messages_task ON messages (task_id)"),
     ("idx_evaluations_run", "CREATE INDEX idx_evaluations_run ON evaluations (run_id)"),
     ("idx_tasks_status", "CREATE INDEX idx_tasks_status ON tasks (status)"),
+    ("idx_deliberations_session", "CREATE INDEX idx_deliberations_session ON deliberations (session_id)"),
 )
 
 
@@ -331,12 +350,31 @@ WHEN NOT MATCHED THEN
     VALUES (:id, :hypothesis, :configuration, :status, :result_json, :created_at)
 """
 
+_MERGE_DELIBERATION = """
+MERGE INTO deliberations t
+USING (SELECT :id AS id FROM dual) s
+ON (t.id = s.id)
+WHEN MATCHED THEN UPDATE SET
+    t.final_decision = :final_decision,
+    t.confidence = :confidence,
+    t.rounds = :rounds,
+    t.metadata_json = :metadata_json
+WHEN NOT MATCHED THEN
+    INSERT (id, session_id, topic, participating_agents, consensus_strategy,
+            final_decision, confidence, rounds, created_at, metadata_json)
+    VALUES (:id, :session_id, :topic, :participating_agents, :consensus_strategy,
+            :final_decision, :confidence, :rounds, :created_at, :metadata_json)
+"""
+
 _SELECT_TASK = "SELECT * FROM tasks WHERE id = :id"
 _SELECT_TASK_MESSAGES = "SELECT * FROM messages WHERE task_id = :task_id ORDER BY created_at ASC"
 _SELECT_MEMORIES = "SELECT * FROM memories WHERE agent_id = :agent_id"
 _SELECT_STRATEGY = "SELECT * FROM strategies WHERE task_type = :task_type"
 _SELECT_STRATEGIES = "SELECT * FROM strategies ORDER BY score DESC"
 _SELECT_EXPERIMENT = "SELECT * FROM experiments WHERE id = :id"
+_SELECT_DELIBERATION = (
+    "SELECT * FROM deliberations WHERE session_id = :session_id ORDER BY created_at DESC FETCH FIRST 1 ROWS ONLY"
+)
 _SELECT_RUNNING_TASKS = (
     "SELECT id, metadata_json FROM tasks WHERE status = 'running' AND created_at < :cutoff"
 )
@@ -928,14 +966,6 @@ class OracleMemory(BaseMemory):
             clobs=("error",),
         )
 
-        # Mirror to dokploy-postgres if available (parity with the SQLite store).
-        try:
-            from app.memory.postgres import postgres_memory
-
-            await postgres_memory.save_run(run)
-        except Exception as exc:  # noqa: BLE001 - the mirror is best effort
-            logger.debug("PostgreSQL run mirror skipped: %s", exc)
-
     # -- messages -----------------------------------------------------------
     async def save_message(self, message: MessageRecord) -> None:
         """Persist a conversation or debate message."""
@@ -1069,14 +1099,6 @@ class OracleMemory(BaseMemory):
             clobs=("strategy", "recommended_agents", "metadata_json"),
         )
 
-        # Mirror to dokploy-postgres if available (parity with the SQLite store).
-        try:
-            from app.memory.postgres import postgres_memory
-
-            await postgres_memory.save_strategy(strategy)
-        except Exception as exc:  # noqa: BLE001 - the mirror is best effort
-            logger.debug("PostgreSQL strategy mirror skipped: %s", exc)
-
     async def get_strategy(self, task_type: str) -> StrategyRecord | None:
         """Retrieve the learned strategy for a specific task type."""
         rows = await self._read(_SELECT_STRATEGY, {"task_type": task_type})
@@ -1105,6 +1127,51 @@ class OracleMemory(BaseMemory):
             created_at=_required_timestamp(row.get("created_at")),
             metadata=_json_object(row.get("metadata_json")),
         )
+
+    # -- deliberations ------------------------------------------------------
+    async def save_deliberation(self, deliberation: DeliberationRecord) -> None:
+        """Persist a multi-agent deliberation and consensus outcome."""
+        await self._write(
+            _MERGE_DELIBERATION,
+            {
+                "id": deliberation.id,
+                "session_id": deliberation.session_id,
+                "topic": deliberation.topic,
+                "participating_agents": ",".join(deliberation.participating_agents),
+                "consensus_strategy": deliberation.consensus_strategy,
+                "final_decision": deliberation.final_decision,
+                "confidence": deliberation.confidence,
+                "rounds": deliberation.rounds,
+                "created_at": _naive_utc(deliberation.created_at),
+                "metadata_json": json.dumps(deliberation.metadata),
+            },
+            clobs=(
+                "topic",
+                "participating_agents",
+                "final_decision",
+                "metadata_json",
+            ),
+        )
+
+    async def get_deliberation(self, session_id: str) -> dict[str, Any] | None:
+        """Retrieve the latest deliberation outcome for a session ID."""
+        rows = await self._read(_SELECT_DELIBERATION, {"session_id": session_id})
+        if not rows:
+            return None
+        row = rows[0]
+        confidence = row.get("confidence")
+        return {
+            "id": _text(row.get("id")),
+            "session_id": _text(row.get("session_id")),
+            "topic": _text(row.get("topic")),
+            "participating_agents": _text(row.get("participating_agents")),
+            "consensus_strategy": _text(row.get("consensus_strategy")),
+            "final_decision": _text(row.get("final_decision")),
+            "confidence": float(confidence) if confidence is not None else None,
+            "rounds": int(row.get("rounds") or 1),
+            "created_at": _required_timestamp(row.get("created_at")),
+            "metadata_json": _text(row.get("metadata_json")),
+        }
 
     # -- experiments --------------------------------------------------------
     async def save_experiment(self, experiment: ExperimentRecord) -> None:

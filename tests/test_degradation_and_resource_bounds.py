@@ -388,9 +388,9 @@ async def test_sqlite_connection_pool_is_bounded(tmp_path):
 
     await asyncio.gather(*[reader(i) for i in range(40)])
 
-    assert created <= settings.SQLITE_POOL_SIZE, (
+    assert created <= memory._pool_max, (
         f"opened {created} connections for 40 concurrent readers; the pool cap is "
-        f"{settings.SQLITE_POOL_SIZE}. Each connection costs ~37 file descriptors, so an "
+        f"{memory._pool_max}. Each connection costs ~37 file descriptors, so an "
         f"unbounded pattern makes the OS descriptor limit the service's real ceiling"
     )
     await memory.close()
@@ -414,7 +414,7 @@ async def test_sqlite_pool_replaces_a_connection_that_raised(tmp_path):
     async with memory.connect() as db:
         cursor = await db.execute("SELECT 1")
         assert await cursor.fetchone() is not None
-    assert memory._pool_created <= max(before, settings.SQLITE_POOL_SIZE)
+    assert memory._pool_created <= max(before, memory._pool_max)
     await memory.close()
 
 

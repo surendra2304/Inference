@@ -61,10 +61,11 @@ def _parameters(func) -> list[tuple[str, int, object]]:
 # -- factory selection ------------------------------------------------------------
 
 
-def test_factory_returns_sqlite_only_for_an_explicit_sqlite_url(tmp_path):
-    store = create_memory_store(f"sqlite:///{tmp_path / 'explicit.db'}")
-    assert isinstance(store, SQLiteMemory)
-    assert store.db_path.endswith("explicit.db")
+def test_factory_never_selects_sqlite_even_for_an_explicit_sqlite_url(tmp_path):
+    """SQLiteMemory is test-only; the factory must refuse a sqlite:// URL."""
+    with pytest.raises(DatabaseConfigurationError) as excinfo:
+        create_memory_store(f"sqlite:///{tmp_path / 'explicit.db'}")
+    assert "Unsupported memory database URL scheme 'sqlite'" in str(excinfo.value)
 
 
 def test_factory_returns_the_oracle_store_for_an_oracle_url():
@@ -133,11 +134,12 @@ def test_validate_database_configuration_fails_closed_and_reports_the_backend(mo
         settings.validate_database_configuration()
 
     monkeypatch.setattr(settings, "DATABASE_URL", "sqlite:///data/universe.db")
-    assert settings.validate_database_configuration() == "sqlite"
+    with pytest.raises(RuntimeError):
+        settings.validate_database_configuration()
 
 
 def test_backend_description_names_the_real_backend():
-    assert describe_memory_backend("sqlite:///data/universe.db").startswith("SQLite (sqlite:///data/universe.db")
+    assert describe_memory_backend("sqlite:///data/universe.db").startswith("unconfigured")
     described = describe_memory_backend(ORACLE_URL)
     assert described.startswith("Oracle Autonomous Database 26ai")
     assert "secret" not in described  # never echo the password

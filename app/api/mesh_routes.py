@@ -337,17 +337,9 @@ async def get_mesh_status() -> MeshStatusResponse:
 
         persistence_authority={
 
-            "primary": f"PostgreSQL 18 ({settings.POSTGRES_DB} on {settings.POSTGRES_HOST}:{settings.POSTGRES_PORT})",
-
-            "oracle_23ai": f"Oracle ATP 23ai (friday_universe_db on {settings.ORACLE_HOST}:{settings.ORACLE_PORT})",
+            "primary": settings.memory_backend_description(),
 
             "active_backend": settings.database_backend,
-
-            "fallback": settings.memory_backend_description(),
-
-            "ephemeral_shm": "/dev/shm/inference.db" if os.path.exists("/dev/shm") else ":memory:",
-
-            "zero_disk_compliant": True,
 
             "schema_synced": True,
 

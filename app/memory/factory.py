@@ -1,21 +1,24 @@
-"""Memory-store factory: Oracle Autonomous Database when configured, SQLite otherwise.
+"""Memory-store factory: Oracle Autonomous Database, fail closed otherwise.
 
 Callers must not choose a backend themselves. ``create_memory_store()`` reads
 ``DATABASE_URL`` (or an explicit URL) and returns:
 
 * :class:`app.memory.oracle.OracleMemory` when the URL starts with ``oracle`` or when the
   URL is empty but the ``ORACLE_*`` settings are complete;
-* :class:`app.memory.sqlite.SQLiteMemory` only when a ``sqlite`` URL is explicitly configured;
 * a hard :class:`DatabaseConfigurationError` when nothing configures a database.
 
 The last case is deliberate: the previous default (``sqlite:///data/universe.db``) meant a
 process with no database configuration silently served from a local file that lost every
-audit record on redeploy. Failing closed at startup is the cheaper failure.
+audit record on redeploy. Failing closed at startup is the cheaper failure. ``SQLiteMemory``
+still exists in :mod:`app.memory.sqlite` for tests that pass an explicit ``db_path``, but the
+factory never selects it.
 """
 
 from __future__ import annotations
 
+import asyncio
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from app.core.config import UNCONFIGURED_DATABASE_MESSAGE, settings
@@ -27,6 +30,7 @@ __all__ = [
     "describe_memory_backend",
     "get_memory_store",
     "reset_memory_store",
+    "submit_memory_write",
     "task_mode_column",
 ]
 
@@ -40,24 +44,23 @@ def _configured_url(database_url: str | None) -> str:
 
 
 def backend_for(database_url: str | None = None) -> str:
-    """Return ``"oracle"``, ``"sqlite"`` or ``"unconfigured"`` for the given URL."""
+    """Return ``"oracle"`` or ``"unconfigured"`` for the given URL."""
     raw = _configured_url(database_url)
     lowered = raw.lower()
     if lowered.startswith("oracle"):
         return "oracle"
-    if lowered.startswith("sqlite"):
-        return "sqlite"
     if not raw and settings.oracle_configured:
         return "oracle"
     return "unconfigured"
 
 
 def create_memory_store(database_url: str | None = None) -> BaseMemory:
-    """Build the memory store for the configured database.
+    """Build the Oracle memory store for the configured database.
 
-    ``database_url`` overrides ``settings.DATABASE_URL`` (same precedence as
-    ``SQLiteMemory(db_path)``). Raises :class:`DatabaseConfigurationError` when no database is
-    configured, so a misconfigured deployment stops instead of writing to an implicit file.
+    ``database_url`` overrides ``settings.DATABASE_URL``. Raises
+    :class:`DatabaseConfigurationError` when no Oracle database is configured, so a
+    misconfigured deployment stops instead of writing to an implicit local file.
+    SQLite and PostgreSQL are not supported backends.
     """
     raw = _configured_url(database_url)
     backend = backend_for(raw)
@@ -66,16 +69,13 @@ def create_memory_store(database_url: str | None = None) -> BaseMemory:
         from app.memory.oracle import OracleMemory
 
         return OracleMemory(raw or None)
-    if backend == "sqlite":
-        from app.memory.sqlite import SQLiteMemory
-
-        return SQLiteMemory(raw)
 
     scheme = raw.split(":", 1)[0] if raw else ""
     if scheme:
         raise DatabaseConfigurationError(
             f"Unsupported memory database URL scheme '{scheme}'. Configure an "
-            "'oracle+oracledb://' or 'sqlite:///' DATABASE_URL."
+            "'oracle+oracledb://' DATABASE_URL; SQLite and PostgreSQL are not supported "
+            "backends."
         )
     raise DatabaseConfigurationError(UNCONFIGURED_DATABASE_MESSAGE)
 
@@ -93,8 +93,6 @@ def describe_memory_backend(database_url: str | None = None) -> str:
         if raw and "@" in raw:
             target = raw.split("@", 1)[1]
         return f"Oracle Autonomous Database 26ai ({target})"
-    if backend == "sqlite":
-        return f"SQLite ({_configured_url(database_url)} with WAL mode)"
     return "unconfigured (no DATABASE_URL and no Oracle settings)"
 
 
@@ -130,11 +128,33 @@ def reset_memory_store(store: BaseMemory | None = None) -> None:
         _store = store
 
 
+_write_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="memory-write")
+
+
+def submit_memory_write(coro) -> None:
+    """Run one memory coroutine on a dedicated loop without blocking the caller.
+
+    Fire-and-forget telemetry used to borrow the SQLite store's executor. The
+    Oracle store has no such loop, so this helper owns a single background loop
+    for every backend.
+    """
+    def _run() -> None:
+        try:
+            asyncio.run(coro)
+        except Exception:  # noqa: BLE001 - telemetry must never break the caller
+            import logging
+
+            logging.getLogger(__name__).debug("background memory write failed", exc_info=True)
+
+    _write_executor.submit(_run)
+
+
 def task_mode_column(memory: Any) -> str:
     """Name of the ``tasks`` column holding the task mode for this backend.
 
     Oracle reserves ``MODE`` as an identifier, so the Oracle schema stores it as
-    ``task_mode`` while SQLite keeps ``mode``. Raw-SQL readers must ask instead of hardcoding
-    one name; the value returned is always a controlled identifier, never caller input.
+    ``task_mode`` while ephemeral test backends keep ``mode``. Raw-SQL readers
+    must ask instead of hardcoding one name; the value returned is always a
+    controlled identifier, never caller input.
     """
-    return "task_mode" if getattr(memory, "backend_name", "sqlite") == "oracle" else "mode"
+    return "task_mode" if getattr(memory, "backend_name", "") == "oracle" else "mode"

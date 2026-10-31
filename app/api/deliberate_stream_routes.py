@@ -24,7 +24,7 @@ from app.core.config import settings
 from app.core.security import _configured_keys, require_inference_api_key
 from app.inference_runtime.prompt_guard import inspect as inspect_prompt
 from app.memory.base import DeliberationRecord
-from app.memory.postgres import postgres_memory
+from app.memory.factory import get_memory_store
 from app.providers.base import ProviderMessage, ProviderRequest
 from app.providers.gateway import model_gateway
 from app.security.prompt_isolation import scrub_credentials
@@ -322,7 +322,7 @@ async def websocket_deliberation_endpoint(websocket: WebSocket) -> None:
                     metadata={"latency_ms": lat_ms, "caller": current_agent},
                 )
                 try:
-                    await postgres_memory.save_deliberation(delib_rec)
+                    await get_memory_store().save_deliberation(delib_rec)
                 except Exception as db_exc:
                     logger.debug("[WS_DELIBERATE] Deliberation persistence notice: %s", db_exc)
 

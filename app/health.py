@@ -79,13 +79,13 @@ async def basic_health():
 
 async def service_ready(response: Response):
 
-    """Readiness probe verifying SQLite database accessibility and provider routing readiness."""
+    """Readiness probe verifying Oracle database accessibility and provider routing readiness."""
 
     db_ok = False
 
     db_detail = "uninitialized"
 
-    journal_mode = "unknown"
+    journal_mode = "not_applicable"
 
     try:
 
@@ -93,7 +93,7 @@ async def service_ready(response: Response):
 
         # BaseMemory is adapter-neutral; a low-level connect() context is an optional
 
-        # capability implemented by the SQLite backend. Check it explicitly so the
+        # capability implemented by each backend. Check it explicitly so the
 
         # readiness probe remains valid for adapters with different interfaces.
 
@@ -109,19 +109,24 @@ async def service_ready(response: Response):
 
             await cursor.fetchone()
 
-            try:
+            # ``PRAGMA journal_mode`` only exists on SQLite. Oracle reports the
+            # backend-neutral value instead of a fabricated WAL mode.
 
-                cur2 = await db.execute("PRAGMA journal_mode;")
+            if getattr(orchestrator.memory, "backend_name", "") == "sqlite":
 
-                row = await cur2.fetchone()
+                try:
 
-                if row:
+                    cur2 = await db.execute("PRAGMA journal_mode;")
 
-                    journal_mode = str(row[0]).lower()
+                    row = await cur2.fetchone()
 
-            except Exception:
+                    if row:
 
-                journal_mode = "wal"
+                        journal_mode = str(row[0]).lower()
+
+                except Exception:
+
+                    journal_mode = "unknown"
 
             db_ok = True
 

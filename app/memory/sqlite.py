@@ -432,7 +432,7 @@ class SQLiteMemory(BaseMemory):
             self.db_path = raw_path[len("sqlite+aiosqlite:///"):]
         elif raw_path.startswith("sqlite:///"):
             self.db_path = raw_path[len("sqlite:///"):]
-        elif "oracle" in raw_path or "postgres" in raw_path or not raw_path:
+        elif "oracle" in raw_path or not raw_path:
             if os.path.exists("/dev/shm"):
                 self.db_path = "/dev/shm/inference.db"
             else:
@@ -472,11 +472,12 @@ class SQLiteMemory(BaseMemory):
         # CPU — and the ceiling was reached by a client count that a single operator
         # running a batch job could produce.
         #
-        # A small persistent pool bounds that: at most ``settings.SQLITE_POOL_SIZE``
-        # connections exist, so descriptors stay flat regardless of traffic, while
-        # concurrent callers still get parallelism instead of queueing behind one
-        # connection. Connections are reused rather than reopened, which also removes a
-        # per-call ``PRAGMA`` round trip and lets SQLite's page cache stay warm.
+        # A small persistent pool bounds that: at most ``_POOL_MAX`` connections exist, so
+        # descriptors stay flat regardless of traffic, while concurrent callers still get
+        # parallelism instead of queueing behind one connection. Connections are reused
+        # rather than reopened, which also removes a per-call ``PRAGMA`` round trip and lets
+        # SQLite's page cache stay warm. This store is test/local-only; production uses the
+        # Oracle backend.
         self._pool: asyncio.Queue[aiosqlite.Connection] | None = None
         self._pool_created: int = 0
         self._pool_lock = asyncio.Lock()
@@ -486,7 +487,7 @@ class SQLiteMemory(BaseMemory):
         # Set of connections currently owned by the pool, handed to the loop finaliser
         # so they can be stopped even if nobody ever calls close().
         self._pool_owner: set = set()
-        self._pool_max: int = max(1, int(getattr(settings, "SQLITE_POOL_SIZE", 8)))
+        self._pool_max: int = 8
 
         #: Schema self-heal state (see ``ensure_schema``). ``_schema_ready`` is per instance:
         #: two components with their own ``SQLiteMemory`` over the same file each check once.
@@ -1057,7 +1058,7 @@ class SQLiteMemory(BaseMemory):
                 )
 
     async def save_run(self, run: RunRecord) -> None:
-        """Persist an execution run audit record into SQLite and dokploy-postgres."""
+        """Persist an execution run audit record into the SQLite store."""
         created_str = run.created_at.isoformat()
         async with self.connect() as db:
             await db.execute("""
@@ -1083,15 +1084,8 @@ class SQLiteMemory(BaseMemory):
                 run.error,
                 created_str
             ))
-            await db.commit()
-
-        # Mirror to dokploy-postgres if available
-        try:
-            from app.memory.postgres import postgres_memory
-            await postgres_memory.save_run(run)
-        except Exception as exc:
-            logger.debug("PostgreSQL run mirror skipped: %s", exc)
-
+            await db.commit()
+
     async def save_message(self, message: MessageRecord) -> None:
         """Persist a conversation or debate message."""
         created_str = message.created_at.isoformat()
@@ -1262,15 +1256,8 @@ class SQLiteMemory(BaseMemory):
                 created_str,
                 meta_json
             ))
-            await db.commit()
-
-        # Mirror to dokploy-postgres if available
-        try:
-            from app.memory.postgres import postgres_memory
-            await postgres_memory.save_strategy(strategy)
-        except Exception as exc:
-            logger.debug("PostgreSQL strategy mirror skipped: %s", exc)
-
+            await db.commit()
+
     async def get_strategy(self, task_type: str) -> StrategyRecord | None:
         """Retrieve the best learned strategy for a specific task type."""
         async with self.connect() as db:

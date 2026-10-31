@@ -99,11 +99,10 @@ from typing import Anyfrom pydantic import Field, field_validatorfrom pydanti
 
     # Database
     #: No default on purpose. Configure ``DATABASE_URL`` explicitly — for example
-    #: ``oracle+oracledb://INFERENCE:password@host:1521?service_name=service`` or
-    #: ``sqlite:///data/universe.db`` — or provide the ``ORACLE_*`` settings below. The
-    #: application refuses to start when neither is configured; the old
-    #: ``sqlite:///data/universe.db`` default silently persisted audit records to a local
-    #: file that was lost on redeploy.
+    #: ``oracle+oracledb://INFERENCE:password@host:1521?service_name=service`` — or provide
+    #: the ``ORACLE_*`` settings below. The application refuses to start when neither is
+    #: configured; the old ``sqlite:///data/universe.db`` default silently persisted audit
+    #: records to a local file that was lost on redeploy.
     DATABASE_URL: str = ""
 
     # Oracle Autonomous Database 23ai (friday_universe_db) Configuration
@@ -142,12 +141,10 @@ from typing import Anyfrom pydantic import Field, field_validatorfrom pydanti
 
     @property
     def database_backend(self) -> str:
-        """Name of the configured memory backend: ``oracle``, ``sqlite`` or ``unconfigured``."""
+        """Name of the configured memory backend: ``oracle`` or ``unconfigured``."""
         url = (self.DATABASE_URL or "").strip().lower()
         if url.startswith("oracle"):
             return "oracle"
-        if url.startswith("sqlite"):
-            return "sqlite"
         if not url and self.oracle_configured:
             return "oracle"
         return "unconfigured"
@@ -164,29 +161,20 @@ from typing import Anyfrom pydantic import Field, field_validatorfrom pydanti
                 "Oracle Autonomous Database 26ai "
                 f"({self.ORACLE_SERVICE} on {self.ORACLE_HOST}:{self.ORACLE_PORT})"
             )
-        if backend == "sqlite":
-            return f"SQLite ({self.DATABASE_URL} with WAL mode)"
-        return "unconfigured (no DATABASE_URL and no Oracle settings)"
+        return "unconfigured (no Oracle DATABASE_URL and no Oracle settings)"
 
     def validate_database_configuration(self) -> str:
         """Fail closed unless a memory backend is configured; returns its name.
 
         Called from the application lifespan. A deployment with neither ``DATABASE_URL`` nor
-        Oracle settings must stop at startup instead of serving from an implicit local SQLite
-        file that loses every audit record on the next redeploy.
+        Oracle settings must stop at startup instead of serving from an implicit local file
+        that loses every audit record on the next redeploy.
         """
         backend = self.database_backend
         if backend == "unconfigured":
             raise RuntimeError(UNCONFIGURED_DATABASE_MESSAGE)
-        return backend
-
-    # dokploy-postgres Database Configuration
-    POSTGRES_HOST: str = Field(default="dokploy-postgres", description="PostgreSQL host for inference_db")
-    POSTGRES_PORT: int = Field(default=5432, description="PostgreSQL port")
-    POSTGRES_DB: str = Field(default="inference_db", description="PostgreSQL database name")
-    POSTGRES_USER: str = Field(default="inference_user", description="PostgreSQL user")
-    POSTGRES_PASSWORD: str | None = Field(default=None, description="PostgreSQL password; configure via environment or secret store")
-
+        return backend
+
     #: Ceiling for the per-tenant request-id deduplication window. Each entry retains a
     #: full response payload; a deduplicated response is an optimisation (a miss is
     #: recomputed), so this trades memory for occasional recomputation.
@@ -359,18 +347,7 @@ from typing import Anyfrom pydantic import Field, field_validatorfrom pydanti
     #: Per-bot ceiling for POST /v1/trading/consult (sliding hour). A bot that consults on
     #: every drawdown event can legitimately exceed the 20/hour default, and the operator of
     #: the bot is the one who knows the right number.
-    TRADING_CONSULT_RATE_LIMIT_PER_HOUR: int = 20
-    SQLITE_POOL_SIZE: int = Field(
-        default=8,
-        ge=1,
-        le=64,
-        description=(
-            "Maximum concurrent SQLite connections per memory store. Each in-flight "
-            "connection holds ~37 file descriptors (db + -wal + -shm + pipe + thread), "
-            "so an unbounded connection-per-call pattern makes the OS descriptor limit "
-            "the service's real concurrency ceiling."
-        ),
-    )
+    TRADING_CONSULT_RATE_LIMIT_PER_HOUR: int = 20
     PEER_COVERAGE_MAX_ATTEMPTS: int = Field(
         default=3,
         ge=0,
@@ -533,10 +510,10 @@ from typing import Anyfrom pydantic import Field, field_validatorfrom pydanti
 #: the operator sees one message regardless of which entry point noticed the misconfiguration.
 UNCONFIGURED_DATABASE_MESSAGE = (
     "No memory database is configured. Set DATABASE_URL to an "
-    "'oracle+oracledb://user:password@host:port?service_name=service' URL (or a sqlite:/// URL "
-    "for local development), or provide ORACLE_HOST, ORACLE_SERVICE, ORACLE_USER and "
-    "ORACLE_PASSWORD (alternatively ORACLE_CORE_URL). Refusing to start rather than implicitly "
-    "writing audit records to a local SQLite file."
+    "'oracle+oracledb://user:password@host:port?service_name=service' URL, or provide "
+    "ORACLE_HOST, ORACLE_SERVICE, ORACLE_USER and ORACLE_PASSWORD (alternatively "
+    "ORACLE_CORE_URL). SQLite and PostgreSQL are not supported backends. Refusing to start "
+    "rather than implicitly writing audit records to a local file."
 )
 
 

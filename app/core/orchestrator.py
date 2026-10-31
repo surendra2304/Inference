@@ -69,7 +69,7 @@ class OrchestrationResult(BaseModel):
 
 #: How many recent task records are kept in the fast in-memory lookup window. Sized for a
 #: busy operator session, deliberately far smaller than the unbounded dict it replaces;
-#: older tasks are read back from the durable store (SQLite) instead.
+#: older tasks are read back from the durable Oracle store instead.
 MAX_FORCED_AGENT_CANDIDATES = 50
 
 
@@ -107,7 +107,7 @@ class Orchestrator(BaseOrchestrator):
         self.performance_tracker = PerformanceTracker(memory=self.memory)
         self._active_cancellations: dict[str, asyncio.Event] = {}
         # Bounded, not a plain dict: this is a *cache* of recent task records, and the
-        # durable copy lives in SQLite. Measured before the bound: 400 ``/ask`` requests
+        # durable copy lives in the Oracle memory store. Measured before the bound: 400 ``/ask`` requests
         # left 400 entries and +10.9 MB RSS (~27.9 KB each) with no code path that ever
         # removed one, so a long-lived server grew without limit. Eviction is safe:
         # ``get_task_status`` falls back to ``memory.get_task``, and a miss is reported as

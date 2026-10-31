@@ -237,8 +237,7 @@ class OutcomeLearningEngine:
         """Persists run telemetry and learned strategies directly into database (runs and strategies)."""
         try:
             from app.memory.base import RunRecord, StrategyRecord
-            from app.memory.factory import get_memory_store
-            from app.memory.sqlite import _DB_EXECUTOR
+            from app.memory.factory import get_memory_store, submit_memory_write
 
             metrics = report.measured_metrics or {}
             raw_lat = (
@@ -285,8 +284,7 @@ class OutcomeLearningEngine:
 
             async def _do_save() -> None:
                 # Shared store: building one per outcome would open a new Oracle pool for every
-                # report. ``_DB_EXECUTOR`` is the process-wide database loop the SQLite store
-                # already owns, so this fire-and-forget hop works for either backend.
+                # report. ``submit_memory_write`` owns the background loop for every backend.
                 try:
                     mem = get_memory_store()
                     await mem.save_run(run_rec)
@@ -294,7 +292,7 @@ class OutcomeLearningEngine:
                 except Exception as exc:  # noqa: BLE001 - telemetry must never break the caller
                     logger.debug("[OUTCOME] DB persistence skipped: %s", exc)
 
-            _DB_EXECUTOR.submit(_do_save())
+            submit_memory_write(_do_save())
         except Exception as exc:
             logger.debug("[OUTCOME] DB persistence skipped: %s", exc)
 

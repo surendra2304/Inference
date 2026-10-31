@@ -68,7 +68,10 @@ async def test_mesh_status_telemetry(auth_headers):
     assert data["active_coding_model"] == "qwen/qwen-2.5-coder-32b-instruct"
     assert "provider_pools" in data
     assert "persistence_authority" in data
-    assert "PostgreSQL 18" in data["persistence_authority"]["primary"]
+    authority = data["persistence_authority"]
+    assert authority["active_backend"] in {"oracle", "unconfigured"}
+    assert "PostgreSQL" not in authority["primary"]
+    assert "SQLite" not in authority["primary"]
 
 
 @pytest.mark.asyncio

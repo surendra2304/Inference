@@ -1,8 +1,9 @@
 """Persistent memory package.
 
 Import ``create_memory_store`` from :mod:`app.memory.factory` to obtain the configured
-backend (Oracle Autonomous Database or SQLite). ``SQLiteMemory`` remains importable from
-:mod:`app.memory.sqlite` for tests and explicit local use.
+backend (Oracle Autonomous Database). ``SQLiteMemory`` remains importable from
+:mod:`app.memory.sqlite` for tests and explicit local use only; it is never selected by
+the factory in a deployment.
 
 The factory is re-exported here for convenience; the store implementations are imported
 lazily inside the factory so that importing this package stays cheap and works even when the
