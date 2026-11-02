@@ -6,6 +6,7 @@ import asyncio
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, status
@@ -368,6 +369,29 @@ async def execute_task(
             result=structured_data,
             summary=summary_text,
             execution_time_ms=lat,
+            # FRIDAY's cognitive mesh certifies a task COMPLETED only when the
+            # peer returns a receipt naming the dispatched action, targeting this
+            # agent, with non-empty verification evidence. Without it a perfectly
+            # good answer is classified UNVERIFIED.
+            receipt={
+                "requested_action": envelope.action,
+                "target": "inference",
+                "authorization_decision": "AUTHORIZED",
+                "execution_timestamp": datetime.now(timezone.utc).isoformat(),
+                "result": {
+                    "model_used": resp.model_used,
+                    "provider_used": resp.provider_used,
+                },
+                "verification_evidence": {
+                    "source": "inference.v1.task.execute",
+                    "task_id": envelope.task_id,
+                    "model_used": resp.model_used,
+                    "provider_used": resp.provider_used,
+                    "token_usage": resp.token_usage or {},
+                    "latency_ms": lat,
+                },
+                "failure_reason": None,
+            },
         )
     except HTTPException:
         raise
